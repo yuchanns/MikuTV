@@ -1,0 +1,37 @@
+[
+  {
+    "id": "netflix",
+    "name": "Netflix",
+    "asset": "tv-apps/netflix.png",
+    "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/4d/5d/8d/4d5d8d1d-8455-6c65-a256-f41ac98a2419/AppIcon-0-0-1x_U007epad-0-1-0-sRGB-0-85-220.png/512x512bb.jpg",
+    "page": "https://apps.apple.com/us/app/netflix/id363590051?uo=4"
+  },
+  {
+    "id": "youtube",
+    "name": "YouTube",
+    "asset": "tv-apps/youtube.png",
+    "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/14/ce/45/14ce45d8-5ca6-1dfa-c4a5-4660061cf213/logo_youtube_2024_q4_color-0-0-1x_U007emarketing-0-0-0-7-0-0-0-85-220.png/512x512bb.jpg",
+    "page": "https://apps.apple.com/us/app/youtube/id544007664?uo=4"
+  },
+  {
+    "id": "tv",
+    "name": "Apple TV",
+    "asset": "tv-apps/tv.png",
+    "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/a2/74/61/a274610a-1537-0429-df1b-afacfad5a478/tvCalistoga-0-0-1x_U007epad-0-1-0-sRGB-85-220.png/512x512bb.jpg",
+    "page": "https://apps.apple.com/us/app/apple-tv/id1174078549?uo=4"
+  },
+  {
+    "id": "music",
+    "name": "Apple Music",
+    "asset": "tv-apps/music.png",
+    "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/d5/45/38/d5453893-7719-0067-ed45-1de44d0d8eb9/musicValkyrie-0-0-1x_U007epad-0-1-0-85-220.png/512x512bb.jpg",
+    "page": "https://apps.apple.com/us/app/apple-music/id1108187390?uo=4"
+  },
+  {
+    "id": "plex",
+    "name": "Plex: Find Movies and TV Shows",
+    "asset": "tv-apps/plex.png",
+    "source": "https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/0e/71/1f/0e711f4e-1c26-5749-a037-6351ebafbaab/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg",
+    "page": "https://apps.apple.com/us/app/plex-find-movies-and-tv-shows/id383457673?uo=4"
+  }
+]

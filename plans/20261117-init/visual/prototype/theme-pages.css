@@ -1,0 +1,51 @@
+.modal:has([data-theme-picker]){width:760px}
+.theme-options{gap:10px;margin-top:24px}
+.theme-option{gap:24px;min-height:112px;padding:18px;border:1px solid #ffffff0e}
+.theme-copy{flex:1;min-width:0}
+.theme-copy strong{display:block;font-size:24px;font-weight:450}
+.theme-copy small{display:block;font-size:17px;line-height:1.6;margin-top:8px;color:#8fa2bc}
+.theme-check{display:grid;place-items:center;width:28px;flex:none}
+#stage .theme-option:focus .theme-copy small{color:#465976}
+.theme-palette{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);flex:none;width:126px;height:76px;border-radius:9px;overflow:hidden;border:1px solid #ffffff26}
+.theme-palette i{display:block}
+.theme-empty-note{font-size:18px!important;margin-bottom:0}
+.plugin-toolbar{display:flex;gap:12px;align-items:center}
+.plugin-search{position:relative;display:block;margin:24px 0}
+.plugin-search>svg{position:absolute;left:22px;top:21px;width:24px;height:24px;pointer-events:none;color:var(--theme-secondary,#a7b2c1)}
+.plugin-search .form-input{padding:18px 22px 18px 62px;font-size:22px;border-radius:12px}
+.plugin-kind-tabs{display:flex;gap:32px;margin:0 0 28px}
+#stage .plugin-kind-tabs .tab{position:relative;min-height:48px;font-size:21px;padding:8px 0;border-radius:0;background:transparent!important;color:var(--theme-secondary,#a7b2c1);box-shadow:none!important;transform:none!important;transition:color .2s}
+#stage .plugin-kind-tabs .tab:after{content:"";position:absolute;left:0;right:0;bottom:0;display:block;width:auto;height:3px;margin:0;border-radius:3px;background:var(--accent);transform:scaleX(0);transition:transform .2s var(--ease),background .2s}
+#stage .plugin-kind-tabs .tab.selected{color:var(--accent-soft)}
+#stage .plugin-kind-tabs .tab.selected:after{transform:scaleX(1)}
+#stage .plugin-kind-tabs .tab:is(:hover,:focus){color:var(--theme-text,#f4f5f8)!important}
+#stage .plugin-kind-tabs .tab:is(:hover,:focus):after{transform:scaleX(1);background:var(--accent-soft)}
+.preference-preview{display:block;flex:none;width:92px}
+.preference-preview .theme-palette{width:88px;height:56px}
+#stage .preference-row:has(.theme-palette):hover:not(:focus){background:rgb(var(--accent-rgb) / .08);box-shadow:none}
+.preference-row:has(.theme-palette):is(:hover,:focus) .theme-palette{border-color:var(--accent-soft)}
+
+/* Palette overrides leave the approved built-in appearance unchanged. */
+#stage[data-custom-theme]{color:var(--theme-text)}
+#stage[data-custom-theme] #ambient{background:radial-gradient(ellipse at 70% 10%,var(--theme-ambient),transparent 70%)}
+#stage[data-custom-theme] #rail{background:var(--theme-sidebar)}
+#stage[data-custom-theme] :is(.settings-sections button,.nav-button,.preference-icon,.preference-value,.preference-copy small,.preference-intro,.page-title p,.header-right,.card-info,.hero-description,.meta,.panel-subtitle,.modal p){color:var(--theme-secondary)}
+#stage[data-custom-theme] :is(.preference-row,.preference-option,.option,.nav-button.active,.card-title,.dialog-context,.account-identity h2){color:var(--theme-text)}
+#stage[data-custom-theme] :is(.settings-sections .selected,.preference-option.selected,.option.selected){color:var(--theme-selected-text);background:var(--theme-selected)}
+#stage[data-custom-theme] :is(.modal,.player-panel,.playback-popover){background:var(--theme-panel)}
+#stage[data-custom-theme] :is(.form-input,.search-box){background:var(--theme-raised);color:var(--theme-text)}
+#stage[data-custom-theme] .primary{background:var(--theme-focus);color:var(--theme-focus-text)}
+#stage[data-custom-theme] .hero-art:after{background:linear-gradient(90deg,var(--canvas) 0%,rgb(var(--canvas-rgb) / .93) 8%,rgb(var(--canvas-rgb) / .47) 43%,transparent 71%),linear-gradient(0deg,var(--canvas) 0%,rgb(var(--canvas-rgb) / .91) 7%,transparent 45%),linear-gradient(180deg,rgb(var(--canvas-rgb) / .4),transparent 22%)}
+#stage[data-custom-theme] .hero-art.alt:after{background:linear-gradient(90deg,var(--canvas),rgb(var(--canvas-rgb) / .85) 28%,rgb(var(--canvas-rgb) / .13) 70%),linear-gradient(0deg,var(--canvas),transparent 65%)}
+#stage[data-custom-theme] .detail{background:var(--canvas)}
+#stage[data-custom-theme] .detail-bg:after{background:linear-gradient(90deg,var(--canvas),rgb(var(--canvas-rgb) / .8) 40%,transparent 85%),linear-gradient(0deg,var(--canvas),transparent 75%)}
+#stage[data-custom-theme] .membership-card{border-color:rgb(var(--accent-rgb) / .21);background:radial-gradient(ellipse at 100% 0%,rgb(var(--accent-rgb) / .16),transparent 75%),var(--theme-panel)}
+#stage[data-custom-theme] :is(.membership-heading,.membership-card h2,.membership-card ul,.membership-action){color:var(--accent-soft)}
+#stage[data-custom-theme] .focusable:focus{background:var(--theme-focus);color:var(--theme-focus-text)}
+#stage[data-custom-theme] .focusable:focus :is(.preference-value,.preference-copy small,.preference-icon,.theme-copy small){color:var(--theme-focus-text)}
+#stage[data-custom-theme] :is(.preference-option.selected,.option.selected,.control-button.toggled):focus{background:var(--theme-selected-focus);color:#fff}
+#stage[data-custom-theme] .theme-option.selected:focus .theme-copy small{color:#fff}
+#stage[data-custom-theme] :is(.settings-sections button,.text-back,.tab):focus{background:transparent;color:var(--theme-text);box-shadow:none}
+#stage[data-custom-theme] .video-card:focus{background:transparent;color:var(--theme-text)}
+#stage[data-custom-theme] .video-card:focus .card-image{box-shadow:0 0 0 4px var(--accent-soft),0 18px 45px #0009}
+#stage[data-custom-theme] .timeline:focus{background:#ffffff40}

@@ -1,0 +1,43 @@
+#top-shelf{position:absolute;inset:0;background:#080b11;overflow:hidden;color:#fff}
+.top-art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:60% 50%;animation:drift 35s ease-in-out infinite alternate}
+.top-shade{position:absolute;inset:0;background:linear-gradient(90deg,#080b11f5 2%,#080b11c9 25%,#080b1144 58%,#080b1100 82%),linear-gradient(0deg,#080b11 0%,#080b11dd 14%,transparent 55%)}
+.top-status{position:absolute;right:88px;top:54px;font-size:23px;color:#d6e0ed;display:flex;gap:18px;align-items:center}
+.top-status .profile-dot{width:38px;height:38px}
+.top-copy{position:absolute;left:104px;top:218px;max-width:800px;transition:transform .5s var(--ease)}
+.top-context{display:flex;align-items:center;gap:13px;font-size:21px;color:#b7c4d6}
+.top-context img{width:40px;height:24px;object-fit:cover;border-radius:5px}
+.top-copy h1{font-size:80px;line-height:1.2;letter-spacing:2px;font-weight:550;margin:28px 0 26px;white-space:pre-line}
+.top-copy .top-summary{font-size:23px;line-height:1.8;color:#b9c7d8;max-width:640px;margin:25px 0 28px}
+.top-copy .meta{font-size:19px;color:#ccd4df}
+.top-actions{display:flex;gap:17px;margin-top:30px}
+.top-action{height:62px;padding:0 31px;display:flex;gap:12px;align-items:center;justify-content:center;border-radius:32px;font-size:22px;background:#ffffff20;color:#f3f7fb;backdrop-filter:blur(20px)}
+.top-action.primary-action{background:#f3f5f8;color:#142030}
+.top-action svg{width:23px;height:23px}
+.top-action.primary-action svg{fill:currentColor;stroke-width:0}
+.top-action:focus{box-shadow:0 0 0 4px #ffffff42!important;transform:none!important}
+.top-switch{position:absolute;right:95px;bottom:320px;display:flex;align-items:center;gap:13px;color:#c0cedf}
+.top-switch button{width:44px;height:44px;display:grid;place-items:center;border-radius:50%;background:#ffffff09;border:1px solid #ffffff12}
+.top-switch span{font-size:15px;letter-spacing:2px;padding:0 8px}
+.tv-dock{position:absolute;bottom:107px;left:0;right:0;display:flex;justify-content:center;gap:28px;align-items:center;transition:opacity .5s,transform .5s var(--ease)}
+.tv-app{position:relative;width:232px;flex:none;height:139px;padding:0;border-radius:25px;transition:transform .35s var(--ease),box-shadow .35s;background:#1a2332;color:#a8b6c9;display:grid;place-items:center}
+.tv-app>img{width:100%;height:100%;object-fit:cover;border-radius:25px;display:block}
+.tv-app>svg{width:62px;height:62px;stroke-width:1.4;color:#cfdae8}
+.tv-app.current{transform:none;box-shadow:0 0 0 3px #ffffff90,0 20px 45px #0008}
+.tv-app:focus{transform:none!important;box-shadow:0 0 0 5px #f3f5f9,0 20px 50px #0008!important;background:#243146!important}
+.tv-app span{position:absolute;left:-30px;right:-30px;bottom:-45px;font-size:21px;text-align:center;color:#b7c5d6}
+.tv-app.current span{color:#fff}
+.tv-app:nth-child(2){background:#273a53}.tv-app:nth-child(3){background:#423746}.tv-app:nth-child(4){background:#2b464b}.tv-app:nth-child(5){background:#2c3341}.tv-app:nth-child(6){background:#26384b}
+.top-mini-row{position:absolute;left:105px;bottom:305px;display:flex;gap:12px}
+.top-mini{height:55px;width:97px;border-radius:8px;border:2px solid transparent;padding:0;opacity:.55;overflow:hidden}
+.top-mini img{height:100%;width:100%;object-fit:cover;display:block}
+.top-mini.selected{opacity:1;border-color:#e9eef5}
+.top-immersive .tv-dock{opacity:0;transform:translateY(240px);pointer-events:none}
+.top-immersive .top-copy{transform:translateY(38px)}
+.top-immersive .top-mini-row{bottom:94px}
+.top-immersive .top-switch{bottom:94px}
+.top-immersive .top-shade{background:linear-gradient(90deg,#080b11f5,#080b11bb 28%,#080b1100 76%),linear-gradient(0deg,#080b11c9,transparent 56%)}
+@media(prefers-reduced-motion:reduce){.top-art{animation:none}.tv-dock,.top-copy{transition:none}}
+
+.top-mini-row{bottom:278px}.top-switch{bottom:284px}.top-immersive .top-mini-row,.top-immersive .top-switch{bottom:94px}.app-icon-layers{width:100%;height:100%;position:relative;overflow:hidden;border-radius:25px}.app-icon-layers>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .2s ease-out}.app-icon-layers .icon-front{filter:drop-shadow(0 9px 11px #0006)}.tv-app:focus .icon-front{transform:translateY(-2px)}
+
+.tv-app.neighbor{overflow:visible;background:#000}.tv-app.neighbor>img{width:139px;height:139px;object-fit:contain;border-radius:0}.tv-app.app-youtube{background:#fff}.tv-app.app-music{background:#fff}.app-netflix>img{clip-path:inset(14% 25%)}.app-tv>img{clip-path:inset(27% 5%)}.app-plex>img{clip-path:inset(26% 5%)}

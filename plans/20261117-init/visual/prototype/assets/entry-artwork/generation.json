@@ -1,0 +1,14 @@
+{
+  "mode": "built-in-image-gen",
+  "purpose": "Illustrative plugin-owned cover artwork for the local design prototype",
+  "files": [
+    {
+      "path": "assets/entry-artwork/sample-source.png",
+      "prompt": "Use case: stylized-concept\nAsset type: Cover artwork supplied by a video plugin, to fill a wide 2:1 card in an elegant dark television app.\nPrimary request: A beautifully composed cinematic still of a small retro television with two thin antennae standing on a low desk by a large window at blue hour. The television screen softly glows with a vivid sunset sky and clouds, no UI. A rich ultramarine sky, distant city lights and soft warm coral light make a welcoming world of animation, video and live entertainment. Sophisticated 3D animated-film art direction, matte tactile surfaces, restrained luminous color, convincing light and depth, clean visual hierarchy.\nComposition/framing: Wide panoramic 2:1 landscape, entire television clearly visible near the center with generous cinematic environment around it. Main subject fully inside the central 70 percent; bottom right quiet and dark for a small host badge. The artwork fills the entire image edge-to-edge.\nConstraints: One cover image only. No app interface, no surrounding cards, no frame, no typography, no letters, no logo, no watermark. No green tint or monochrome teal wash. No humanoid mascot."
+    },
+    {
+      "path": "assets/entry-artwork/video.png",
+      "prompt": "Use case: photorealistic-natural\nAsset type: Cover artwork supplied by a demonstration video plugin, to fill a wide 2:1 card in an elegant dark television app.\nPrimary request: An evocative cinematic photograph inside an intimate movie theater, viewed from the rear seats toward a wide luminous screen showing a hazy golden mountain landscape. Deep burgundy upholstered seat backs form clean rhythmic rows in the lower foreground, a narrow projector light beam visible in soft air above. No people. Fine natural film texture, beautifully controlled contrast, sophisticated photographic art direction. Warm amber glow from the screen against dark blue and burgundy theater shadows.\nComposition/framing: Wide panoramic 2:1 landscape. The screen and seating form a striking complete composition readable as a small card. Important content inside the central 70 percent. Bottom right stays dark and quiet for a host badge. Artwork fills the canvas edge-to-edge.\nConstraints: One cover image only. No app interface, no outside border, no graphic play icons, no typography, no letters, no logo, no watermark. No green tint or monochrome teal wash."
+    }
+  ]
+}

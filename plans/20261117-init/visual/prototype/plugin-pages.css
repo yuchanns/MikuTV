@@ -1,0 +1,13 @@
+/* Inherit the approved settings rows, collection cards, and modal surfaces. */
+.entry-grid .folder-cover>.entry-current{display:flex;align-items:center;gap:9px;font-size:17px;color:var(--accent-soft)}
+.entry-current>svg{width:20px;height:20px}
+.entry-grid .entry-artwork{position:absolute;inset:0;display:block}
+.entry-grid .folder-cover:has(.entry-artwork)>span{visibility:hidden}
+.entry-grid .folder-cover>.entry-current{padding:8px 12px;border-radius:8px;background:#071018d9}
+.plugin-permissions .preference-option{font-size:20px;gap:22px}
+.plugin-permissions small{font-size:16px;color:var(--accent-soft);white-space:nowrap}
+.plugin-download{height:5px;overflow:hidden;border-radius:5px;background:#ffffff12;margin:30px 0}
+.plugin-download>i{display:block;height:100%;width:58%;border-radius:inherit;background:var(--accent);animation:plugin-download 2s ease-in-out infinite alternate}
+@keyframes plugin-download{from{width:25%}to{width:85%}}
+
+.plugin-empty>.secondary{display:inline-flex;margin-top:16px}

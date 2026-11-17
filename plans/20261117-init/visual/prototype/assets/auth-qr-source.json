@@ -1,0 +1,8 @@
+{
+  "purpose": "Static visual-design fixture; not a real sign-in session",
+  "payload": "mikutv://auth/design-session",
+  "generator": "qrcode-generator 1.4.4 by Kazuhiko Arase",
+  "generatorSource": "https://github.com/kazuhikoarase/qrcode-generator",
+  "generatorLicense": "MIT",
+  "runtimeDependency": false
+}

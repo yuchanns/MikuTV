@@ -1,0 +1,5 @@
+Leek asset: https://freesvg.org/leek-69352
+Published by OpenClipart / FreeSVG, asset 128137.
+Public domain under CC0 1.0 Universal.
+https://creativecommons.org/publicdomain/zero/1.0/
+Changes: recolored, scaled, placed, and rotated. Original paths retained.

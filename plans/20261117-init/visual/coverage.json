@@ -1,0 +1,1126 @@
+{
+  "product": "MikuTV",
+  "scope": "visual and interaction design",
+  "nativeImplementation": false,
+  "liveApiIntegration": false,
+  "data": "local fixtures",
+  "coreCapabilityCount": 68,
+  "designedCapabilityCount": 68,
+  "missingCapabilities": [],
+  "capabilities": [
+    {
+      "index": 1,
+      "category": "账号",
+      "capability": "电视扫码申请",
+      "screens": [
+        "screens/account/login.png",
+        "screens/account/login-scanned.png",
+        "screens/account/login-expired.png",
+        "screens/account/login-success.png"
+      ],
+      "modules": [
+        "prototype/auth-flow.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 2,
+      "category": "账号",
+      "capability": "扫码结果轮询",
+      "screens": [
+        "screens/account/login.png",
+        "screens/account/login-scanned.png",
+        "screens/account/login-expired.png",
+        "screens/account/login-success.png"
+      ],
+      "modules": [
+        "prototype/auth-flow.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 3,
+      "category": "账号",
+      "capability": "APP token 刷新",
+      "screens": [
+        "screens/main/account.png",
+        "screens/rights/expired.png",
+        "screens/account/login-success.png"
+      ],
+      "modules": [
+        "prototype/auth-flow.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 4,
+      "category": "账号",
+      "capability": "登录状态与会员状态",
+      "screens": [
+        "screens/main/account.png",
+        "screens/rights/expired.png",
+        "screens/account/login-success.png"
+      ],
+      "modules": [
+        "prototype/auth-flow.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 5,
+      "category": "账号",
+      "capability": "Cookie 有效性",
+      "screens": [
+        "screens/main/account.png",
+        "screens/rights/expired.png",
+        "screens/account/login-success.png"
+      ],
+      "modules": [
+        "prototype/auth-flow.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 6,
+      "category": "账号",
+      "capability": "Cookie 刷新",
+      "screens": [
+        "screens/main/account.png",
+        "screens/rights/expired.png",
+        "screens/account/login-success.png"
+      ],
+      "modules": [
+        "prototype/auth-flow.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 7,
+      "category": "发现",
+      "capability": "推荐视频",
+      "screens": [
+        "screens/main/home.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 8,
+      "category": "发现",
+      "capability": "APP 推荐备选",
+      "screens": [
+        "screens/main/home.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 9,
+      "category": "发现",
+      "capability": "热门",
+      "screens": [
+        "screens/main/trending.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 10,
+      "category": "发现",
+      "capability": "排行榜",
+      "screens": [
+        "screens/explore/ranking.png"
+      ],
+      "modules": [
+        "prototype/explore-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 11,
+      "category": "发现",
+      "capability": "分区索引",
+      "screens": [
+        "screens/main/categories.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 12,
+      "category": "搜索",
+      "capability": "多类型搜索",
+      "screens": [
+        "screens/main/search.png",
+        "screens/explore/search-suggestions.png",
+        "screens/explore/search-filters.png",
+        "screens/explore/search-system-input.png",
+        "screens/explore/search-empty.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/explore-pages.js",
+        "prototype/text-input.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 13,
+      "category": "搜索",
+      "capability": "综合搜索",
+      "screens": [
+        "screens/main/search.png",
+        "screens/explore/search-suggestions.png",
+        "screens/explore/search-filters.png",
+        "screens/explore/search-system-input.png",
+        "screens/explore/search-empty.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/explore-pages.js",
+        "prototype/text-input.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 14,
+      "category": "搜索",
+      "capability": "搜索联想",
+      "screens": [
+        "screens/main/search.png",
+        "screens/explore/search-suggestions.png",
+        "screens/explore/search-filters.png",
+        "screens/explore/search-system-input.png",
+        "screens/explore/search-empty.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/explore-pages.js",
+        "prototype/text-input.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 15,
+      "category": "视频",
+      "capability": "视频详情",
+      "screens": [
+        "screens/detail/video.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 16,
+      "category": "视频",
+      "capability": "分 P 列表",
+      "screens": [
+        "screens/flows/video-parts.png"
+      ],
+      "modules": [
+        "prototype/player-features.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 17,
+      "category": "视频",
+      "capability": "相关推荐",
+      "screens": [
+        "screens/detail/related.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 18,
+      "category": "播放",
+      "capability": "UGC 播放地址",
+      "screens": [
+        "screens/player/playback.png",
+        "screens/player/quality.png",
+        "screens/rights/vip-content.png",
+        "screens/rights/purchase-content.png",
+        "screens/rights/trial.png",
+        "screens/rights/trial-end.png",
+        "screens/rights/region.png",
+        "screens/rights/device.png",
+        "screens/rights/source.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/content-access.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 19,
+      "category": "播放",
+      "capability": "PGC 播放地址",
+      "screens": [
+        "screens/player/playback.png",
+        "screens/player/quality.png",
+        "screens/rights/vip-content.png",
+        "screens/rights/purchase-content.png",
+        "screens/rights/trial.png",
+        "screens/rights/trial-end.png",
+        "screens/rights/region.png",
+        "screens/rights/device.png",
+        "screens/rights/source.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/content-access.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 20,
+      "category": "播放",
+      "capability": "播放器元信息与字幕目录",
+      "screens": [
+        "screens/player/description.png",
+        "screens/player/subtitles.png",
+        "screens/player/chapters.png",
+        "screens/player/seeking.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/player-features.js",
+        "prototype/playback-menus.css"
+      ],
+      "presentation": "direct",
+      "chapterFields": [
+        "view_points[].content",
+        "view_points[].from",
+        "view_points[].to",
+        "view_points[].imgUrl (optional)"
+      ],
+      "chapterInteraction": [
+        "Timeline focus and seeking reveal the chapter strip and up cue before entering chapter selection",
+        "Up enters the current chapter",
+        "Left/Right browse without seeking",
+        "Confirm seeks to chapter start",
+        "Down/Back returns to the timeline",
+        "Pending seek and playback state are preserved until confirmation",
+        "No picker when chapter metadata is absent"
+      ]
+    },
+    {
+      "index": 21,
+      "category": "播放",
+      "capability": "进度缩略图",
+      "screens": [
+        "screens/player/seeking-no-chapters.png",
+        "screens/player/seeking.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/player-features.js",
+        "prototype/playback-menus.css"
+      ],
+      "presentation": "direct",
+      "seekPresentation": "Videos without chapters show the time preview; videos with chapters reveal the chapter strip above the timeline."
+    },
+    {
+      "index": 22,
+      "category": "播放",
+      "capability": "互动视频分支",
+      "screens": [
+        "screens/flows/interactive-branch.png"
+      ],
+      "modules": [
+        "prototype/player-features.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 23,
+      "category": "播放",
+      "capability": "播放心跳",
+      "screens": [
+        "screens/player/playback.png",
+        "screens/main/library-history.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 24,
+      "category": "弹幕",
+      "capability": "弹幕元数据",
+      "screens": [
+        "screens/player/playback.png",
+        "screens/player/danmaku.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 25,
+      "category": "弹幕",
+      "capability": "分段弹幕（Web）",
+      "screens": [
+        "screens/player/playback.png",
+        "screens/player/danmaku.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 26,
+      "category": "弹幕",
+      "capability": "分段弹幕（另一客户端路径）",
+      "screens": [
+        "screens/player/playback.png",
+        "screens/player/danmaku.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 27,
+      "category": "弹幕",
+      "capability": "发送弹幕",
+      "screens": [
+        "screens/flows/video-danmaku-compose.png",
+        "screens/discussion/system-input.png"
+      ],
+      "modules": [
+        "prototype/player-features.js",
+        "prototype/text-input.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 28,
+      "category": "弹幕",
+      "capability": "云端屏蔽规则",
+      "screens": [
+        "screens/settings/danmaku.png",
+        "screens/settings/blocked-rules.png",
+        "screens/settings/add-rule-validation.png"
+      ],
+      "modules": [
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 29,
+      "category": "评论",
+      "capability": "评论列表",
+      "screens": [
+        "screens/discussion/comments.png",
+        "screens/player/comments.png"
+      ],
+      "modules": [
+        "prototype/discussion.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 30,
+      "category": "评论",
+      "capability": "楼中楼",
+      "screens": [
+        "screens/discussion/replies.png"
+      ],
+      "modules": [
+        "prototype/discussion.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 31,
+      "category": "评论",
+      "capability": "发表评论",
+      "screens": [
+        "screens/discussion/system-input.png",
+        "screens/discussion/composer.png",
+        "screens/discussion/posted.png"
+      ],
+      "modules": [
+        "prototype/discussion.js",
+        "prototype/text-input.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 32,
+      "category": "评论",
+      "capability": "评论点赞",
+      "screens": [
+        "screens/discussion/replies.png"
+      ],
+      "modules": [
+        "prototype/discussion.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 33,
+      "category": "互动",
+      "capability": "点赞",
+      "screens": [
+        "screens/detail/video.png",
+        "screens/player/paused-focus.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 34,
+      "category": "互动",
+      "capability": "点赞状态",
+      "screens": [
+        "screens/detail/video.png",
+        "screens/player/paused-focus.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 35,
+      "category": "互动",
+      "capability": "支持",
+      "screens": [
+        "screens/detail/video.png",
+        "screens/rights/coins.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 36,
+      "category": "互动",
+      "capability": "一键支持",
+      "screens": [
+        "screens/detail/video.png",
+        "screens/rights/coins.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 37,
+      "category": "片库",
+      "capability": "收藏夹列表",
+      "screens": [
+        "screens/library/folders.png"
+      ],
+      "modules": [
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 38,
+      "category": "片库",
+      "capability": "收藏内容",
+      "screens": [
+        "screens/library/folder-content.png"
+      ],
+      "modules": [
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 39,
+      "category": "片库",
+      "capability": "收藏与取消",
+      "screens": [
+        "screens/library/favorite-chooser.png",
+        "screens/library/manage-folder.png"
+      ],
+      "modules": [
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 40,
+      "category": "片库",
+      "capability": "新建收藏夹",
+      "screens": [
+        "screens/library/folder-editor.png"
+      ],
+      "modules": [
+        "prototype/library-pages.js",
+        "prototype/text-input.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 41,
+      "category": "片库",
+      "capability": "修改收藏夹",
+      "screens": [
+        "screens/library/folder-editor.png"
+      ],
+      "modules": [
+        "prototype/library-pages.js",
+        "prototype/text-input.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 42,
+      "category": "片库",
+      "capability": "稍后再看",
+      "screens": [
+        "screens/main/library-watchlater.png",
+        "screens/library/watchlater-empty.png"
+      ],
+      "modules": [
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 43,
+      "category": "片库",
+      "capability": "加入稍后再看",
+      "screens": [
+        "screens/main/library-watchlater.png",
+        "screens/library/watchlater-empty.png"
+      ],
+      "modules": [
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 44,
+      "category": "片库",
+      "capability": "移出稍后再看",
+      "screens": [
+        "screens/main/library-watchlater.png",
+        "screens/library/watchlater-empty.png"
+      ],
+      "modules": [
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 45,
+      "category": "片库",
+      "capability": "观看历史",
+      "screens": [
+        "screens/main/library-history.png",
+        "screens/settings/privacy.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/library-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 46,
+      "category": "片库",
+      "capability": "上报进度",
+      "screens": [
+        "screens/main/library-history.png",
+        "screens/settings/privacy.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/library-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 47,
+      "category": "关注",
+      "capability": "创作者资料",
+      "screens": [
+        "screens/community/creator-about.png"
+      ],
+      "modules": [
+        "prototype/community-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 48,
+      "category": "关注",
+      "capability": "创作者投稿",
+      "screens": [
+        "screens/community/creator-videos.png",
+        "screens/community/creator-collections.png"
+      ],
+      "modules": [
+        "prototype/community-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 49,
+      "category": "关注",
+      "capability": "关注列表",
+      "screens": [
+        "screens/main/following.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 50,
+      "category": "关注",
+      "capability": "关注与取关",
+      "screens": [
+        "screens/community/creator-videos.png"
+      ],
+      "modules": [
+        "prototype/community-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 51,
+      "category": "关注",
+      "capability": "动态视频流",
+      "screens": [
+        "screens/main/following.png",
+        "screens/community/creator-posts.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/community-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 52,
+      "category": "关注",
+      "capability": "关注 UP 入口",
+      "screens": [
+        "screens/community/creator-videos.png"
+      ],
+      "modules": [
+        "prototype/community-pages.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 53,
+      "category": "番剧影视",
+      "capability": "剧集详情",
+      "screens": [
+        "screens/detail/show-1.png",
+        "screens/flows/series-episodes.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/player-features.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 54,
+      "category": "番剧影视",
+      "capability": "索引条件",
+      "screens": [
+        "screens/explore/series-index.png",
+        "screens/explore/index-filter.png"
+      ],
+      "modules": [
+        "prototype/explore-pages.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 55,
+      "category": "番剧影视",
+      "capability": "索引筛选",
+      "screens": [
+        "screens/explore/series-index.png",
+        "screens/explore/index-filter.png"
+      ],
+      "modules": [
+        "prototype/explore-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 56,
+      "category": "番剧影视",
+      "capability": "更新日历",
+      "screens": [
+        "screens/explore/update-calendar.png",
+        "screens/explore/calendar-next-day.png"
+      ],
+      "modules": [
+        "prototype/explore-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 57,
+      "category": "番剧影视",
+      "capability": "追番",
+      "screens": [
+        "screens/detail/show-1.png",
+        "screens/main/library-tracking.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 58,
+      "category": "番剧影视",
+      "capability": "取消追番",
+      "screens": [
+        "screens/detail/show-1.png",
+        "screens/main/library-tracking.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 59,
+      "category": "番剧影视",
+      "capability": "用户追番列表",
+      "screens": [
+        "screens/detail/show-1.png",
+        "screens/main/library-tracking.png"
+      ],
+      "modules": [
+        "prototype/app.js",
+        "prototype/library-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 60,
+      "category": "直播",
+      "capability": "直播推荐",
+      "screens": [
+        "screens/main/live.png",
+        "screens/main/following-live.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 61,
+      "category": "直播",
+      "capability": "直播分区",
+      "screens": [
+        "screens/main/live.png",
+        "screens/main/following-live.png"
+      ],
+      "modules": [
+        "prototype/app.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 62,
+      "category": "直播",
+      "capability": "直播流与线路",
+      "screens": [
+        "screens/flows/live-quality.png",
+        "screens/flows/live-lines.png",
+        "screens/flows/live-disconnected.png",
+        "screens/flows/live-ended.png"
+      ],
+      "modules": [
+        "prototype/player-features.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 63,
+      "category": "直播",
+      "capability": "弹幕 token 与服务器",
+      "screens": [
+        "screens/flows/live-chat.png",
+        "screens/flows/live-disconnected.png"
+      ],
+      "modules": [
+        "prototype/player-features.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 64,
+      "category": "直播",
+      "capability": "直播弹幕连接",
+      "screens": [
+        "screens/flows/live-chat.png",
+        "screens/flows/live-disconnected.png"
+      ],
+      "modules": [
+        "prototype/player-features.js"
+      ],
+      "presentation": "shared"
+    },
+    {
+      "index": 65,
+      "category": "直播",
+      "capability": "发送直播弹幕",
+      "screens": [
+        "screens/flows/live-compose.png",
+        "screens/flows/live-muted.png"
+      ],
+      "modules": [
+        "prototype/player-features.js",
+        "prototype/text-input.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 66,
+      "category": "消息",
+      "capability": "未读通知",
+      "screens": [
+        "screens/community/notifications.png",
+        "screens/main/account.png"
+      ],
+      "modules": [
+        "prototype/community-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 67,
+      "category": "消息",
+      "capability": "私信会话",
+      "screens": [
+        "screens/community/private-conversation.png",
+        "screens/community/private-compose.png"
+      ],
+      "modules": [
+        "prototype/community-pages.js",
+        "prototype/text-input.js"
+      ],
+      "presentation": "direct"
+    },
+    {
+      "index": 68,
+      "category": "扩展",
+      "capability": "付费课堂播放",
+      "screens": [
+        "screens/detail/course-camera.png",
+        "screens/flows/course-lessons.png",
+        "screens/flows/course-playback.png"
+      ],
+      "modules": [
+        "prototype/content-access.js",
+        "prototype/player-features.js"
+      ],
+      "presentation": "direct"
+    }
+  ],
+  "hostFeatures": [
+    {
+      "id": "entry-selection",
+      "screens": [
+        "screens/plugins/entries.png",
+        "screens/plugins/entries-empty.png",
+        "screens/plugins/sidebar.png",
+        "screens/plugins/installed-entries.png"
+      ],
+      "modules": [
+        "prototype/plugin-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "installed-plugins",
+      "screens": [
+        "screens/plugins/installed.png",
+        "screens/plugins/detail.png",
+        "screens/plugins/external.png"
+      ],
+      "modules": [
+        "prototype/plugin-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "plugin-discovery",
+      "screens": [
+        "screens/plugins/discover.png"
+      ],
+      "modules": [
+        "prototype/plugin-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "plugin-installation",
+      "screens": [
+        "screens/plugins/install.png",
+        "screens/plugins/progress.png",
+        "screens/plugins/install-success.png"
+      ],
+      "modules": [
+        "prototype/plugin-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "plugin-updates",
+      "screens": [
+        "screens/plugins/update.png",
+        "screens/plugins/failed.png"
+      ],
+      "modules": [
+        "prototype/plugin-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "plugin-disable-and-remove",
+      "screens": [
+        "screens/plugins/disable.png",
+        "screens/plugins/remove.png"
+      ],
+      "modules": [
+        "prototype/plugin-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "plugin-repository-input",
+      "screens": [
+        "screens/plugins/repository.png"
+      ],
+      "modules": [
+        "prototype/plugin-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "plugin-list-states",
+      "screens": [
+        "screens/plugins/loading.png",
+        "screens/plugins/empty.png",
+        "screens/plugins/offline.png",
+        "screens/plugins/error.png"
+      ],
+      "modules": [
+        "prototype/plugin-pages.js",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "theme-selection",
+      "screens": [
+        "screens/settings/appearance.png",
+        "screens/themes/picker.png",
+        "screens/themes/picker-current.png",
+        "screens/themes/appearance-twilight.png",
+        "screens/themes/appearance-ocean.png",
+        "screens/themes/home-twilight.png"
+      ],
+      "modules": [
+        "prototype/theme-pages.js",
+        "prototype/theme-pages.css",
+        "prototype/sidebar-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "theme-installation",
+      "screens": [
+        "screens/themes/discover.png",
+        "screens/themes/install.png",
+        "screens/themes/installed.png"
+      ],
+      "modules": [
+        "prototype/theme-pages.js",
+        "prototype/plugin-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "theme-lifecycle",
+      "screens": [
+        "screens/themes/error.png",
+        "screens/themes/remove.png",
+        "screens/themes/builtin-only.png"
+      ],
+      "modules": [
+        "prototype/theme-pages.js",
+        "prototype/plugin-pages.js"
+      ],
+      "presentation": "local interaction fixture"
+    },
+    {
+      "id": "entry-accounts",
+      "screens": [
+        "screens/account/accounts.png"
+      ],
+      "modules": [
+        "prototype/plugin-pages.js",
+        "prototype/sidebar-pages.js",
+        "prototype/auth-flow.js"
+      ],
+      "presentation": "local interaction fixture"
+    }
+  ]
+}

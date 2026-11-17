@@ -1,0 +1,29 @@
+{
+  "product": "MikuTV",
+  "accent": "#39c5bb",
+  "tvRotationDegrees": -11,
+  "leekRotationDegrees": 45,
+  "tv": {
+    "library": "Lucide",
+    "icon": "tv",
+    "version": "1.73.0",
+    "license": "ISC/MIT"
+  },
+  "leek": {
+    "title": "leek",
+    "publisher": "OpenClipart / FreeSVG",
+    "source": "https://freesvg.org/leek-69352",
+    "assetId": 128137,
+    "download": "https://freesvg.org/download/128137",
+    "license": "CC0-1.0",
+    "sha256": "f6a9454ad36c6806bd3eb6431a545df0b8fd9af2f8ffc14887cc0ee6ba566093",
+    "baseColor": "#39c5bb",
+    "outlineColor": "#39c5bb"
+  },
+  "changes": "Original paths retained. Color gradient, scale, placement and rotation adjusted. White stem southwest; green leaves northeast.",
+  "layers": [
+    "background.svg",
+    "midground.svg",
+    "foreground.svg"
+  ]
+}
