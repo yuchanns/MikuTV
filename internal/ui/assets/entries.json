@@ -1,0 +1,10 @@
+[
+  {
+    "id": "sample-source",
+    "sourceId": "sample-source",
+    "name": "示例影视",
+    "description": "视频、番剧与直播",
+    "artwork": "artwork/sample-source.png",
+    "available": true
+  }
+]

@@ -1,0 +1,63 @@
+{
+  "Nav": {
+    "home": "\u4e3a\u4f60",
+    "search": "\u641c\u7d22",
+    "following": "\u5173\u6ce8",
+    "series": "\u756a\u5267\u5f71\u89c6",
+    "live": "\u76f4\u64ad",
+    "library": "\u6211\u7684\u7247\u5e93",
+    "settings": "\u8bbe\u7f6e",
+    "account": "\u672a\u767b\u5f55",
+    "entries": "\u5207\u6362\u5165\u53e3"
+  },
+  "EntriesTitle": "\u9009\u62e9\u5165\u53e3",
+  "EntriesNote": "\u9009\u62e9\u60f3\u770b\u7684\u5185\u5bb9\u6765\u6e90\u3002",
+  "CurrentEntry": "\u5f53\u524d\u5165\u53e3",
+  "EmptyEntries": "\u8fd8\u6ca1\u6709\u53ef\u7528\u5165\u53e3",
+  "EmptyEntryNote": "\u5148\u5b89\u88c5\u6216\u542f\u7528\u4e00\u4e2a\u5185\u5bb9\u63d2\u4ef6\u3002",
+  "Manage": "\u7ba1\u7406\u63d2\u4ef6",
+  "EmptyTitle": "\u6682\u65e0\u5185\u5bb9",
+  "EmptyNote": "\u5f53\u524d\u8fd8\u6ca1\u6709\u53ef\u663e\u793a\u7684\u5185\u5bb9\u3002",
+  "SwitchEntry": "\u5207\u6362\u5165\u53e3",
+  "SettingsTitle": "\u8bbe\u7f6e",
+  "SettingsNote": "\u8ba9\u6bcf\u4e00\u6b21\u89c2\u770b\uff0c\u90fd\u5408\u4f60\u5fc3\u610f\u3002",
+  "EmptySettings": "\u5f53\u524d\u8fd8\u6ca1\u6709\u53ef\u7528\u9009\u9879\u3002",
+  "Version": "\u7248\u672c",
+  "Platform": "\u9002\u7528\u5e73\u53f0",
+  "AboutNote": "\u8ba9\u597d\u5185\u5bb9\uff0c\u503c\u5f97\u4e00\u5757\u5927\u5c4f\u3002",
+  "Licenses": "\u5f00\u6e90\u8bb8\u53ef",
+  "Close": "\u5173\u95ed",
+  "SaveFailed": "\u65e0\u6cd5\u4fdd\u5b58\u5165\u53e3\u9009\u62e9\u3002",
+  "Sections": [
+    {
+      "ID": "playback",
+      "Name": "\u64ad\u653e",
+      "Icon": "play"
+    },
+    {
+      "ID": "danmaku",
+      "Name": "\u5f39\u5e55",
+      "Icon": "comment"
+    },
+    {
+      "ID": "appearance",
+      "Name": "\u5916\u89c2\u4e0e\u52a8\u6001",
+      "Icon": "brand"
+    },
+    {
+      "ID": "privacy",
+      "Name": "\u9690\u79c1\u4e0e\u8bb0\u5f55",
+      "Icon": "lock"
+    },
+    {
+      "ID": "plugins",
+      "Name": "\u63d2\u4ef6\u7ba1\u7406",
+      "Icon": "plug"
+    },
+    {
+      "ID": "about",
+      "Name": "\u5173\u4e8e MikuTV",
+      "Icon": "info"
+    }
+  ]
+}

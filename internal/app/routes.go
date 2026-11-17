@@ -1,0 +1,155 @@
+package app
+
+import "fmt"
+
+type Page string
+
+const (
+	Entries   Page = "entries"
+	Home      Page = "home"
+	Search    Page = "search"
+	Following Page = "following"
+	Series    Page = "series"
+	Live      Page = "live"
+	Library   Page = "library"
+	Settings  Page = "settings"
+	Account   Page = "account"
+	Licenses  Page = "licenses"
+)
+
+type FocusID string
+
+const (
+	ManagePlugins FocusID = "entries/manage"
+	ContentAction FocusID = "content/entries"
+	ShowLicenses  FocusID = "about/licenses"
+	LicenseText   FocusID = "licenses/text"
+	CloseModal    FocusID = "modal/close"
+)
+
+func RailFocus(page Page) FocusID    { return FocusID("rail/" + page) }
+func EntryFocus(id string) FocusID   { return FocusID("entry/" + id) }
+func SectionFocus(id string) FocusID { return FocusID("section/" + id) }
+
+type Route struct {
+	Page    Page
+	Section string
+}
+
+type FocusArea uint8
+
+const (
+	ContentArea FocusArea = iota
+	NavigationArea
+)
+
+type Position struct {
+	Focus FocusID
+	Area  FocusArea
+	X, Y  float32
+}
+
+type Location struct {
+	Route
+	Position
+}
+
+// RouteSpec describes navigation policy without depending on a UI toolkit.
+type RouteSpec struct {
+	Route         Route
+	Parent        Route
+	Redirect      Route
+	Initial       Position
+	ResolveFocus  func(*State) FocusID
+	ContentFocus  FocusID
+	ExitFocus     FocusID
+	RequiresEntry bool
+	Transient     bool
+	Modal         bool
+}
+
+type Routes struct {
+	Root   Route
+	Picker Route
+	specs  map[Route]RouteSpec
+}
+
+func NewRoutes(root, picker Route, specs []RouteSpec) (*Routes, error) {
+	r := &Routes{Root: root, Picker: picker, specs: make(map[Route]RouteSpec)}
+	for _, spec := range specs {
+		if spec.Route.Page == "" {
+			return nil, fmt.Errorf("route identity is required")
+		}
+		if _, exists := r.specs[spec.Route]; exists {
+			return nil, fmt.Errorf("duplicate route: %+v", spec.Route)
+		}
+		r.specs[spec.Route] = spec
+	}
+	for _, required := range []Route{root, picker} {
+		if _, exists := r.specs[required]; !exists {
+			return nil, fmt.Errorf("unregistered application root: %+v", required)
+		}
+	}
+	for route, spec := range r.specs {
+		if spec.Parent.Page != "" {
+			if _, exists := r.specs[spec.Parent]; !exists {
+				return nil, fmt.Errorf("route %+v has an unregistered parent", route)
+			}
+		}
+		seen := make(map[Route]bool)
+		for current := route; current.Page != ""; current = r.specs[current].Parent {
+			if seen[current] {
+				return nil, fmt.Errorf("route parent cycle at %+v", route)
+			}
+			seen[current] = true
+		}
+	}
+	for route := range r.specs {
+		if _, ok := r.Resolve(route); !ok {
+			return nil, fmt.Errorf("invalid route redirect at %+v", route)
+		}
+	}
+	return r, nil
+}
+
+func (r *Routes) Spec(route Route) (RouteSpec, bool) {
+	spec, ok := r.specs[route]
+	return spec, ok
+}
+
+func (r *Routes) Resolve(route Route) (RouteSpec, bool) {
+	for range len(r.specs) + 1 {
+		spec, ok := r.specs[route]
+		if !ok {
+			return RouteSpec{}, false
+		}
+		if spec.Redirect.Page == "" {
+			for parent := spec.Parent; parent.Page != ""; parent = r.specs[parent].Parent {
+				spec.RequiresEntry = spec.RequiresEntry || r.specs[parent].RequiresEntry
+			}
+			return spec, true
+		}
+		route = spec.Redirect
+	}
+	return RouteSpec{}, false
+}
+
+func (r *Routes) Ancestors(route Route) []Route {
+	var chain []Route
+	for route.Page != "" {
+		chain = append(chain, route)
+		route = r.specs[route].Parent
+	}
+	for left, right := 0, len(chain)-1; left < right; left, right = left+1, right-1 {
+		chain[left], chain[right] = chain[right], chain[left]
+	}
+	return chain
+}
+
+func (r *Routes) initial(state *State, spec RouteSpec) Location {
+	position := spec.Initial
+	if spec.ResolveFocus != nil {
+		position.Focus = spec.ResolveFocus(state)
+	}
+	return Location{Route: spec.Route, Position: position}
+}

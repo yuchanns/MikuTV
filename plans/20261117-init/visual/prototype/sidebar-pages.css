@@ -62,11 +62,10 @@
 .account-guest{position:relative;margin:42px 83px 0 103px;min-height:500px;overflow:hidden;border:1px solid #ffffff10;border-radius:24px;background:#111927}.account-guest-art{position:absolute;inset:0}.account-guest-art img{width:100%;height:100%;object-fit:cover;object-position:75% 45%;opacity:.55}.account-guest-art:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#111927,#111927e6 30%,transparent)}.account-guest-copy{position:relative;padding:50px 58px;max-width:820px}.guest-avatar{width:70px;height:70px;border-radius:50%;background:#ffffff0b;display:grid;place-items:center;color:#acbfd8}.guest-avatar svg{height:35px;width:35px}.account-guest-copy h2{font-size:45px;margin:28px 0 22px}.account-guest-copy p{font-size:23px;color:#a1b2ca;line-height:1.8;margin-bottom:30px}
 .live-player .timeline,.live-player .chapter-label,.live-player .seek-preview,.live-player [data-action="previous"],.live-player [data-action="next"],.live-player [data-action="panel:speed"],.live-player [data-action="panel:subtitles"]{display:none}
 
-.logo-word{font-size:12px;letter-spacing:.6px;text-transform:none}
-
-.logo .brand-mark{display:block;width:62px;height:42px;object-fit:contain}
-
-.logo .brand-mark{width:39px;height:39px}
+.logo{width:288px;min-width:288px;align-self:flex-start;flex-direction:row;align-items:flex-start;gap:28px;padding:0 34px}
+.logo .brand-mark{display:block;width:48px;height:48px;object-fit:contain;flex:none}
+.logo-word{font-size:26px;font-weight:650;line-height:48px;letter-spacing:.4px;text-transform:none;margin:0;color:var(--ink);opacity:0;transition:opacity .22s var(--ease)}
+#rail:focus-within .logo-word{opacity:1}
 
 .about-overview{display:grid;grid-template-columns:320px minmax(0,1fr);gap:65px;padding-top:24px}.about-overview .about-app{padding-top:0}.about-overview .about-app img{width:280px;height:168px}.about-overview .about-app h2{font-size:40px;letter-spacing:3px;margin:26px 0 5px}.about-overview .about-app p{font-size:22px;letter-spacing:2px;margin:6px 0 0;color:var(--accent-soft)}.about-overview .about-app small{font-size:17px;line-height:1.8;margin-top:25px;color:#8fa1ba;max-width:300px}.about-facts{display:flex;flex-direction:column;padding-top:0}.about-facts>div,.about-facts>button,.about-facts>a{min-height:76px;display:flex;align-items:center;justify-content:space-between;padding:15px 19px;border-bottom:1px solid #ffffff10;border-radius:8px;font-size:21px;color:#d9e3ef;text-align:left}.about-facts>div>span{color:#8da1bd}.about-facts strong{font-size:20px;font-weight:400;color:#adbed5}.about-facts svg{width:20px;height:20px;color:#849bbd}.about-facts .focusable:focus{transform:none!important}.license-copy{max-height:510px;overflow:auto;white-space:pre-wrap;font-size:16px;line-height:1.8;color:#c5d2e4;background:#ffffff04;border-radius:12px;padding:22px;margin-top:26px;scrollbar-width:thin}.modal:has(.license-copy){width:1050px}.privacy-copy{white-space:pre-line}.danmaku-preferences .preference-row{min-height:91px}
 

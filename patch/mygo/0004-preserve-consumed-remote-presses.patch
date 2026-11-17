@@ -1,0 +1,79 @@
+diff --git a/internal/tvos/window.go b/internal/tvos/window.go
+--- a/internal/tvos/window.go
++++ b/internal/tvos/window.go
+@@ -21,6 +21,7 @@
+ 	visible      bool
+ 	pending      bool
+ 	closed       bool
++	handledKeys  remotePresses
+ }
+ 
+ func (b *Backend) NewWindow(options *platform.WindowOptions, handler platform.WindowHandler) (platform.Window, error) {
+@@ -32,7 +33,7 @@
+ 	}
+ 	screen := send(class("UIScreen"), "mainScreen")
+ 	bounds := native.getRect(screen, sel("bounds"))
+-	w := &window{b: b, h: handler, title: options.Title}
++	w := &window{b: b, h: handler, title: options.Title, handledKeys: make(remotePresses)}
+ 	w.native = native.initRect(send(class("UIWindow"), "alloc"), sel("initWithFrame:"), bounds)
+ 	w.view = native.initRect(send(class("MyGoTVView"), "alloc"), sel("initWithFrame:"), rect{Width: bounds.Width, Height: bounds.Height})
+ 	controller := alloc("UIViewController")
+@@ -141,7 +142,8 @@
+ 		press := send(items, "objectAtIndex:", index)
+ 		key := remoteKey(int(send(press, "type")))
+ 		if key != platform.KeyUnknown {
+-			handled = w.h.SurfaceEvent(platform.SurfaceEvent{Kind: kind, Key: key, PhysicalKey: key}) || handled
++			taken := w.h.SurfaceEvent(platform.SurfaceEvent{Kind: kind, Key: key, PhysicalKey: key})
++			handled = w.handledKeys.take(key, kind, taken) || handled
+ 		}
+ 	}
+ 	return handled
+diff --git a/internal/tvos/remote.go b/internal/tvos/remote.go
+--- a/internal/tvos/remote.go
++++ b/internal/tvos/remote.go
+@@ -23,3 +23,19 @@
+ 		return platform.KeyUnknown
+ 	}
+ }
++
++// A consumed press also owns its release, even when the press changed the view.
++type remotePresses map[platform.Key]bool
++
++func (p remotePresses) take(key platform.Key, kind platform.SurfaceEventKind, taken bool) bool {
++	switch kind {
++	case platform.KeyPressed:
++		if taken {
++			p[key] = true
++		}
++	case platform.KeyReleased:
++		taken = p[key] || taken
++		delete(p, key)
++	}
++	return taken
++}
+diff --git a/internal/tvos/remote_test.go b/internal/tvos/remote_test.go
+--- a/internal/tvos/remote_test.go
++++ b/internal/tvos/remote_test.go
+@@ -20,3 +20,22 @@
+ 		}
+ 	}
+ }
++
++func TestConsumedBackOwnsItsMatchingRelease(t *testing.T) {
++	presses := make(remotePresses)
++	if !presses.take(platform.KeyEscape, platform.KeyPressed, true) {
++		t.Fatal("consumed Back was forwarded to UIKit")
++	}
++	if presses.take(platform.KeyRight, platform.KeyReleased, false) {
++		t.Fatal("an unrelated release was consumed")
++	}
++	if !presses.take(platform.KeyEscape, platform.KeyReleased, false) {
++		t.Fatal("Back release was forwarded after its press was consumed")
++	}
++	if presses.take(platform.KeyEscape, platform.KeyReleased, false) {
++		t.Fatal("completed Back left a stale consumed press")
++	}
++	if presses.take(platform.KeyEscape, platform.KeyPressed, false) || presses.take(platform.KeyEscape, platform.KeyReleased, false) {
++		t.Fatal("unhandled root Back did not reach UIKit")
++	}
++}

@@ -95,6 +95,7 @@ def build():
     }
     (APP / "Info.plist").write_bytes(plistlib.dumps(info))
     (APP / "PkgInfo").write_bytes(b"APPL????")
+    shutil.copyfile(ROOT / "resources/PrivacyInfo.xcprivacy", APP / "PrivacyInfo.xcprivacy")
     print(APP)
 
 
