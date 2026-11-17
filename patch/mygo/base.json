@@ -1,0 +1,9 @@
+{
+  "module": "github.com/egoist/mygo",
+  "version": "v0.9.2",
+  "commit": "25ce62f4d357cd6d29da04300e3fbc352d79daa4",
+  "upstream": "https://github.com/egoist/mygo",
+  "reference": "https://github.com/egoist/mygo/pull/940",
+  "reference_commit": "ea96ba60e10733dd0bb31f6afacc1037b3267baa",
+  "tag": "v0.9.2"
+}
