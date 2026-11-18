@@ -15,13 +15,19 @@ func (p *PageContext) heading(c *ui.Context, title, note string) {
 }
 
 func (p *PageContext) empty(c *ui.Context, title, note, label string, id app.FocusID, group string, action func()) {
-	colors := p.Theme.Colors
 	ui.Column(c).FillWidth().Height(530).Center().Gap(24).Children(func() {
-		ui.Icon(c, p.Assets.Icon("library")).Size(64, 64).TextColor(paint(colors.Text.Muted))
-		ui.Text(c, title).FontSize(36)
-		ui.Text(c, note).FontSize(23).TextColor(paint(colors.Text.Secondary))
+		p.emptyDescription(c, title, note)
 		p.button(c, label, id, group, action).AlignSelf(ui.Center)
 	})
+}
+
+func (p *PageContext) emptyDescription(c *ui.Context, title, note string) {
+	colors := p.Theme.Colors
+	ui.Icon(c, p.Assets.Icon("library")).Size(64, 64).TextColor(paint(colors.Text.Muted))
+	ui.Text(c, title).FontSize(36)
+	if note != "" {
+		ui.Text(c, note).FontSize(23).TextColor(paint(colors.Text.Secondary))
+	}
 }
 
 func (p *PageContext) button(c *ui.Context, label string, id app.FocusID, group string, action func()) ui.Element {

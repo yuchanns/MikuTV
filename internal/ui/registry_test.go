@@ -29,7 +29,7 @@ func TestRegisteredComponentsAndNestedOverlaysNeedNoShellCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := app.NewState(assets.Entries, assets.Entries[0].ID, pages.Routes)
+	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
 	if err != nil {
 		t.Fatal(err)
 	}

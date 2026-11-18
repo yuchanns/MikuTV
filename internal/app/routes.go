@@ -1,6 +1,10 @@
 package app
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/yuchanns/MikuTV/internal/provider"
+)
 
 type Page string
 
@@ -64,6 +68,8 @@ type RouteSpec struct {
 	ContentFocus  FocusID
 	ExitFocus     FocusID
 	RequiresEntry bool
+	Capability    provider.Capability
+	Capabilities  []provider.Capability
 	Transient     bool
 	Modal         bool
 }
@@ -124,9 +130,31 @@ func (r *Routes) Resolve(route Route) (RouteSpec, bool) {
 			return RouteSpec{}, false
 		}
 		if spec.Redirect.Page == "" {
-			for parent := spec.Parent; parent.Page != ""; parent = r.specs[parent].Parent {
-				spec.RequiresEntry = spec.RequiresEntry || r.specs[parent].RequiresEntry
+			var required []provider.Capability
+			addCap := func(cap provider.Capability) {
+				if cap == "" {
+					return
+				}
+				for _, existing := range required {
+					if existing == cap {
+						return
+					}
+				}
+				required = append(required, cap)
 			}
+			addCap(spec.Capability)
+			for _, cap := range spec.Capabilities {
+				addCap(cap)
+			}
+			for parent := spec.Parent; parent.Page != ""; parent = r.specs[parent].Parent {
+				parentSpec := r.specs[parent]
+				spec.RequiresEntry = spec.RequiresEntry || parentSpec.RequiresEntry
+				addCap(parentSpec.Capability)
+				for _, cap := range parentSpec.Capabilities {
+					addCap(cap)
+				}
+			}
+			spec.Capabilities = required
 			return spec, true
 		}
 		route = spec.Redirect

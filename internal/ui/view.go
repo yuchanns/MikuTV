@@ -21,6 +21,7 @@ type scrollKey struct {
 
 type Options struct {
 	State       *app.State
+	Catalog     *app.Catalog
 	Pages       *Pages
 	Assets      *Assets
 	Preferences app.PreferencesStore
@@ -30,6 +31,7 @@ type Options struct {
 
 type View struct {
 	State         *app.State
+	Catalog       *app.Catalog
 	Pages         *Pages
 	Assets        *Assets
 	Preferences   app.PreferencesStore
@@ -46,7 +48,7 @@ type View struct {
 }
 
 func NewView(options Options) *View {
-	return &View{State: options.State, Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
+	return &View{State: options.State, Catalog: options.Catalog, Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Theme: options.Theme, Version: options.Version, native: nativeTheme(options.Theme), scrolls: make(map[scrollKey]*ui.ScrollState)}
 }
 
@@ -150,6 +152,10 @@ func (v *View) dispatch(action func()) {
 	}
 	v.State.RecordPosition(position)
 	action()
+	if v.Catalog != nil {
+		entry, _ := v.State.Current()
+		v.Catalog.Select(entry)
+	}
 	if v.Trace {
 		log.Printf("navigation: entry=%s page=%s section=%s focus=%s", v.State.CurrentEntry, v.State.Page, v.State.Section, v.State.Focus)
 	}

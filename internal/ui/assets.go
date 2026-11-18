@@ -20,6 +20,8 @@ type labels struct {
 	Nav                                                                   map[app.Page]string
 	EntriesTitle, EntriesNote, CurrentEntry, EmptyEntries, EmptyEntryNote string
 	Manage, EmptyTitle, EmptyNote, SwitchEntry                            string
+	LoadingTitle, LoadingNote, FailedTitle, FailedNote                    string
+	CanceledTitle, Retry, Cancel                                          string
 	SettingsTitle, SettingsNote, EmptySettings                            string
 	Version, Platform, AboutNote, Licenses, Close, SaveFailed             string
 	Sections                                                              []section
@@ -27,7 +29,6 @@ type labels struct {
 
 type Assets struct {
 	Text         labels
-	Entries      []app.Entry
 	Brand        ui.ImageSource
 	AboutArtwork ui.ImageSource
 	License      string
@@ -37,14 +38,12 @@ type Assets struct {
 
 func LoadAssets() (*Assets, error) {
 	a := &Assets{icons: make(map[string]*ui.SVG), images: make(map[string]ui.ImageSource)}
-	for path, target := range map[string]any{"assets/labels.json": &a.Text, "assets/entries.json": &a.Entries} {
-		data, err := files.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(data, target); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", path, err)
-		}
+	text, err := files.ReadFile("assets/labels.json")
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(text, &a.Text); err != nil {
+		return nil, fmt.Errorf("decode labels: %w", err)
 	}
 	icons, err := files.ReadDir("assets/icons")
 	if err != nil {
@@ -79,18 +78,14 @@ func LoadAssets() (*Assets, error) {
 		return nil, err
 	}
 	a.License = string(license)
-	// Prepare bundled covers before the window opens, outside navigation frames.
-	for _, entry := range a.Entries {
-		if _, cached := a.images[entry.Artwork]; cached {
-			continue
-		}
-		var image ui.ImageSource
-		if data, err := files.ReadFile("assets/" + entry.Artwork); err == nil {
-			image, _ = ui.DecodeImage(data)
-		}
-		a.images[entry.Artwork] = image
-	}
 	return a, nil
+}
+
+// PrepareArtwork decodes an already validated package cover before rendering.
+func (a *Assets) PrepareArtwork(key string, data []byte) {
+	if len(data) != 0 {
+		a.images[key], _ = ui.DecodeImage(data)
+	}
 }
 
 func (a *Assets) Icon(name string) *ui.SVG {

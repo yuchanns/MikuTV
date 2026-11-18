@@ -2,6 +2,7 @@
 """Build the Go application against a freshly patched, pinned MyGo vendor tree."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ PATCHES = ROOT / "patch/mygo"
 DEPENDENCY = ROOT / "vendor/github.com/egoist/mygo"
 APP = BUILD / "Payload/MikuTV.app"
 MINIMUM = "18.0"
+APP_VERSION = "0.1.0"
 
 
 def run(args, *, env=None):
@@ -82,13 +84,14 @@ def build():
     if APP.exists():
         shutil.rmtree(APP)
     APP.mkdir(parents=True)
-    run(["go", "build", "-trimpath", "-tags=tvos,mygo_noinspector", "-ldflags=-s -w",
+    run(["go", "build", "-trimpath", "-tags=tvos,mygo_noinspector",
+         f"-ldflags=-s -w -X main.appVersion={APP_VERSION}",
          "-o", str(APP / "MikuTV"), "."], env=environment)
     info = {
         "CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "MikuTV",
         "CFBundleExecutable": "MikuTV", "CFBundleIdentifier": "dev.yuchanns.MikuTV",
         "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "MikuTV",
-        "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.1.0",
+        "CFBundlePackageType": "APPL", "CFBundleShortVersionString": APP_VERSION,
         "CFBundleVersion": number, "CFBundleSupportedPlatforms": ["AppleTVOS"],
         "UIDeviceFamily": [3], "MinimumOSVersion": MINIMUM,
         "LSRequiresIPhoneOS": True, "UILaunchScreen": {},
@@ -96,7 +99,48 @@ def build():
     (APP / "Info.plist").write_bytes(plistlib.dumps(info))
     (APP / "PkgInfo").write_bytes(b"APPL????")
     shutil.copyfile(ROOT / "resources/PrivacyInfo.xcprivacy", APP / "PrivacyInfo.xcprivacy")
+    bundle_plugins()
     print(APP)
+
+
+def bundle_plugins():
+    destination = APP / "assets/plugins"
+    destination.mkdir(parents=True)
+    records = []
+    for manifest_file in sorted((ROOT / "plugins").glob("*/plugin.json")):
+        package = manifest_file.parent
+        manifest = json.loads(manifest_file.read_text())
+        plugin_id = manifest["id"]
+        if plugin_id != package.name:
+            raise RuntimeError("The plugin ID must match its source directory")
+        target = destination / plugin_id / "plugin.zip"
+        target.parent.mkdir()
+        source_path = str(package.relative_to(ROOT))
+        listed = output(["git", "ls-files", "-z", "--cached", "--others",
+                         "--exclude-standard", "--", source_path])
+        package_files = sorted(set(listed.rstrip("\0").split("\0")))
+        with zipfile.ZipFile(target, "w") as archive:
+            for name in package_files:
+                path = ROOT / name
+                if path.is_symlink():
+                    raise RuntimeError("A bundled plugin cannot contain a symbolic link")
+                if path.is_file():
+                    info = zipfile.ZipInfo(path.relative_to(package).as_posix())
+                    info.create_system = 3
+                    info.external_attr = 0o100644 << 16
+                    archive.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
+        record = {
+            "id": plugin_id,
+            "version": manifest["version"],
+            "appVersion": APP_VERSION,
+            "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+        }
+        if not output(["git", "status", "--porcelain", "--untracked-files=all", "--", source_path]):
+            commit = output(["git", "log", "-1", "--format=%H", "--", source_path])
+            if commit:
+                record["sourceCommit"] = commit
+        records.append(record)
+    (destination / "index.json").write_text(json.dumps(records, indent=2) + "\n")
 
 
 def package():

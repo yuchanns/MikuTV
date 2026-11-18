@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"slices"
+	"strings"
 )
 
 type viewKey struct {
@@ -74,6 +75,9 @@ func (s *State) navigate(route Route, push bool) bool {
 		s.OpenEntries("")
 		return true
 	}
+	if !s.Allows(spec) {
+		return false
+	}
 	if spec.Route == s.Route {
 		return true
 	}
@@ -136,6 +140,46 @@ func (s *State) root() Route {
 		return s.routes.Picker
 	}
 	return s.routes.Root
+}
+
+func (s *State) Allows(spec RouteSpec) bool {
+	if !spec.RequiresEntry && spec.Capability == "" && len(spec.Capabilities) == 0 {
+		return true
+	}
+	entry, ok := s.Current()
+	if !ok {
+		return false
+	}
+	if len(spec.Capabilities) > 0 {
+		for _, cap := range spec.Capabilities {
+			if cap != "" && !entry.Capabilities.Has(cap) {
+				return false
+			}
+		}
+		return true
+	}
+	return spec.Capability == "" || entry.Capabilities.Has(spec.Capability)
+}
+
+func (s *State) canRestore(location Location) bool {
+	spec, ok := s.routes.Resolve(location.Route)
+	return ok && s.Allows(spec)
+}
+
+func (s *State) restoreSession(location Location, history []Location) {
+	if !s.canRestore(location) {
+		root, _ := s.routes.Resolve(s.root())
+		location, history = s.routes.initial(s, root), nil
+	}
+	s.history = slices.DeleteFunc(slices.Clone(history), func(previous Location) bool {
+		return !s.canRestore(previous)
+	})
+	if page, rail := strings.CutPrefix(string(location.Focus), "rail/"); rail &&
+		!s.canRestore(Location{Route: Route{Page: Page(page)}}) {
+		spec, _ := s.routes.Resolve(location.Route)
+		location.Focus, location.Area = s.routes.initial(s, spec).Focus, ContentArea
+	}
+	s.show(location)
 }
 
 func (s *State) location(spec RouteSpec) Location {

@@ -1,6 +1,6 @@
 # 功能实施顺序与提交拆分
 
-本计划基于现有 tvOS 基础、[插件化设计](plugin-architecture.md)和[既定 visual](visual/)。F01 已完成，F02 至 F48 待实施。编号表达功能依赖顺序，不对应 Git 提交总数。
+本计划基于现有 tvOS 基础、[插件化设计](plugin-architecture.md)和[既定 visual](visual/)。F01 与 F02 已完成，F03 至 F48 待实施。编号表达功能依赖顺序，不对应 Git 提交总数。
 
 ## 1. 实施与提交规则
 

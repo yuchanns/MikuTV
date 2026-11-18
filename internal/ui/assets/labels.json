@@ -28,6 +28,13 @@
   "Licenses": "\u5f00\u6e90\u8bb8\u53ef",
   "Close": "\u5173\u95ed",
   "SaveFailed": "\u65e0\u6cd5\u4fdd\u5b58\u5165\u53e3\u9009\u62e9\u3002",
+  "LoadingTitle": "\u6b63\u5728\u52a0\u8f7d",
+  "LoadingNote": "\u6b63\u5728\u8bfb\u53d6\u5f53\u524d\u5165\u53e3\u7684\u5185\u5bb9\u3002",
+  "FailedTitle": "\u52a0\u8f7d\u5931\u8d25",
+  "FailedNote": "\u8bf7\u91cd\u8bd5\u6216\u5207\u6362\u5165\u53e3\u3002",
+  "CanceledTitle": "\u5df2\u53d6\u6d88",
+  "Retry": "\u91cd\u8bd5",
+  "Cancel": "\u53d6\u6d88",
   "Sections": [
     {
       "ID": "playback",

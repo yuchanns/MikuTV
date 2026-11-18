@@ -1,14 +1,23 @@
 package tvui
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/provider"
 	"github.com/yuchanns/MikuTV/internal/theme"
 )
+
+func testEntries() []app.Entry {
+	return []app.Entry{{
+		ID: "test-source", SourceID: "test-source", Name: "Test Source", Available: true,
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.SearchCatalog},
+	}}
+}
 
 type memoryPreferences struct{ value app.Preferences }
 
@@ -27,7 +36,7 @@ func TestNavigationConfirmationReturnsFocusToContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := app.NewState(assets.Entries, assets.Entries[0].ID, pages.Routes)
+	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +67,7 @@ func TestExpandedNavigationPushesContentWithoutReflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := app.NewState(assets.Entries, assets.Entries[0].ID, pages.Routes)
+	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +106,7 @@ func TestSettingsKeepFocusAndModalReturnsToItsTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := app.NewState(assets.Entries, assets.Entries[0].ID, pages.Routes)
+	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,5 +180,97 @@ func TestEmptyEntriesKeepManagementReachable(t *testing.T) {
 	tester.Key(0, ui.KeyEscape)
 	if state.Page != app.Entries || ui.FocusedValue(context, &state.Focus) != app.ManagePlugins {
 		t.Fatal("Back did not restore the empty entry action")
+	}
+}
+
+func TestSourceCapabilitiesHideUnsupportedRoutesAndRailFocus(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := testEntries()
+	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Navigate(app.Route{Page: app.Search}) {
+		t.Fatal("declared capability could not open search")
+	}
+	entries[0].Capabilities = provider.Capabilities{provider.BrowseCatalog}
+	if err := state.SetEntries(entries); err != nil {
+		t.Fatal(err)
+	}
+	if state.Page != app.Home || state.Navigate(app.Route{Page: app.Search}) {
+		t.Fatalf("hidden route kept a focus target: %+v", state.Location)
+	}
+	primary := pages.navigation(state, primaryNavigation)
+	if len(primary) != 1 || primary[0].Policy.Route.Page != app.Home {
+		t.Fatalf("unsupported primary links are still present: %+v", primary)
+	}
+	utility := pages.navigation(state, utilityNavigation)
+	if len(utility) != 2 || utility[0].Policy.Route.Page != app.Entries || utility[1].Policy.Route.Page != app.Settings {
+		t.Fatalf("entry or settings navigation is unavailable: %+v", utility)
+	}
+}
+
+type viewCatalogSession struct {
+	page chan provider.CollectionPage
+}
+
+func (s viewCatalogSession) Browse(context.Context, provider.BrowseRequest) (provider.CollectionPage, error) {
+	return <-s.page, nil
+}
+
+func (viewCatalogSession) Item(context.Context, provider.MediaRef) (provider.MediaItem, error) {
+	return provider.MediaItem{}, nil
+}
+
+func (viewCatalogSession) Close() {}
+
+func TestAsyncCollectionKeepsEntryActionFocused(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := testEntries()
+	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := viewCatalogSession{page: make(chan provider.CollectionPage, 1)}
+	completion := make(chan func(), 1)
+	var frame *ui.Context
+	catalog := app.NewCatalog(func(string) provider.Session { return session }, func(fn func()) { completion <- fn }, func() {
+		if frame != nil {
+			frame.Invalidate()
+		}
+	})
+	defer catalog.Close()
+	view := NewView(Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default()})
+	catalog.Select(entries[0])
+	tester := ui.NewTester(func(c *ui.Context) { frame = c; view.Render(c) }, 1920, 1080)
+	if !tester.Focused(assets.Text.Cancel) {
+		t.Fatal("loading action did not receive focus")
+	}
+	session.page <- provider.CollectionPage{Collections: []provider.Collection{{
+		ID: "catalog", Title: "Catalog",
+		Items: []provider.MediaItem{{Ref: provider.MediaRef{Kind: provider.Series, ID: "series"}, Title: "Show"}},
+	}}}
+	(<-completion)()
+	tester.Frame()
+	if !tester.Focused(assets.Text.SwitchEntry) {
+		t.Fatal("collection replaced the focused action")
+	}
+	tester.Key(0, ui.KeyEnter)
+	if state.Page != app.Entries {
+		t.Fatalf("entry confirmation is unreachable: %+v", state.Location)
 	}
 }

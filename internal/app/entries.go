@@ -4,26 +4,24 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
 type Entry struct {
-	ID          string `json:"id"`
-	SourceID    string `json:"sourceId"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Artwork     string `json:"artwork"`
-	Available   bool   `json:"available"`
-	Generation  uint64 `json:"-"`
+	ID           string                `json:"id"`
+	SourceID     string                `json:"sourceId"`
+	Name         string                `json:"name"`
+	Description  string                `json:"description"`
+	Artwork      string                `json:"artwork"`
+	Available    bool                  `json:"available"`
+	Capabilities provider.Capabilities `json:"capabilities,omitempty"`
+	Generation   uint64                `json:"-"`
 }
 
 func (s *State) SetEntries(entries []Entry) error {
 	seen := make(map[string]bool, len(entries))
-	previous := make(map[string]Entry, len(s.entries))
-	for _, entry := range s.entries {
-		previous[entry.ID] = entry
-	}
-	next := make([]Entry, len(entries))
-	for i, entry := range entries {
+	for _, entry := range entries {
 		if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.SourceID) == "" || strings.TrimSpace(entry.Name) == "" {
 			return fmt.Errorf("entry identity, source and name are required")
 		}
@@ -31,19 +29,11 @@ func (s *State) SetEntries(entries []Entry) error {
 			return fmt.Errorf("duplicate entry identity %q", entry.ID)
 		}
 		seen[entry.ID] = true
-		if old, ok := previous[entry.ID]; ok {
-			if entry.Generation == 0 {
-				entry.Generation = old.Generation
-			}
-			if old.SourceID != entry.SourceID || old.Name != entry.Name ||
-				old.Description != entry.Description || old.Artwork != entry.Artwork ||
-				old.Available != entry.Available {
-				entry.Generation = max(entry.Generation, old.Generation) + 1
-			}
-		}
-		next[i] = entry
 	}
-	s.entries = next
+	s.entries = slices.Clone(entries)
+	for index := range s.entries {
+		s.entries[index].Capabilities = slices.Clone(s.entries[index].Capabilities)
+	}
 	if !s.available(s.CurrentEntry) {
 		s.CurrentEntry = ""
 		s.history = nil
@@ -54,53 +44,10 @@ func (s *State) SetEntries(entries []Entry) error {
 		if !valid {
 			s.Focus = s.PickerFocus()
 		}
+	} else {
+		s.restoreSession(s.Location, s.history)
 	}
 	return nil
-}
-
-// UpdateEntries reconciles hot-added, updated, or removed entries while keeping navigation consistent.
-func (s *State) UpdateEntries(entries []Entry) {
-	previous := make(map[string]Entry, len(s.entries))
-	for _, entry := range s.entries {
-		previous[entry.ID] = entry
-	}
-	next := make([]Entry, 0, len(entries))
-	seen := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.SourceID) == "" || strings.TrimSpace(entry.Name) == "" {
-			continue
-		}
-		if seen[entry.ID] {
-			continue
-		}
-		seen[entry.ID] = true
-		if old, ok := previous[entry.ID]; ok {
-			if entry.Generation == 0 {
-				entry.Generation = old.Generation
-			}
-			if old.SourceID != entry.SourceID || old.Name != entry.Name ||
-				old.Description != entry.Description || old.Artwork != entry.Artwork ||
-				old.Available != entry.Available {
-				entry.Generation = max(entry.Generation, old.Generation) + 1
-			}
-		}
-		next = append(next, entry)
-	}
-	s.entries = next
-	if !s.available(s.CurrentEntry) {
-		s.CurrentEntry = ""
-		s.history = nil
-		spec, _ := s.routes.Resolve(s.routes.Picker)
-		s.show(s.routes.initial(s, spec))
-		return
-	}
-	if s.Route == s.routes.Picker {
-		valid := slices.ContainsFunc(s.entries, func(entry Entry) bool { return entry.Available && EntryFocus(entry.ID) == s.Focus })
-		if !valid {
-			s.Focus = s.PickerFocus()
-			s.Revision++
-		}
-	}
 }
 
 func (s *State) AvailableEntries() []Entry {
@@ -140,8 +87,7 @@ func (s *State) SelectEntry(id string) bool {
 	s.remember()
 	s.CurrentEntry = id
 	if saved, ok := s.sessions[id]; ok {
-		s.history = slices.Clone(saved.history)
-		s.show(saved.Location)
+		s.restoreSession(saved.Location, saved.history)
 	} else {
 		s.history = nil
 		spec, _ := s.routes.Resolve(s.routes.Root)
@@ -164,4 +110,46 @@ func (s *State) PickerFocus() FocusID {
 
 func (s *State) available(id string) bool {
 	return id != "" && slices.ContainsFunc(s.entries, func(entry Entry) bool { return entry.ID == id && entry.Available })
+}
+
+// UpdateEntries reconciles hot-added, updated, or removed entries while keeping navigation consistent.
+func (s *State) UpdateEntries(entries []Entry) {
+	previous := make(map[string]Entry, len(s.entries))
+	for _, entry := range s.entries {
+		previous[entry.ID] = entry
+	}
+	next := make([]Entry, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.SourceID) == "" || strings.TrimSpace(entry.Name) == "" || seen[entry.ID] {
+			continue
+		}
+		seen[entry.ID] = true
+		if old, ok := previous[entry.ID]; ok {
+			if entry.Generation == 0 {
+				entry.Generation = old.Generation
+			}
+			if old.SourceID != entry.SourceID || old.Name != entry.Name ||
+				old.Description != entry.Description || old.Artwork != entry.Artwork ||
+				old.Available != entry.Available || !slices.Equal(old.Capabilities, entry.Capabilities) {
+				entry.Generation = max(entry.Generation, old.Generation) + 1
+			}
+		}
+		next = append(next, entry)
+	}
+	s.entries = next
+	if !s.available(s.CurrentEntry) {
+		s.CurrentEntry = ""
+		s.history = nil
+		spec, _ := s.routes.Resolve(s.routes.Picker)
+		s.show(s.routes.initial(s, spec))
+		return
+	}
+	if s.Route == s.routes.Picker {
+		valid := slices.ContainsFunc(s.entries, func(entry Entry) bool { return entry.Available && EntryFocus(entry.ID) == s.Focus })
+		if !valid {
+			s.Focus = s.PickerFocus()
+			s.Revision++
+		}
+	}
 }

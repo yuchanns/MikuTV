@@ -5,6 +5,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
 type Component interface {
@@ -46,28 +47,29 @@ type Pages struct {
 
 func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	focus := func(id app.FocusID) app.Position { return app.Position{Focus: id} }
-	content := func(page app.Page, initial app.Position) Registration {
+	content := func(page app.Page, capability provider.Capability) Registration {
 		return Registration{
-			Policy:    app.RouteSpec{Route: app.Route{Page: page}, Initial: initial, ContentFocus: app.ContentAction, RequiresEntry: true},
+			Policy:    app.RouteSpec{Route: app.Route{Page: page}, Initial: focus(app.ContentAction), ContentFocus: app.ContentAction, RequiresEntry: true, Capability: capability},
 			Component: contentPage{}, Title: assets.Text.Nav[page],
 			Navigation: &NavigationLink{Title: assets.Text.Nav[page], Icon: string(page)},
 		}
 	}
-	home := content(app.Home, focus(app.ContentAction))
+	home := content(app.Home, "")
+	home.Component = catalogPage{}
 	home.Policy.ExitFocus = app.RailFocus(app.Home)
 	registrations := []Registration{
 		home,
-		content(app.Search, focus(app.ContentAction)),
-		content(app.Following, focus(app.ContentAction)),
-		content(app.Series, focus(app.ContentAction)),
-		content(app.Live, focus(app.ContentAction)),
-		content(app.Library, focus(app.ContentAction)),
+		content(app.Search, provider.SearchCatalog),
+		content(app.Following, provider.BrowseFollowing),
+		content(app.Series, provider.BrowseSeries),
+		content(app.Live, provider.BrowseLive),
+		content(app.Library, provider.BrowseLibrary),
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.Entries}, Transient: true, ResolveFocus: func(s *app.State) app.FocusID { return s.PickerFocus() }},
 			Component: entriesPage{}, Navigation: &NavigationLink{Title: assets.Text.Nav[app.Entries], Icon: "switch", Placement: utilityNavigation}},
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.Settings}, Redirect: app.Route{Page: app.Settings, Section: "playback"}},
 			Component: settingsLayout{}, Navigation: &NavigationLink{Title: assets.Text.Nav[app.Settings], Icon: "settings", Placement: utilityNavigation}},
 	}
-	account := content(app.Account, focus(app.ContentAction))
+	account := content(app.Account, provider.SignIn)
 	account.Navigation.Icon, account.Navigation.Placement = "user", utilityNavigation
 	registrations = append(registrations, account)
 	settings := map[string]Component{
@@ -115,7 +117,7 @@ func (p *Pages) navigation(state *app.State, placement navPlacement) []Registrat
 			continue
 		}
 		policy, _ := p.Routes.Resolve(registration.Policy.Route)
-		if policy.RequiresEntry && state.CurrentEntry == "" {
+		if !state.Allows(policy) {
 			continue
 		}
 		links = append(links, registration)
