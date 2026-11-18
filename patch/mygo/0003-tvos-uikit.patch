@@ -1,19 +1,19 @@
-diff --git a/backend_darwin.go b/backend_darwin.go
-index d65ac3e..9d03d40 100644
---- a/backend_darwin.go
-+++ b/backend_darwin.go
+diff --git a/backend_mobile.go b/backend_mobile.go
+index 3a67b15..e34cfd2 100644
+--- a/backend_mobile.go
++++ b/backend_mobile.go
 @@ -1,4 +1,4 @@
--//go:build darwin
-+//go:build darwin && !ios
+-//go:build ios || android
++//go:build (ios && !tvos) || android
  
  package mygo
  
 diff --git a/backend_tvos.go b/backend_tvos.go
 new file mode 100644
-index 0000000..0966a23
+index 0000000..2cf4892
 --- /dev/null
 +++ b/backend_tvos.go
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,10 @@
 +//go:build ios && tvos && arm64
 +
 +package mygo
@@ -24,19 +24,12 @@ index 0000000..0966a23
 +)
 +
 +func newBackend() platform.Backend { return tvos.New() }
-+
-+func enableNotificationSenders() {}
-+func linkNotificationImages()    {}
-+func linkContentRules()          {}
-+func linkNowPlaying()            {}
-+func linkMenuIcons()             {}
-+func linkContextMenus()          {}
 diff --git a/internal/tvos/app.go b/internal/tvos/app.go
 new file mode 100644
 index 0000000..1b12a76
 --- /dev/null
 +++ b/internal/tvos/app.go
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,165 @@
 +//go:build ios && tvos && arm64
 +
 +// Package tvos implements the single-window UIKit backend using Go and purego.
@@ -102,7 +95,7 @@ index 0000000..1b12a76
 +}
 +
 +func (b *Backend) Wake() { b.Signal() }
-+func (*Backend) Step()   { native.runMode(native.defaultMode, 60, true) }
++func (*Backend) Step()   { native.runMode(native.defaultMode, 0.05, true) }
 +
 +func (b *Backend) registerClasses() error {
 +	if err := register("MyGoTVAppDelegate", "UIResponder", []objc.MethodDef{
@@ -138,8 +131,20 @@ index 0000000..1b12a76
 +			}
 +			b.h.DidResignActive()
 +		}},
-+		{Cmd: sel("applicationDidEnterBackground:"), Fn: func(id, objc.SEL, id) { b.h.PowerEvent("suspend") }},
++		{Cmd: sel("applicationDidEnterBackground:"), Fn: func(id, objc.SEL, id) {
++			if b.window != nil {
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceHidden})
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceLowMemory})
++			}
++			b.h.PowerEvent("suspend")
++		}},
 +		{Cmd: sel("applicationWillEnterForeground:"), Fn: func(id, objc.SEL, id) { b.h.PowerEvent("resume") }},
++		{Cmd: sel("applicationDidReceiveMemoryWarning:"), Fn: func(id, objc.SEL, id) {
++			b.h.MemoryWarning()
++			if b.window != nil {
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceLowMemory})
++			}
++		}},
 +		{Cmd: sel("applicationWillTerminate:"), Fn: func(id, objc.SEL, id) { b.h.Terminating() }},
 +	}); err != nil {
 +		return err
@@ -307,7 +312,7 @@ new file mode 100644
 index 0000000..d65692f
 --- /dev/null
 +++ b/internal/tvos/objc.go
-@@ -0,0 +1,111 @@
+@@ -0,0 +1,149 @@
 +//go:build ios && tvos && arm64
 +
 +package tvos
@@ -315,6 +320,7 @@ index 0000000..d65692f
 +import (
 +	"fmt"
 +	"runtime"
++	"sync"
 +	"unsafe"
 +
 +	"github.com/ebitengine/purego"
@@ -340,7 +346,15 @@ index 0000000..d65692f
 +	commonModes     uintptr
 +	defaultMode     uintptr
 +	superSend       uintptr
++	getFloat64      func(id, objc.SEL) float64
 +}
++
++var (
++	selMu      sync.RWMutex
++	selCache   = make(map[string]objc.SEL)
++	classMu    sync.RWMutex
++	classCache = make(map[string]id)
++)
 +
 +func load() error {
 +	libraries := make(map[string]uintptr)
@@ -366,6 +380,7 @@ index 0000000..d65692f
 +		return err
 +	}
 +	purego.RegisterLibFunc(&native.applicationMain, ui, "UIApplicationMain")
++	purego.RegisterLibFunc(&native.getFloat64, libobjc, "objc_msgSend")
 +	purego.RegisterLibFunc(&native.mainThread, libraries["/usr/lib/libSystem.B.dylib"], "pthread_main_np")
 +	purego.RegisterLibFunc(&native.mainLoop, cf, "CFRunLoopGetMain")
 +	purego.RegisterLibFunc(&native.sourceCreate, cf, "CFRunLoopSourceCreate")
@@ -389,9 +404,37 @@ index 0000000..d65692f
 +	return nil
 +}
 +
-+func sel(name string) objc.SEL { return objc.RegisterName(name) }
-+func class(name string) id     { return id(objc.GetClass(name)) }
-+func alloc(name string) id     { return send(send(class(name), "alloc"), "init") }
++func sel(name string) objc.SEL {
++	selMu.RLock()
++	s, ok := selCache[name]
++	selMu.RUnlock()
++	if ok {
++		return s
++	}
++	s = objc.RegisterName(name)
++	selMu.Lock()
++	selCache[name] = s
++	selMu.Unlock()
++	return s
++}
++
++func class(name string) id {
++	classMu.RLock()
++	c, ok := classCache[name]
++	classMu.RUnlock()
++	if ok {
++		return c
++	}
++	c = id(objc.GetClass(name))
++	if c != 0 {
++		classMu.Lock()
++		classCache[name] = c
++		classMu.Unlock()
++	}
++	return c
++}
++
++func alloc(name string) id { return send(send(class(name), "alloc"), "init") }
 +
 +func send(object id, method string, args ...any) id {
 +	return object.Send(sel(method), args...)
@@ -483,7 +526,7 @@ new file mode 100644
 index 0000000..69f03bb
 --- /dev/null
 +++ b/internal/tvos/window.go
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,151 @@
 +//go:build ios && tvos && arm64
 +
 +package tvos
@@ -492,7 +535,6 @@ index 0000000..69f03bb
 +	"errors"
 +	"fmt"
 +
-+	"github.com/ebitengine/purego/objc"
 +	"github.com/egoist/mygo/internal/platform"
 +	"github.com/egoist/mygo/transfer"
 +)
@@ -590,7 +632,7 @@ index 0000000..69f03bb
 +func (w *window) Size() (width, height, scale float64) {
 +	bounds := native.getRect(w.view, sel("bounds"))
 +	screen := send(class("UIScreen"), "mainScreen")
-+	scale = objc.Send[float64](screen, sel("scale"))
++	scale = native.getFloat64(screen, sel("scale"))
 +	return bounds.Width, bounds.Height, scale
 +}
 +
@@ -636,23 +678,3 @@ index 0000000..69f03bb
 +var _ platform.Backend = (*Backend)(nil)
 +var _ platform.Window = (*window)(nil)
 +var _ platform.Surface = (*window)(nil)
-diff --git a/pdf_text_darwin.go b/pdf_text_darwin.go
-index f105214..099c2a9 100644
---- a/pdf_text_darwin.go
-+++ b/pdf_text_darwin.go
-@@ -1,4 +1,4 @@
--//go:build darwin
-+//go:build darwin && !ios
- 
- package mygo
- 
-diff --git a/pdf_text_other.go b/pdf_text_other.go
-index 92cce11..38f6f4c 100644
---- a/pdf_text_other.go
-+++ b/pdf_text_other.go
-@@ -1,4 +1,4 @@
--//go:build !darwin
-+//go:build !darwin || ios
- 
- package mygo
- 
