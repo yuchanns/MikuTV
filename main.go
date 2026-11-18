@@ -39,6 +39,12 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		var credentials app.CredentialStore
+		if keychain, err := platform.NewCredentialKeychain(); err == nil {
+			credentials = keychain
+		} else {
+			log.Printf("credential store unavailable: %v", err)
+		}
 		saved, err := preferences.Load()
 		if err != nil {
 			log.Print(err)
@@ -53,7 +59,8 @@ func main() {
 		for _, source := range sources {
 			info := source.Manifest()
 			entry := app.Entry{ID: info.ID, SourceID: info.ID, Name: info.Name,
-				Description: info.Description, Artwork: info.ID, Available: true, Capabilities: source.Capabilities()}
+				Description: info.Description, Artwork: info.ID, Available: true,
+				Capabilities: source.Capabilities(), Auth: source.AuthPresentation()}
 			store, err := plugin.NewStorage(preferences.LoadPluginStorage(entry.SourceID, entry.ID), func(data []byte) error {
 				return preferences.SavePluginStorage(entry.SourceID, entry.ID, data)
 			})
@@ -64,23 +71,34 @@ func main() {
 			installed[entry.ID], stores[entry.ID] = source, store
 			entries = append(entries, entry)
 			assets.PrepareArtwork(entry.Artwork, source.Cover())
+			assets.PrepareAccountArtwork(entry.ID, source.AuthArtwork())
 		}
 		state, err := app.NewState(entries, saved.RecentEntry, pages.Routes)
 		if err != nil {
 			log.Fatal(err)
 		}
 		var window *mygo.Window
+		invalidate := func() {
+			if window != nil {
+				window.Invalidate()
+			}
+		}
 		catalog := app.NewCatalog(func(entryID string) provider.Session {
 			if source := installed[entryID]; source != nil {
 				return source.NewSession(entryID, stores[entryID])
 			}
 			return nil
-		}, mygo.RunOnMain, func() {
-			if window != nil {
-				window.Invalidate()
+		}, mygo.RunOnMain, invalidate)
+		activity := app.NewAccountActivity(preferences, mygo.RunOnMain, invalidate)
+		var view *tvui.View
+		auth := app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
+			catalog.Reload()
+			activity.Close()
+			if view != nil {
+				view.SyncAccountActivity()
 			}
 		})
-		view := tvui.NewView(tvui.Options{State: state, Catalog: catalog, Pages: pages, Assets: assets,
+		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Auth: auth, Activity: activity, Pages: pages, Assets: assets,
 			Preferences: preferences, Theme: theme.Default(), Version: appVersion})
 		view.Trace = os.Getenv("MIKUTV_NAV_TRACE") == "1"
 		if view.Trace {
@@ -91,9 +109,12 @@ func main() {
 			Content: ui.View(view.Render),
 		})
 		window.OnReadyToShow(func() { log.Print("MikuTV: first frame ready") })
-		entry, _ := state.Current()
-		catalog.Select(entry)
-		mygo.App.OnQuit(catalog.Close)
+		view.SyncEntry()
+		mygo.App.OnQuit(func() {
+			activity.Close()
+			auth.Close()
+			catalog.Close()
+		})
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

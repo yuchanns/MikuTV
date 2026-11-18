@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MoeForge/moejs"
@@ -29,14 +30,23 @@ type Session struct {
 	client  *http.Client
 	context context.Context
 	cancel  context.CancelFunc
+
+	requests  sync.RWMutex
+	active    *http.Client
+	accountID string
+	secret    json.RawMessage
+	scope     context.Context
+	stop      context.CancelFunc
 }
 
 // NewSession gives an entry its own cookies, storage and cancellation scope.
 func (s *Source) NewSession(entryID string, storage *Storage) *Session {
 	ctx, cancel := context.WithCancel(context.Background())
+	scope, stop := context.WithCancel(ctx)
+	client := s.httpClient()
 	return &Session{
-		source: s, entryID: entryID, storage: storage, client: s.httpClient(),
-		context: ctx, cancel: cancel,
+		source: s, entryID: entryID, storage: storage, client: client,
+		context: ctx, cancel: cancel, active: client, scope: scope, stop: stop,
 	}
 }
 
@@ -50,7 +60,7 @@ func (s *Session) Close() {
 func (s *Source) Verify(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	_, err := s.execute(ctx, nil, nil, "", nil)
+	_, err := s.execute(ctx, nil, nil, "", nil, false)
 	return err
 }
 
@@ -101,22 +111,116 @@ func (s *Session) ownItem(item *provider.MediaItem) error {
 }
 
 func (s *Session) call(ctx context.Context, op provider.Capability, request, result any) error {
+	s.requests.RLock()
+	client, scope := s.active, s.scope
+	s.requests.RUnlock()
+	return s.invoke(ctx, scope, client, op, operations[op][0], request, result)
+}
+
+func (s *Session) ReadAccount(ctx context.Context, request provider.AccountRequest) (provider.AccountPage, error) {
+	if !request.AccountQuery.Valid() || len(request.Folder) > 512 || len(request.Cursor) > 4096 {
+		return provider.AccountPage{}, &provider.Error{Code: provider.Denied}
+	}
+	s.requests.RLock()
+	client, scope, accountID := s.active, s.scope, s.accountID
+	s.requests.RUnlock()
+	if accountID == "" {
+		return provider.AccountPage{}, &provider.Error{Code: provider.NeedsSignIn}
+	}
+	input := struct {
+		provider.AccountRequest
+		Owner string `json:"owner"`
+	}{request, accountID}
+	var page provider.AccountPage
+	if err := s.invoke(ctx, scope, client, request.Section.Capability(), "readAccount", input, &page); err != nil {
+		return provider.AccountPage{}, err
+	}
+	if len(page.NextCursor) > 4096 || page.Total != nil && *page.Total < 0 || page.Unread != nil && *page.Unread < 0 {
+		return provider.AccountPage{}, &provider.Error{Code: provider.PluginFailed}
+	}
+	for index := range page.Rows {
+		row := &page.Rows[index]
+		if row.ID == "" || strings.TrimSpace(row.Title) == "" || row.Count != nil && *row.Count < 0 {
+			return provider.AccountPage{}, &provider.Error{Code: provider.PluginFailed}
+		}
+		if row.DurationSeconds != nil && *row.DurationSeconds < 0 || row.Views != nil && *row.Views < 0 ||
+			row.ProgressSeconds != nil && *row.ProgressSeconds < -1 {
+			return provider.AccountPage{}, &provider.Error{Code: provider.PluginFailed}
+		}
+		if row.CreatorAvatarURL != "" && httpsURL(row.CreatorAvatarURL) == nil {
+			row.CreatorAvatarURL = ""
+		}
+		if row.Ref != nil {
+			if !row.Ref.Kind.Valid() || row.Ref.ID == "" {
+				return provider.AccountPage{}, &provider.Error{Code: provider.PluginFailed}
+			}
+			row.Ref.EntryID = s.entryID
+		}
+	}
+	return page, nil
+}
+
+func (s *Session) EditFavoriteFolder(ctx context.Context, edit provider.FavoriteFolderEdit) error {
+	if !edit.Valid() {
+		return &provider.Error{Code: provider.Denied}
+	}
+	s.requests.RLock()
+	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
+	s.requests.RUnlock()
+	if owner == "" {
+		return &provider.Error{Code: provider.NeedsSignIn}
+	}
+	request := struct {
+		provider.FavoriteFolderEdit
+		Owner  string          `json:"owner"`
+		Secret json.RawMessage `json:"secret"`
+	}{edit, owner, secret}
+	var result struct{}
+	return s.invoke(ctx, scope, client, provider.EditFavoriteFolders, "editFavoriteFolder", request, &result)
+}
+
+func (s *Session) RemoveAccountItems(ctx context.Context, section provider.AccountSection, ids []string) error {
+	capability := section.RemoveCapability()
+	if capability == "" || len(ids) == 0 || len(ids) > 20 {
+		return &provider.Error{Code: provider.Denied}
+	}
+	for _, id := range ids {
+		if id == "" || len(id) > 512 {
+			return &provider.Error{Code: provider.Denied}
+		}
+	}
+	s.requests.RLock()
+	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
+	s.requests.RUnlock()
+	if owner == "" {
+		return &provider.Error{Code: provider.NeedsSignIn}
+	}
+	input := struct {
+		Section provider.AccountSection `json:"section"`
+		IDs     []string                `json:"ids"`
+		Secret  json.RawMessage         `json:"secret"`
+	}{section, ids, secret}
+	var result struct{}
+	return s.invoke(ctx, scope, client, capability, "removeAccountItems", input, &result)
+}
+
+func (s *Session) invoke(ctx, scope context.Context, client *http.Client, op provider.Capability, export string, request, result any) error {
 	if !s.source.manifest.Capabilities.Has(op) {
 		return &provider.Error{Code: provider.Unsupported}
 	}
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	stop := context.AfterFunc(s.context, cancel)
+	stop := context.AfterFunc(scope, cancel)
 	defer stop()
-	if s.context.Err() != nil {
+	if scope.Err() != nil {
 		return context.Canceled
 	}
 	params, err := json.Marshal(request)
 	if err != nil {
 		return &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
-	data, err := s.source.execute(ctx, s.client, s.storage, operations[op], params)
-	if s.context.Err() != nil {
+	data, err := s.source.execute(ctx, client, s.storage, export, params, strings.HasPrefix(string(op), "account."))
+	if scope.Err() != nil {
 		return context.Canceled
 	}
 	if err != nil {
@@ -152,7 +256,7 @@ var invokeScript = func() *moejs.Script {
 
 // Each operation owns its loop. Stopping it cannot interrupt a different call,
 // and a completed call cannot leave its timers or promises running.
-func (s *Source) execute(ctx context.Context, client *http.Client, store *Storage, export string, params []byte) ([]byte, error) {
+func (s *Source) execute(ctx context.Context, client *http.Client, store *Storage, export string, params []byte, secure bool) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -162,7 +266,7 @@ func (s *Source) execute(ctx context.Context, client *http.Client, store *Storag
 		return nil, &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
 	defer loop.Terminate()
-	opts := webapi.Options{Context: ctx, Client: client, Allow: s.allowRequest()}
+	opts := webapi.Options{Context: ctx, Client: client, Allow: s.allowRequest(secure)}
 	api, err := webapi.Install(loop, opts)
 	if err != nil {
 		return nil, &provider.Error{Code: provider.PluginFailed, Cause: err}
@@ -181,9 +285,10 @@ func (s *Source) execute(ctx context.Context, client *http.Client, store *Storag
 			return err
 		}
 		for _, capability := range s.manifest.Capabilities {
-			name := operations[capability]
-			if value, ok := rt.Export(name); !ok || !value.IsObject() || !value.AsObject().IsCallable() {
-				return fmt.Errorf("%w: %s is not callable", ErrIncompatible, name)
+			for _, name := range operations[capability] {
+				if value, ok := rt.Export(name); !ok || !value.IsObject() || !value.AsObject().IsCallable() {
+					return fmt.Errorf("%w: %s is not callable", ErrIncompatible, name)
+				}
 			}
 		}
 		if export == "" {

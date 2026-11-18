@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"image"
 	"slices"
 )
 
@@ -58,6 +59,8 @@ type MediaItem struct {
 	Title    string   `json:"title"`
 	Subtitle string   `json:"subtitle,omitempty"`
 	Creator  *Creator `json:"creator,omitempty"`
+	Views    *int64   `json:"views,omitempty"`
+	Quality  string   `json:"quality,omitempty"`
 }
 
 type Collection struct {
@@ -85,4 +88,12 @@ type Catalog interface {
 type Session interface {
 	Catalog
 	Close()
+}
+
+type CatalogArtworkLoader interface {
+	LoadCatalogArtwork(context.Context, string) (image.Image, error)
+}
+
+type CatalogBackdropLoader interface {
+	LoadCatalogBackdrop(context.Context, string) (image.Image, error)
 }

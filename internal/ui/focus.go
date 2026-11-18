@@ -115,10 +115,7 @@ func (v *View) bind(element ui.Element, id app.FocusID, group string, active boo
 		case ui.KeyDown:
 			v.dispatch(func() { v.move(app.Down) })
 		case ui.KeyEscape:
-			if !v.State.CanGoBack() {
-				return false
-			}
-			v.dispatch(func() { v.State.Back() })
+			return v.goBack()
 		default:
 			return false
 		}

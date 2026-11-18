@@ -1301,6 +1301,8 @@ window.CONTENT = {
     "folderName": "名称",
     "namePlaceholder": "给收藏夹起个名字",
     "deleteFolder": "删除收藏夹",
+    "removeConfirm": "确定从当前收藏夹移出 %d 个视频？",
+    "confirmRemove": "移除",
     "deleteTitle": "删除这个收藏夹？",
     "deleteBody": "收藏夹内的收藏记录会一并移除，视频内容不受影响。",
     "required": "请输入收藏夹名称",

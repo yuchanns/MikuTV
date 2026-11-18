@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
 //go:embed assets
@@ -21,10 +22,44 @@ type labels struct {
 	EntriesTitle, EntriesNote, CurrentEntry, EmptyEntries, EmptyEntryNote string
 	Manage, EmptyTitle, EmptyNote, SwitchEntry                            string
 	LoadingTitle, LoadingNote, FailedTitle, FailedNote                    string
-	CanceledTitle, Retry, Cancel                                          string
+	CanceledTitle, Retry, Cancel, Refresh                                 string
 	SettingsTitle, SettingsNote, EmptySettings                            string
 	Version, Platform, AboutNote, Licenses, Close, SaveFailed             string
 	Sections                                                              []section
+	Auth                                                                  authLabels
+	Activity                                                              accountActivityLabels
+}
+
+type accountActivityLabels struct {
+	History, Favorites, WatchLater, Messages, MessagesNote, MessagesUnread  string
+	NotificationTab, PrivateMessageTab, ReadAllNotices                      string
+	RefreshingRights, RefreshedRights                                       string
+	All, Replies, Likes, System                                             string
+	SyncOn, SyncOff, SyncNote, SyncAction                                   string
+	HistorySync, HistorySyncNote, Enabled, Disabled                         string
+	PrivacyIntro                                                            string
+	More, Unavailable, SignInNeeded, SignInAction                           string
+	FavoritesTitle, FavoritesNote, FoldersBack, FolderContents              string
+	FolderCount, FolderPrivate, FolderPublic, FolderViews                   string
+	CreateFolder, FolderSettings, EditFolder, DeleteFolder                  string
+	FolderName, FolderNamePlaceholder, FolderNameRequired, FolderDuplicate  string
+	PrivateFolder, SaveFolder, ManageFolder, DoneManaging                   string
+	CancelFolder                                                            string
+	SelectedFavorites, SelectAll, ClearSelection                            string
+	DeleteFolderTitle, DeleteFolderNote, RemoveFavoritesNote, SavingFolder  string
+	LibraryHistory, Tracking, Courses, PlayAll, DiscoverContent             string
+	LibraryGuestTitle, LibraryGuestNote, LibraryUnavailable, RemoveSelected string
+	ConfirmRemove                                                           string
+	LibraryEmpty                                                            map[provider.AccountSection]struct{ Title, Note string }
+}
+
+type authLabels struct {
+	Body, QR, Waiting, Scanned, PhoneConfirm, Secure                string
+	Success, Continuing, Expired, ExpiredBody, Refresh, Loading     string
+	Accounts, AccountsNote, Add, SignOut, SignOutTitle, SignOutNote string
+	Failed, NetworkFailed, AccountExpired                           string
+	AccountTitle, ScanLogin                                         string
+	Connected, AccountStatus, AccountNormal, SignOutCancel          string
 }
 
 type Assets struct {
@@ -86,6 +121,14 @@ func (a *Assets) PrepareArtwork(key string, data []byte) {
 	if len(data) != 0 {
 		a.images[key], _ = ui.DecodeImage(data)
 	}
+}
+
+func (a *Assets) PrepareAccountArtwork(entryID string, data []byte) {
+	a.PrepareArtwork("account/"+entryID, data)
+}
+
+func (a *Assets) AccountArtwork(entryID string) ui.ImageSource {
+	return a.Artwork("account/" + entryID)
 }
 
 func (a *Assets) Icon(name string) *ui.SVG {

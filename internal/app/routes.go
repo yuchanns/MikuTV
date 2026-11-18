@@ -9,16 +9,21 @@ import (
 type Page string
 
 const (
-	Entries   Page = "entries"
-	Home      Page = "home"
-	Search    Page = "search"
-	Following Page = "following"
-	Series    Page = "series"
-	Live      Page = "live"
-	Library   Page = "library"
-	Settings  Page = "settings"
-	Account   Page = "account"
-	Licenses  Page = "licenses"
+	Entries         Page = "entries"
+	Home            Page = "home"
+	Search          Page = "search"
+	Following       Page = "following"
+	Series          Page = "series"
+	Live            Page = "live"
+	Library         Page = "library"
+	Settings        Page = "settings"
+	Account         Page = "account"
+	AccountDetails  Page = "accountDetails"
+	AccountMessages Page = "accountMessages"
+	AccountPicker   Page = "accountPicker"
+	SignInQR        Page = "signInQR"
+	SignOut         Page = "signOut"
+	Licenses        Page = "licenses"
 )
 
 type FocusID string
@@ -29,11 +34,22 @@ const (
 	ShowLicenses  FocusID = "about/licenses"
 	LicenseText   FocusID = "licenses/text"
 	CloseModal    FocusID = "modal/close"
+	AccountAction FocusID = "account/action"
+	AccountInfo   FocusID = "account/info"
+	AccountInbox  FocusID = "account/messages"
+	AccountSync   FocusID = "account/sync"
+	HistorySync   FocusID = "settings/history-sync"
+	AccountSwitch FocusID = "account/switch"
+	AccountAdd    FocusID = "account/add"
+	AccountExit   FocusID = "account/exit"
+	QRAction      FocusID = "auth/qr"
+	ConfirmExit   FocusID = "auth/sign-out"
 )
 
 func RailFocus(page Page) FocusID    { return FocusID("rail/" + page) }
 func EntryFocus(id string) FocusID   { return FocusID("entry/" + id) }
 func SectionFocus(id string) FocusID { return FocusID("section/" + id) }
+func AccountFocus(id string) FocusID { return FocusID("account/saved/" + id) }
 
 type Route struct {
 	Page    Page

@@ -111,7 +111,6 @@ func TestCompileAndActivationAreSeparate(t *testing.T) {
 	data := zipFiles(t, map[string][]byte{
 		"plugin.json": manifestForTest(t, func(m *sourceManifest) {
 			m.Artwork.Cover = "assets/cover.png"
-			m.Authentication.Methods = []string{"qrCode"}
 		}),
 		"index.js":         []byte("export { browse } from './src/catalog.js'"),
 		"src/catalog.js":   []byte("export function browse() { return { collections: [] }; }"),

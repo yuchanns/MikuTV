@@ -59,6 +59,10 @@ func (navigationRail) Render(c *ui.Context, p *PageContext) {
 
 func (p *PageContext) railButton(c *ui.Context, registration Registration, width float32, expanded bool) {
 	link := registration.Navigation
+	label := link.Title
+	if link.Label != nil {
+		label = link.Label(p)
+	}
 	page := registration.Policy.Route.Page
 	id := app.RailFocus(page)
 	colors := p.Theme.Colors
@@ -71,7 +75,7 @@ func (p *PageContext) railButton(c *ui.Context, registration Registration, width
 	}
 	e := ui.Button(c.Key(string(id)), "").Width(width).Height(66).Padding(0, 12).
 		Radius(16).Border(0, ui.Transparent).Background(background).TextColor(foreground).
-		Label(link.Title).
+		Label(label).
 		OnClick(func() {
 			p.dispatch(func() {
 				if p.State.Navigate(registration.Policy.Route) {
@@ -87,8 +91,14 @@ func (p *PageContext) railButton(c *ui.Context, registration Registration, width
 	opacity = e.AnimateTo("label", opacity, ui.Animation{Duration: focusDuration, NonMotion: true})
 	e.Children(func() {
 		ui.Row(c).Fill().Gap(16).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(40, 40).Center().Children(func() { ui.Icon(c, p.Assets.Icon(link.Icon)).Size(26, 26) })
-			ui.Text(c, link.Title).Width(180).MaxLines(1).FontSize(22).Opacity(opacity)
+			ui.Box(c).Size(40, 40).Center().Children(func() {
+				if link.Symbol != nil {
+					link.Symbol(c, p)
+				} else {
+					ui.Icon(c, p.Assets.Icon(link.Icon)).Size(26, 26)
+				}
+			})
+			ui.Text(c, label).Width(180).MaxLines(1).FontSize(22).Opacity(opacity)
 		})
 	})
 	p.bind(e, id, "rail")

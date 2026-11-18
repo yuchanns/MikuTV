@@ -44,7 +44,8 @@ type sourceManifest struct {
 	Manifest
 	Main           string `json:"main"`
 	Authentication struct {
-		Methods []string `json:"methods,omitempty"`
+		Methods      []string                  `json:"methods,omitempty"`
+		Presentation provider.AuthPresentation `json:"presentation,omitzero"`
 	} `json:"authentication,omitempty"`
 	Permissions struct {
 		Network []string `json:"network,omitempty"`
@@ -111,6 +112,23 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 		if slices.Contains(manifest.Authentication.Methods[:i], method) {
 			return sourceManifest{}, fmt.Errorf("duplicate authentication method")
 		}
+	}
+	if manifest.Capabilities.Has(provider.SignIn) != (len(manifest.Authentication.Methods) != 0) {
+		return sourceManifest{}, fmt.Errorf("%w: sign-in capability and authentication method must be declared together", ErrIncompatible)
+	}
+	if manifest.Capabilities.Has(provider.BrowseLibrary) && !manifest.Capabilities.Has(provider.SignIn) {
+		return sourceManifest{}, fmt.Errorf("%w: %s requires sign-in", ErrIncompatible, provider.BrowseLibrary)
+	}
+	for _, section := range []provider.AccountSection{provider.AccountHistory, provider.AccountWatchLater, provider.AccountFavorites, provider.AccountTracking, provider.AccountCourses, provider.AccountNotifications} {
+		if manifest.Capabilities.Has(section.Capability()) && !manifest.Capabilities.Has(provider.SignIn) {
+			return sourceManifest{}, fmt.Errorf("%w: %s requires sign-in", ErrIncompatible, section.Capability())
+		}
+		if write := section.RemoveCapability(); write != "" && manifest.Capabilities.Has(write) && !manifest.Capabilities.Has(section.Capability()) {
+			return sourceManifest{}, fmt.Errorf("%w: %s requires %s", ErrIncompatible, write, section.Capability())
+		}
+	}
+	if manifest.Capabilities.Has(provider.EditFavoriteFolders) && !manifest.Capabilities.Has(provider.AccountFavorites.Capability()) {
+		return sourceManifest{}, fmt.Errorf("%w: %s requires favorite folders", ErrIncompatible, provider.EditFavoriteFolders)
 	}
 	for i, host := range manifest.Permissions.Network {
 		host = strings.ToLower(host)

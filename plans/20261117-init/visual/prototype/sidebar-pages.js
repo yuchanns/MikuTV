@@ -50,6 +50,25 @@ window.createSidebarPages = ({content:C,state,icon,escape:e,button,header,modal,
     return `${header()}${title(A.title,A.subtitle)}${button(C.community.title+(unreadMessages()?' · '+unreadMessages():''),'community-messages','account-notifications secondary','comment')}<div class="account-layout"><section class="account-profile"><div class="account-identity"><div class="account-avatar">${e(state.accountInitial||'H')}</div><div><span class="account-overline">${e(A.connected)}</span><h2>${e(state.accountName||C.nav.account)}</h2><span class="account-tier">${icon(state.member?'sparkles':'user')}${e(state.member?A.vip:A.normal)}</span></div></div>${button(A.switch,'side-login','account-switch','user')}<div class="account-shortcuts">${A.shortcuts.map(([id,label,glyph])=>`<button class="focusable" data-action="side-library:${id}">${icon(glyph)}<strong>${counts[id]}</strong><span>${e(label)}</span></button>`).join('')}</div></section><section class="membership-card"><div class="membership-heading">${icon('sparkles')}<span>${e(A.vip)}</span></div><h2>${e(A.memberTitle)}</h2><ul>${A.memberBenefits.map(text=>`<li>${icon('check')}${e(text)}</li>`).join('')}</ul>${button(state.member?A.memberActive:A.memberAction,'side-membership','membership-action')}</section></div><section class="account-sync"><div><span class="account-sync-icon">${icon('history')}</span><div><h3>${e(model.sync?A.syncOn:A.syncOff)}</h3><p>${e(A.syncBody)}</p></div></div>${button(A.syncAction,'side-sync','secondary','settings')}</section><div class="account-bottom"><span><i></i>${e(A.status)} · ${e(A.statusValue)}</span>${button(A.logout,'side-logout','account-logout','logout')}</div>`;
   }
   function refresh(action){renderPage(action);}
+  function accountFocus(action,direction){
+    if(!state.account)return '';
+    const shortcuts=A.shortcuts.map(([id])=>'side-library:'+id);
+    const index=shortcuts.indexOf(action);
+    if(index>=0){
+      if(direction==='ArrowUp')return 'side-login';
+      if(direction==='ArrowDown')return 'side-sync';
+      if(direction==='ArrowLeft')return shortcuts[index-1]||'nav:account';
+      return shortcuts[index+1]||'';
+    }
+    return {
+      'community-messages':{ArrowDown:'side-login',ArrowLeft:'nav:account'},
+      'side-login':{ArrowUp:'community-messages',ArrowDown:shortcuts[0],ArrowRight:'side-membership',ArrowLeft:'nav:account'},
+      'side-membership':{ArrowUp:'community-messages',ArrowDown:shortcuts[0],ArrowLeft:'side-login'},
+      'side-sync':{ArrowUp:shortcuts[0],ArrowDown:'side-logout',ArrowLeft:'nav:account'},
+      'side-logout':{ArrowUp:'side-sync',ArrowLeft:'nav:account'},
+      'nav:account':{ArrowRight:'side-login'}
+    }[action]?.[direction]||'';
+  }
   function handle(action){
     const [verb,key]=action.split(':');
     if(verb==='side-rules-back'){ruleModel.open=false;refresh('side-pref:blocklist');return true;}
@@ -102,7 +121,7 @@ window.createSidebarPages = ({content:C,state,icon,escape:e,button,header,modal,
     }
     if(verb==='side-login'){if(state.account)switchAccount();else login();return true;}
     if(verb==='side-membership'){rightsNotice('vip');return true;}
-    if(verb==='side-library'){state.libraryTab=key;navigate('library');requestAnimationFrame(()=>document.querySelector(`[data-action="library:${key}"]`)?.focus());return true;}
+    if(verb==='side-library'){state.libraryTab=key;navigate('library',{parent:'account',parentFocus:action});requestAnimationFrame(()=>document.querySelector(`[data-action="library:${key}"]`)?.focus());return true;}
     if(verb==='side-sync'){model.section='privacy';navigate('settings',{parent:'account'});requestAnimationFrame(()=>document.querySelector('[data-action="side-pref:sync"]')?.focus());return true;}
     if(verb==='side-logout'){
       modal(A.logoutTitle,`<p>${e(A.logoutBody)}</p>`,button(A.logoutConfirm,'side-logout-confirm','primary')+button(A.cancel,'dismissmodal','secondary'));return true;
@@ -112,5 +131,5 @@ window.createSidebarPages = ({content:C,state,icon,escape:e,button,header,modal,
     }
     return false;
   }
-  return {settings,account,handle,preferenceRow,back(){if(state.page==='settings'&&ruleModel.open){ruleModel.open=false;refresh('side-pref:blocklist');return true;}return false;},preferences:model,rules,ruleModel,filterDanmaku:items=>items.filter(text=>!rules.some(rule=>rule.enabled&&rule.type==='keyword'&&text.includes(rule.text)))};
+  return {settings,account,accountFocus,handle,preferenceRow,back(){if(state.page==='settings'&&ruleModel.open){ruleModel.open=false;refresh('side-pref:blocklist');return true;}return false;},preferences:model,rules,ruleModel,filterDanmaku:items=>items.filter(text=>!rules.some(rule=>rule.enabled&&rule.type==='keyword'&&text.includes(rule.text)))};
 };

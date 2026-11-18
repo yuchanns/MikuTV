@@ -143,9 +143,13 @@
     if(!pluginPages.model.currentEntry&&!['settings','entries'].includes(page))page='entries';
     if(state.page==='settings'&&sidebarPages.preferences.section==='plugins')pluginPages.leave();
     clearTimeout(state.toastTimer);$('#toast').classList.remove('visible');
-    state.returnPage=options.parent||null;state.returnFocus=null;state.page=page;state.category=U.any;state.overlay=null;state.detail=null;state.player=null;
+    state.returnPage=options.parent||null;state.parentFocus=options.parentFocus||null;state.returnFocus=null;state.page=page;state.category=U.any;state.overlay=null;state.detail=null;state.player=null;
     $('#overlay').innerHTML=''; $('#main').scrollTop=0; renderPage();
-    requestAnimationFrame(()=>$('#main .focusable')?.focus({preventScroll:true}));
+    requestAnimationFrame(()=>{
+      const preferred=options.focus||(page==='account'?'side-login':'');
+      if(preferred)focusAction(preferred);
+      else $('#main .focusable')?.focus({preventScroll:true});
+    });
   }
   function focusAction(action) {
     const scope=$('#system-input-layer')||$('.state-panel')||$('.branch-choice')||$('.live-state-card')||$('.playback-state-card')||$('.playback-popover')||$('.player.has-chapter-picker .chapter-picker')||$('.player.has-panel .player-panel')||$('.player')||$('.detail')||$('#stage');
@@ -412,6 +416,10 @@
   function moveFocus(direction) {
     const current=document.activeElement;const elements=visibleElements();
     if(!elements.includes(current)){elements[0]?.focus();return;}
+    if(state.page==='account'&&!state.overlay){
+      const action=sidebarPages.accountFocus(current.dataset.action,direction);
+      if(action){focusAction(action);return;}
+    }
     const rect=current.getBoundingClientRect();const origin={x:rect.left+rect.width/2,y:rect.top+rect.height/2};
     let best=null,bestScore=Infinity;
     for(const el of elements){if(el===current)continue;const r=el.getBoundingClientRect();const dx=r.left+r.width/2-origin.x;const dy=r.top+r.height/2-origin.y;
@@ -431,7 +439,7 @@
     if(event.key==='Escape'&&state.overlay!=='modal'&&(state.panel==='comments'||(state.overlay==='detail'&&state.detailTab==='comments'))&&discussion.back()){event.preventDefault();return;}
     if(event.key==='Escape'&&!state.overlay&&communityPages.back()){event.preventDefault();return;}
     if(event.key==='Escape'&&!state.overlay&&sidebarPages.back()){event.preventDefault();return;}
-    if(event.key==='Escape'&&!state.overlay&&state.returnPage){event.preventDefault();navigate(state.returnPage);return;}
+    if(event.key==='Escape'&&!state.overlay&&state.returnPage){event.preventDefault();if(state.page==='library'&&libraryPages.back())return;navigate(state.returnPage,{focus:state.parentFocus});return;}
     if(event.key==='Escape'&&!state.overlay&&explorePages.back()){event.preventDefault();return;}
     if(event.key==='Escape'&&!state.overlay&&libraryPages.back()){event.preventDefault();return;}
     if(event.key==='Escape'){event.preventDefault();if(state.overlay)closeOverlay();else if(state.page!=='home')navigate('home');else focusAction('nav:home');return;}

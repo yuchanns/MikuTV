@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"runtime"
 	"strings"
@@ -56,6 +57,29 @@ func (p *Preferences) Save(preferences app.Preferences) error {
 		return fmt.Errorf("encode recent entry")
 	}
 	return p.saveString(p.key, value, "")
+}
+
+func historySyncKey(entry, owner string) objc.ID {
+	digest := sha256.Sum256([]byte(entry + "\x00" + owner))
+	return objc.ID(objc.GetClass("NSString")).Send(objc.RegisterName("stringWithUTF8String:"), fmt.Sprintf("historySync.%x", digest))
+}
+
+func (p *Preferences) HistorySync(entry, owner string) bool {
+	value := p.defaults.Send(objc.RegisterName("stringForKey:"), historySyncKey(entry, owner))
+	return value == 0 || objc.Send[string](value, objc.RegisterName("UTF8String")) != "disabled"
+}
+
+func (p *Preferences) SaveHistorySync(entry, owner string, enabled bool) error {
+	state := "enabled"
+	if !enabled {
+		state = "disabled"
+	}
+	value := objc.ID(objc.GetClass("NSString")).Send(objc.RegisterName("stringWithUTF8String:"), state)
+	key := historySyncKey(entry, owner)
+	if key == 0 || value == 0 {
+		return fmt.Errorf("encode history sync preference")
+	}
+	return p.saveString(key, value, "")
 }
 
 // LoadPluginStorage uses the UIKit thread and its autorelease pool at startup.

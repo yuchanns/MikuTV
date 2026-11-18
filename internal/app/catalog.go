@@ -25,15 +25,16 @@ type CatalogSnapshot struct {
 // Catalog is owned by the application thread. Only the session call runs
 // in a worker, and its result reenters through post before reading state.
 type Catalog struct {
-	open       func(string) provider.Session
-	post       func(func())
-	changed    func()
-	entryID    string
-	session    provider.Session
-	canBrowse  bool
-	generation uint64
-	pending    context.CancelFunc
-	snapshot   CatalogSnapshot
+	open               func(string) provider.Session
+	post               func(func())
+	changed            func()
+	entryID            string
+	session            provider.Session
+	canBrowse          bool
+	generation         uint64
+	pending            context.CancelFunc
+	snapshot           CatalogSnapshot
+	artwork, backdrops *catalogArtwork
 }
 
 func NewCatalog(open func(string) provider.Session, post func(func()), changed func()) *Catalog {
@@ -41,6 +42,16 @@ func NewCatalog(open func(string) provider.Session, post func(func()), changed f
 }
 
 func (c *Catalog) Snapshot() CatalogSnapshot { return c.snapshot }
+
+func (c *Catalog) Authenticator() provider.Authenticator {
+	service, _ := c.session.(provider.Authenticator)
+	return service
+}
+
+func (c *Catalog) AccountReader() provider.AccountReader {
+	reader, _ := c.session.(provider.AccountReader)
+	return reader
+}
 
 func (c *Catalog) Select(entry Entry) {
 	canBrowse := entry.Capabilities.Has(provider.BrowseCatalog)
@@ -104,6 +115,7 @@ func (c *Catalog) Cancel() {
 
 func (c *Catalog) Close() {
 	c.invalidateRequest()
+	c.clearArtwork()
 	if c.session != nil {
 		c.session.Close()
 		c.session = nil

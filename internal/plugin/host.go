@@ -2,7 +2,11 @@ package plugin
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -86,9 +90,6 @@ func (s *Storage) delete(key string) error {
 }
 
 func installHost(ctx context.Context, rt *moejs.Runtime, store *Storage) error {
-	if store == nil {
-		store, _ = NewStorage(nil, nil)
-	}
 	get := rt.Function("get", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
@@ -115,16 +116,36 @@ func installHost(ctx context.Context, rt *moejs.Runtime, store *Storage) error {
 		sum := sha256.Sum256([]byte(input))
 		return rt.FromGo(hex.EncodeToString(sum[:]))
 	})
+	encrypt := rt.Function("encryptRSAOAEP", 2, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		der, err := base64.StdEncoding.DecodeString(moejs.Arg(args, 0).String())
+		if err != nil {
+			return moejs.Undefined(), err
+		}
+		public, err := x509.ParsePKIXPublicKey(der)
+		if err != nil {
+			return moejs.Undefined(), err
+		}
+		key, ok := public.(*rsa.PublicKey)
+		if !ok {
+			return moejs.Undefined(), errors.New("RSA public key required")
+		}
+		ciphertext, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, key, []byte(moejs.Arg(args, 1).String()), nil)
+		if err != nil {
+			return moejs.Undefined(), err
+		}
+		return rt.FromGo(hex.EncodeToString(ciphertext))
+	})
 	return rt.SetGlobal("host", map[string]any{
 		"storage": map[string]any{"get": get, "set": set, "delete": remove},
-		"crypto":  map[string]any{"sha256": digest},
+		"crypto":  map[string]any{"sha256": digest, "encryptRSAOAEP": encrypt},
 	})
 }
 
-func (s *Source) allowRequest() func(*http.Request) error {
+func (s *Source) allowRequest(secure bool) func(*http.Request) error {
 	allow := webapi.AllowHosts(s.manifest.Permissions.Network...)
 	return func(req *http.Request) error {
 		if (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.User != nil ||
+			(secure && req.URL.Scheme != "https") ||
 			(req.Host != "" && !strings.EqualFold(req.Host, req.URL.Host)) {
 			return errors.New("source requests require an authorized HTTP origin")
 		}

@@ -62,11 +62,17 @@ window.createLibraryPages = ({content:C,state,icon,escape:e,button,header,card,f
     if(verb==='lib-select'){model.selected.has(key)?model.selected.delete(key):model.selected.add(key);refresh(action);return true;}
     if(verb==='lib-all'){const all=ids();model.selected=model.selected.size===all.length?new Set():new Set(all);refresh(action);return true;}
     if(verb==='lib-remove'){
+      if(state.libraryTab==='favorites'){
+        if(model.selected.size)modal(L.remove,`<p>${e(L.removeConfirm.replace('%d',model.selected.size))}</p>`,button(L.confirmRemove,'lib-remove-confirm','primary','trash')+button(C.ui.cancel,'dismissmodal','secondary'));
+        return true;
+      }
+    }
+    if(verb==='lib-remove'||verb==='lib-remove-confirm'){
       const selected=new Set(model.selected);
       if(state.libraryTab==='history')state.history=state.history.filter(id=>!selected.has(id));
       if(state.libraryTab==='watchlater')selected.forEach(id=>state.later.delete(id));
       if(state.libraryTab==='tracking')selected.forEach(id=>state.tracked.delete(id));
-      if(state.libraryTab==='favorites')selected.forEach(id=>currentFolder().ids.delete(id));
+      if(verb==='lib-remove-confirm'){selected.forEach(id=>currentFolder().ids.delete(id));dismissModal();model.editing=false;}
       model.selected.clear();syncFavorites();refresh('lib-manage');toast(L.removed);return true;
     }
     if(verb==='lib-play-all'){startPlayer(ids()[0]);return true;}

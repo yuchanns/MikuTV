@@ -314,11 +314,23 @@ Go 调用方使用按领域划分的类型化服务，例如账号、目录、�
 
 宿主按插件声明的认证方式选择已实现的 visual 组件，页面不根据插件 ID 分支。首版只实现既定扫码界面，不提供通用账号密码表单，也不把系统文本输入能力视为已经支持认证表单。
 
+侧栏的头像打开当前入口的账户页。游客在账户页确认扫码登录，已登录时从资料卡打开账号切换弹窗。扫码完成或按返回会回到账户页的操作位置。
+
+来源可用 `authentication.presentation` 提供账户页副标题、游客标题与说明、扫码标题与说明，以及包内 `guestArtwork`。宿主从当前入口读取这些配置，并复用插件图片的路径和解码校验。通用遥控操作与扫码状态在宿主界面呈现。
+
+登录后的昵称、头像和附加资料来自 `account`。来源可选择提供 `badge` 和 `card`。信息卡由 `title`、`description`、`icon` 和可选的 `benefits` 组成；提供 `actionLabel` 时，宿主开放只读详情，展示来源提供的 `status`、`highlight` 和权益条目。宿主根据 `badge.text` 和 `card.title` 决定是否渲染对应区域，图标引用宿主的通用图标库。示例影视使用这些字段展示会员信息。`avatarURL` 指向来源网络权限内的公开 HTTPS 图片，宿主在登录完成后单独加载并限制图片大小。没有可用头像时显示昵称首字。
+
 插件给出当前二维码挑战、有效期和认证进度；宿主展示等待、已扫码、过期等状态，再调用对应插件继续认证。取消、过期和重新开始都使旧挑战失效，认证凭据不进入普通页面状态或日志。
+
+声明 `account.signIn` 和 `qrCode` 的来源导出 `beginSignIn`、`pollSignIn`、`restoreAccount` 和 `signOut`。`beginSignIn` 返回 HTTPS `url`、挑战 `key` 和 Unix 毫秒时间戳 `expiresAt`。`pollSignIn` 接受挑战 `key`，返回 `waiting`、`scanned`、`expired` 或 `approved`。批准或恢复时，来源返回已校验的 `account`、仅供认证操作读取的私有 `secret`，以及需要保留的 HTTPS `cookies`。Cookie 由响应 `url` 和 `Set-Cookie` 原始值列表 `headers` 描述。宿主校验域名权限，并按原域名、路径和过期时间还原 Cookie。
 
 示例内容源插件使用这套服务实现扫码申请、轮询、账号校验和凭据刷新。二维码是该插件选择的认证方式，宿主核心保持通用。
 
+账号总览与认证一并交付。来源可声明 `account.history`、`account.watchLater`、`account.favorites` 或 `account.notifications`，以 `readAccount` 提供对应的只读列表。宿主通过当前已校验的账号会话传递账号标识，并以来源、入口、账号及查询隔离请求和结果。通知计数独立读取，打开总览不触发已读。观看记录同步选项保存在本机并与入口、账号绑定，决定总览是否自动读取来源记录。播放进度上报与管理操作由后续任务接入。
+
 普通配置与凭据分开存储，凭据通过宿主管理的 Keychain 按插件、入口实例和账号隔离。登录状态保存在本机，不依赖自建云端或登录态云同步。重启后由所属插件校验或刷新凭据，退出登录清除对应凭据。一个会话的刷新请求合并执行，旧账号的回调不得清除或覆盖新账号状态。
+
+扫码与恢复先使用独立 HTTP 会话，凭据保存后才替换目录请求的会话。需要确认续期的来源在返回结果中标记 `pendingConfirmation`，宿主保存新凭据后再次调用 `restoreAccount` 以确认。网络中断后，下一次恢复可用已保存的凭据继续确认。
 
 插件普通存储按入口命名，同一插件的多个入口共用 8 KiB 写入预算，按这些数据的序列化大小计量。60 个插件写满约占 0.5 MB。tvOS 同时检查 UserDefaults 整个应用域，防止达到系统会终止应用的门槛。[Apple 文档](https://developer.apple.com/documentation/foundation/userdefaults/sizelimitexceededmessage)
 

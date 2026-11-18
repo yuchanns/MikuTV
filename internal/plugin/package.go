@@ -21,23 +21,41 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-var operations = map[provider.Capability]string{
-	provider.BrowseCatalog:  "browse",
-	provider.GetCatalogItem: "getItem",
+var operations = map[provider.Capability][]string{
+	provider.BrowseLibrary:                     {"readAccount"},
+	provider.BrowseCatalog:                     {"browse"},
+	provider.GetCatalogItem:                    {"getItem"},
+	provider.SignIn:                            {beginSignIn, pollSignIn, restoreAccount, signOut},
+	provider.AccountHistory.Capability():       {"readAccount"},
+	provider.AccountWatchLater.Capability():    {"readAccount"},
+	provider.AccountFavorites.Capability():     {"readAccount"},
+	provider.AccountTracking.Capability():      {"readAccount"},
+	provider.AccountCourses.Capability():       {"readAccount"},
+	provider.AccountNotifications.Capability(): {"readAccount"},
+	provider.EditFavoriteFolders:               {"editFavoriteFolder"},
+	provider.EditHistory:                       {"removeAccountItems"},
+	provider.EditWatchLater:                    {"removeAccountItems"},
+	provider.EditTracking:                      {"removeAccountItems"},
 }
 
 type Source struct {
-	manifest sourceManifest
-	cover    []byte
-	module   *moejs.Module
-	digest   [sha256.Size]byte
+	manifest    sourceManifest
+	cover       []byte
+	authArtwork []byte
+	module      *moejs.Module
+	digest      [sha256.Size]byte
 }
 
 func (s *Source) Manifest() Manifest        { return s.manifest.Manifest }
 func (s *Source) Cover() []byte             { return bytes.Clone(s.cover) }
+func (s *Source) AuthArtwork() []byte       { return bytes.Clone(s.authArtwork) }
 func (s *Source) Digest() [sha256.Size]byte { return s.digest }
 func (s *Source) Capabilities() provider.Capabilities {
 	return append(provider.Capabilities(nil), s.manifest.Capabilities...)
+}
+
+func (s *Source) AuthPresentation() provider.AuthPresentation {
+	return s.manifest.Authentication.Presentation
 }
 
 // Open validates and compiles a package without executing its code.
@@ -70,17 +88,29 @@ func openPackage(ctx context.Context, input io.ReaderAt, size int64, digest [sha
 	}
 	seen := make(map[provider.Capability]bool)
 	for _, capability := range manifest.Capabilities {
-		name, ok := operations[capability]
-		if !ok || !exports[name] || seen[capability] {
+		names, ok := operations[capability]
+		if !ok || seen[capability] {
 			return nil, fmt.Errorf("%w: invalid operation declaration %q", ErrIncompatible, capability)
+		}
+		for _, name := range names {
+			if !exports[name] {
+				return nil, fmt.Errorf("%w: missing operation %q", ErrIncompatible, name)
+			}
 		}
 		seen[capability] = true
 	}
-	cover, err := coverFile(files, manifest.Artwork.Cover)
+	cover, err := artworkFile(files, manifest.Artwork.Cover)
 	if err != nil {
 		return nil, err
 	}
-	return &Source{manifest: manifest, cover: cover, module: module, digest: digest}, nil
+	authArtwork := cover
+	if name := manifest.Authentication.Presentation.GuestArtwork; name != manifest.Artwork.Cover {
+		authArtwork, err = artworkFile(files, name)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &Source{manifest: manifest, cover: cover, authArtwork: authArtwork, module: module, digest: digest}, nil
 }
 
 func packagePath(name string) bool {
@@ -162,16 +192,16 @@ func (a *packageArchive) read(name string) ([]byte, error) {
 	return content, nil
 }
 
-func coverFile(files *packageArchive, name string) ([]byte, error) {
+func artworkFile(files *packageArchive, name string) ([]byte, error) {
 	if name == "" {
 		return nil, nil
 	}
 	if !packagePath(name) {
-		return nil, fmt.Errorf("invalid cover path %q", name)
+		return nil, fmt.Errorf("invalid artwork path %q", name)
 	}
 	format, ok := map[string]string{".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "webp"}[strings.ToLower(path.Ext(name))]
 	if !ok {
-		return nil, fmt.Errorf("unsupported cover extension")
+		return nil, fmt.Errorf("unsupported artwork extension")
 	}
 	data, err := files.read(name)
 	if err != nil {
