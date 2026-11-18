@@ -26,6 +26,8 @@ window.CONTENT = {
     "picks": "值得在大屏上看",
     "picksNote": "好画面，值得被看见",
     "all": "查看全部",
+    "recommendations": "为你推荐",
+    "refreshRecommendations": "换一批",
     "up": "来自你关注的 创作者",
     "latest": "他们又有新作品了",
     "followingTitle": "好内容，来自熟悉的人。",

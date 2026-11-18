@@ -11,6 +11,7 @@ type Page string
 const (
 	Entries         Page = "entries"
 	Home            Page = "home"
+	HomeAction      Page = "homeAction"
 	Search          Page = "search"
 	Following       Page = "following"
 	Series          Page = "series"

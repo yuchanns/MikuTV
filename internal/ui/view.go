@@ -15,6 +15,13 @@ const (
 	railDuration  = 220 * time.Millisecond
 )
 
+var focusScroll = ui.Animation{Duration: 220 * time.Millisecond, Ease: ui.EaseOut}
+
+var menuTransition = ui.ElementTransition{
+	Duration: 200 * time.Millisecond, Ease: ui.EaseOut, Position: true,
+	Enter: &ui.Motion{Y: 14}, Exit: &ui.Motion{Y: -8},
+}
+
 type scrollKey struct {
 	entry string
 	route app.Route
@@ -50,6 +57,7 @@ type View struct {
 	activeScroll    *ui.ScrollState
 	drawnRevision   uint64
 	reveal          bool
+	railSpan        float32
 	notice          string
 	qrPayload       string
 	qrImage         ui.ImageSource
@@ -58,6 +66,7 @@ type View struct {
 	avatarImage     ui.ImageSource
 	profileGlow     ui.ImageSource
 	cardGlow        ui.ImageSource
+	home            catalogHome
 	favoriteArtwork map[string]favoritePicture
 	favorites       favoritesUI
 
@@ -81,15 +90,17 @@ func (v *View) SetTheme(palette theme.Theme) {
 func (v *View) Render(c *ui.Context) {
 	v.syncAccountAvatar()
 	c.SetTheme(&v.native)
-	v.focus.begin()
-	v.activeScroll = nil
+	c.OnWindowBack(v.goBack)
 	width, height := c.Size()
 	layers := v.State.Layers()
+	v.advanceCatalogHold(c, height, len(layers) == 1 && layers[0].Page == app.Home)
+	v.focus.begin()
+	v.activeScroll = nil
 	ui.Box(c).Fill().Clip().Background(paint(v.Theme.Colors.Surface.Canvas)).Children(func() {
 		page := v.context(layers[0], len(layers) == 1, width-collapsedRailWidth, height)
 		ui.Row(c).Fill().Children(func() {
 			navigationRail{}.Render(c, page)
-			ui.Box(c.Key("main")).Width(width - collapsedRailWidth).Height(height).Shrink(0).
+			ui.Box(c.Key("main")).Width(width - collapsedRailWidth).Height(height).Shrink(0).Clip().
 				Children(func() { v.renderScreen(c, page) })
 		})
 		if v.notice != "" {
@@ -131,12 +142,17 @@ func (v *View) context(location app.Location, active bool, width, height float32
 func (v *View) renderScreen(c *ui.Context, page *PageContext) {
 	chain := v.Pages.Routes.Ancestors(page.Location.Route)
 	scroll := page.scroll()
-	ui.Scroll(c.Key("page/" + string(chain[0].Page))).Fill().TrackScroll(scroll).Children(func() {
+	insets := [4]float32{148, 83, 80, 103}
+	if override := v.Pages.components[chain[0]].ScreenInsets; override != nil {
+		insets = *override
+	}
+	ui.Scroll(c.Key(page.Location.Route)).Fill().TrackScroll(scroll).Transition(menuTransition).Children(func() {
 		if page.Location.Page == app.Library {
 			v.Pages.render(c, page)
 			return
 		}
-		ui.Column(c).FillWidth().Padding(148, 83, 80, 103).Gap(44).Children(func() { v.Pages.render(c, page) })
+		ui.Column(c).FillWidth().Padding(insets[0], insets[1], insets[2], insets[3]).Gap(44).
+			Children(func() { v.Pages.render(c, page) })
 	})
 }
 
@@ -161,7 +177,7 @@ func (v *View) renderModal(c *ui.Context, page *PageContext) {
 	colors := v.Theme.Colors
 	ui.Overlay(c, func() {
 		ui.Box(c.Key(page.Location.Route)).Absolute().Left(0).Top(0).Width(page.Width).Height(page.Height).
-			Modal().Background(paint(colors.Overlay.Scrim)).Center().Children(func() {
+			Modal().Background(paint(colors.Overlay.Scrim)).Center().Transition(menuTransition).Children(func() {
 			panel := ui.Column(c).Width(min(width, page.Width-180)).Height(min(height, page.Height-150)).
 				Padding(insets[0], insets[1], insets[2], insets[3]).Gap(28).
 				Background(paint(colors.Surface.Panel)).Radius(30)
@@ -192,6 +208,7 @@ func (v *View) scrollFor(location app.Location, active bool) *ui.ScrollState {
 }
 
 func (v *View) dispatch(action func()) {
+	v.home.hold = catalogHold{}
 	v.notice = ""
 	position := v.State.Position
 	position.Focus, position.Area = v.State.Focus, v.focus.area(v.State.Focus)
@@ -200,6 +217,9 @@ func (v *View) dispatch(action func()) {
 	}
 	v.State.RecordPosition(position)
 	previous := v.State.Route
+	if previous.Page == app.Home {
+		v.home.rotateAt = time.Time{}
+	}
 	action()
 	if previous != v.State.Route {
 		if leave := v.Pages.components[previous].Leave; leave != nil {
@@ -228,6 +248,12 @@ func (v *View) goBack() bool {
 
 func (v *View) SyncEntry() {
 	entry, _ := v.State.Current()
+	if entry.ID != v.home.entry {
+		v.home.action.stop()
+		v.home.shelfDetails.stop()
+		v.home.featureInfo.stop()
+		v.home = catalogHome{entry: entry.ID}
+	}
 	var service provider.Authenticator
 	if v.Catalog != nil {
 		v.Catalog.Select(entry)

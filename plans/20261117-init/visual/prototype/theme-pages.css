@@ -47,5 +47,4 @@
 #stage[data-custom-theme] .theme-option.selected:focus .theme-copy small{color:#fff}
 #stage[data-custom-theme] :is(.settings-sections button,.text-back,.tab):focus{background:transparent;color:var(--theme-text);box-shadow:none}
 #stage[data-custom-theme] .video-card:focus{background:transparent;color:var(--theme-text)}
-#stage[data-custom-theme] .video-card:focus .card-image{box-shadow:0 0 0 4px var(--accent-soft),0 18px 45px #0009}
 #stage[data-custom-theme] .timeline:focus{background:#ffffff40}

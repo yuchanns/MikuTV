@@ -28,6 +28,15 @@ type labels struct {
 	Sections                                                              []section
 	Auth                                                                  authLabels
 	Activity                                                              accountActivityLabels
+	Home                                                                  homeLabels
+}
+
+type homeLabels struct {
+	ForYou, Popular, Ranking, Regions, RankingNote                              string
+	PopularEyebrow, RankingEyebrow, RegionsEyebrow, RankingHeat                 string
+	Continue, ContinueNote, Picks, PicksNote, Following, FollowingNote, SeeAll  string
+	Play, Details, Later, Featured, Feature, Refresh, RefreshFailed, MoreFailed string
+	Recommendations, RateLimited, Plays, TenThousand, HundredMillion            string
 }
 
 type accountActivityLabels struct {

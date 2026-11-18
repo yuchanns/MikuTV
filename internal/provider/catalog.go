@@ -50,17 +50,24 @@ type MediaRef struct {
 }
 
 type Creator struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatarURL,omitempty"`
 }
 
 type MediaItem struct {
-	Ref      MediaRef `json:"ref"`
-	Title    string   `json:"title"`
-	Subtitle string   `json:"subtitle,omitempty"`
-	Creator  *Creator `json:"creator,omitempty"`
-	Views    *int64   `json:"views,omitempty"`
-	Quality  string   `json:"quality,omitempty"`
+	Ref             MediaRef `json:"ref"`
+	Title           string   `json:"title"`
+	Subtitle        string   `json:"subtitle,omitempty"`
+	Creator         *Creator `json:"creator,omitempty"`
+	CoverURL        string   `json:"coverURL,omitempty"`
+	BackdropURL     string   `json:"backdropURL,omitempty"`
+	DurationSeconds *int64   `json:"durationSeconds,omitempty"`
+	Views           *int64   `json:"views,omitempty"`
+	RankScore       *int64   `json:"rankScore,omitempty"`
+	Category        string   `json:"category,omitempty"`
+	Quality         string   `json:"quality,omitempty"`
+	ProgressSeconds *int64   `json:"progressSeconds,omitempty"`
 }
 
 type Collection struct {
@@ -69,25 +76,28 @@ type Collection struct {
 	Items []MediaItem `json:"items"`
 }
 
+type CatalogFilter struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
 type CollectionPage struct {
-	Collections []Collection `json:"collections"`
-	NextCursor  string       `json:"nextCursor,omitempty"`
+	Collections []Collection    `json:"collections"`
+	NextCursor  string          `json:"nextCursor,omitempty"`
+	Filters     []CatalogFilter `json:"filters,omitempty"`
+	Shelves     []Collection    `json:"shelves,omitempty"`
 }
 
 type BrowseRequest struct {
 	Collection string `json:"collection,omitempty"`
+	Filter     string `json:"filter,omitempty"`
 	Cursor     string `json:"cursor,omitempty"`
+	Refresh    bool   `json:"refresh,omitempty"`
 }
 
 type Catalog interface {
 	Browse(context.Context, BrowseRequest) (CollectionPage, error)
 	Item(context.Context, MediaRef) (MediaItem, error)
-}
-
-// Session owns the resources and cancellation for one active content entry.
-type Session interface {
-	Catalog
-	Close()
 }
 
 type CatalogArtworkLoader interface {
@@ -96,4 +106,10 @@ type CatalogArtworkLoader interface {
 
 type CatalogBackdropLoader interface {
 	LoadCatalogBackdrop(context.Context, string) (image.Image, error)
+}
+
+// Session owns the resources and cancellation for one active content entry.
+type Session interface {
+	Catalog
+	Close()
 }

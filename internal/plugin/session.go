@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,10 +67,17 @@ func (s *Source) Verify(ctx context.Context) error {
 
 func (s *Session) Browse(ctx context.Context, request provider.BrowseRequest) (provider.CollectionPage, error) {
 	var page provider.CollectionPage
-	if err := s.call(ctx, provider.BrowseCatalog, request, &page); err != nil {
+	s.requests.RLock()
+	client, scope, signedIn := s.active, s.scope, s.accountID != ""
+	s.requests.RUnlock()
+	input := struct {
+		provider.BrowseRequest
+		SignedIn bool `json:"signedIn,omitempty"`
+	}{request, signedIn}
+	if err := s.invoke(ctx, scope, client, provider.BrowseCatalog, "browse", input, &page); err != nil {
 		return page, err
 	}
-	for _, group := range page.Collections {
+	for _, group := range slices.Concat(page.Collections, page.Shelves) {
 		if group.ID == "" || strings.TrimSpace(group.Title) == "" {
 			return provider.CollectionPage{}, &provider.Error{Code: provider.PluginFailed}
 		}
@@ -77,6 +85,11 @@ func (s *Session) Browse(ctx context.Context, request provider.BrowseRequest) (p
 			if err := s.ownItem(&group.Items[index]); err != nil {
 				return provider.CollectionPage{}, err
 			}
+		}
+	}
+	for _, filter := range page.Filters {
+		if filter.ID == "" || strings.TrimSpace(filter.Title) == "" {
+			return provider.CollectionPage{}, &provider.Error{Code: provider.PluginFailed}
 		}
 	}
 	return page, nil
@@ -105,6 +118,16 @@ func (s *Session) ownItem(item *provider.MediaItem) error {
 	}
 	if item.Creator != nil && (item.Creator.ID == "" || strings.TrimSpace(item.Creator.Name) == "") {
 		return &provider.Error{Code: provider.PluginFailed}
+	}
+	if item.DurationSeconds != nil && *item.DurationSeconds < 0 ||
+		item.Views != nil && *item.Views < 0 || item.ProgressSeconds != nil && *item.ProgressSeconds < 0 {
+		return &provider.Error{Code: provider.PluginFailed}
+	}
+	if item.CoverURL != "" && httpsURL(item.CoverURL) == nil {
+		item.CoverURL = ""
+	}
+	if item.BackdropURL != "" && httpsURL(item.BackdropURL) == nil {
+		item.BackdropURL = ""
 	}
 	item.Ref.EntryID = s.entryID
 	return nil
@@ -155,6 +178,11 @@ func (s *Session) ReadAccount(ctx context.Context, request provider.AccountReque
 				return provider.AccountPage{}, &provider.Error{Code: provider.PluginFailed}
 			}
 			row.Ref.EntryID = s.entryID
+		}
+		if row.Item != nil {
+			if err := s.ownItem(row.Item); err != nil {
+				return provider.AccountPage{}, err
+			}
 		}
 	}
 	return page, nil

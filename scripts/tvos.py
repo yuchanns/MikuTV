@@ -18,6 +18,8 @@ BUILD = ROOT / ".build/tvos"
 PATCHES = ROOT / "patch/mygo"
 DEPENDENCY = ROOT / "vendor/github.com/egoist/mygo"
 APP = BUILD / "Payload/MikuTV.app"
+# layerutil reads the scale suffix from layered PSD filenames.
+APP_ICON = "MikuTVHomeIcon@2x"
 MINIMUM = "18.0"
 APP_VERSION = "0.1.0"
 
@@ -91,6 +93,7 @@ def build():
         "CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "MikuTV",
         "CFBundleExecutable": "MikuTV", "CFBundleIdentifier": "dev.yuchanns.MikuTV",
         "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "MikuTV",
+        "CFBundleIcons": {"CFBundlePrimaryIcon": APP_ICON},
         "CFBundlePackageType": "APPL", "CFBundleShortVersionString": APP_VERSION,
         "CFBundleVersion": number, "CFBundleSupportedPlatforms": ["AppleTVOS"],
         "UIDeviceFamily": [3], "MinimumOSVersion": MINIMUM,
@@ -99,6 +102,9 @@ def build():
     (APP / "Info.plist").write_bytes(plistlib.dumps(info))
     (APP / "PkgInfo").write_bytes(b"APPL????")
     shutil.copyfile(ROOT / "resources/PrivacyInfo.xcprivacy", APP / "PrivacyInfo.xcprivacy")
+    icon = ROOT / "resources/tvos" / f"{APP_ICON}.psd"
+    run(["xcrun", "--sdk", "appletvos", "layerutil", "-c", "-l", "1",
+         "-o", str(APP / "Assets.car"), str(icon)])
     bundle_plugins()
     print(APP)
 

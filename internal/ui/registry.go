@@ -36,11 +36,11 @@ type Registration struct {
 	Component          Component
 	Title, Icon        string
 	Navigation         *NavigationLink
+	ScreenInsets       *[4]float32
 	ModalWidth         float32
 	ModalHeight        float32
 	ResolveModalHeight func(*View) float32
 	ModalInsets        [4]float32
-	ScreenInsets  *[4]float32
 	Sync               func(*View)
 	Leave              func(*View)
 	Back               func(*View) bool
@@ -62,14 +62,28 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		}
 	}
 	home := content(app.Home, "")
-	home.Component = catalogPage{}
+	home.Component, home.Sync = catalogPage{}, syncHome
+	home.ScreenInsets = &[4]float32{0, 0, 80, 0}
 	home.Policy.ExitFocus = app.RailFocus(app.Home)
+	home.Back = (*View).backFromHome
 	library := content(app.Library, provider.BrowseLibrary)
 	library.Component, library.Sync = libraryPage{}, syncLibrary
 	library.Back = (*View).backFromLibraryManagement
 	library.Leave = pauseLibraryHistory
 	registrations := []Registration{
 		home,
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.HomeAction}, Parent: app.Route{Page: app.Home},
+			Initial: focus(app.CloseModal), RequiresEntry: true, Modal: true},
+			Component: catalogActionPage{}, ModalWidth: 990, ModalHeight: 620,
+			Leave: func(v *View) {
+				if v.State.Route != (app.Route{Page: app.HomeAction, Section: homeShelfDetailsSection}) {
+					v.home.action.stop()
+				}
+			}},
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.HomeAction, Section: homeShelfDetailsSection},
+			Parent: app.Route{Page: app.HomeAction}, Initial: focus(app.CloseModal), RequiresEntry: true, Modal: true},
+			Component: catalogActionPage{}, ModalWidth: 990, ModalHeight: 620,
+			Leave: func(v *View) { v.home.shelfDetails.stop() }},
 		content(app.Search, provider.SearchCatalog),
 		content(app.Following, provider.BrowseFollowing),
 		content(app.Series, provider.BrowseSeries),

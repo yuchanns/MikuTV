@@ -23,9 +23,10 @@ func (navigationRail) Render(c *ui.Context, p *PageContext) {
 	expanded := p.State.Area == app.NavigationArea
 	rail := ui.Column(c.Key("rail"))
 	width := rail.AnimateTo("width", railWidth(p.State), ui.Animation{Duration: railDuration})
+	p.host.railSpan = width
 	buttonWidth := width - 48
 	if p.active {
-		p.host.focus.groups["rail"] = focusRegion{navigation: true, edges: focusEdges{app.Right: {Focus: p.State.ContentFocus()}}}
+		p.host.focus.groups["rail"] = focusRegion{navigation: true, edges: focusEdges{app.Right: {Focus: p.State.ContentFocus(), Region: "content"}}}
 	}
 	colors := p.Theme.Colors
 	rail.Width(width).Height(p.Height).Shrink(0).
@@ -42,7 +43,7 @@ func (navigationRail) Render(c *ui.Context, p *PageContext) {
 				ui.Text(c, "MikuTV").FontSize(26).Bold().TextColor(paint(colors.Text.Primary)).Opacity(opacity)
 			})
 		})
-		ui.Spacer(c).Height(55)
+		ui.Box(c).Height(55)
 		ui.Column(c).Gap(20).Children(func() {
 			for _, link := range p.Pages.navigation(p.State, primaryNavigation) {
 				p.railButton(c, link, buttonWidth, expanded)
@@ -65,10 +66,11 @@ func (p *PageContext) railButton(c *ui.Context, registration Registration, width
 	}
 	page := registration.Policy.Route.Page
 	id := app.RailFocus(page)
+	selected := p.Pages.navigationOwner(p.Location.Route) == page
 	colors := p.Theme.Colors
 	background, foreground := ui.Transparent, paint(colors.Text.Muted)
-	if p.Pages.navigationOwner(p.Location.Route) == page {
-		background, foreground = paint(colors.Hover.Background), paint(colors.Text.Primary)
+	if selected {
+		background, foreground = withAlpha(colors.Playback.Foreground, 0x0e), paint(colors.Text.Primary)
 	}
 	if p.State.Focus == id {
 		background, foreground = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
@@ -90,6 +92,9 @@ func (p *PageContext) railButton(c *ui.Context, registration Registration, width
 	}
 	opacity = e.AnimateTo("label", opacity, ui.Animation{Duration: focusDuration, NonMotion: true})
 	e.Children(func() {
+		if selected {
+			ui.Box(c).Absolute().Left(-23).Top(21).Size(4, 24).Radius(4).Background(paint(colors.Accent.Soft))
+		}
 		ui.Row(c).Fill().Gap(16).AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Size(40, 40).Center().Children(func() {
 				if link.Symbol != nil {

@@ -1,0 +1,56 @@
+diff --git a/ui/runtime.go b/ui/runtime.go
+--- a/ui/runtime.go
++++ b/ui/runtime.go
+@@ -130,6 +130,7 @@
+ 	focusFields     map[any]*focusField
+ 	refs            []*refState
+ 	actions         []action
++	windowBack      func() bool
+ 	textInputClosed bool
+ 	view            func(*context)
+ 	host            host
+diff --git a/ui/context.go b/ui/context.go
+--- a/ui/context.go
++++ b/ui/context.go
+@@ -125,6 +125,7 @@
+ 	c.rt.built, c.rt.nbuilt = c.rt.built[:0], 0
+ 	clear(c.rt.actions)
+ 	c.rt.actions = c.rt.actions[:0]
++	c.rt.windowBack = nil
+ 	c.dirty = max(c.dirty, c.used)
+ 	c.used = 0
+ 	c.now = now
+diff --git a/ui/actions.go b/ui/actions.go
+--- a/ui/actions.go
++++ b/ui/actions.go
+@@ -72,6 +72,16 @@
+ 		raw.rt.actions = append(raw.rt.actions, action{window: c, kind: actionWindowShortcut, mods: mods, key: key, fn: fn})
+ 	}
+ }
++
++// OnWindowBack handles unmodified Escape and Back after focused controls
++// and registered shortcuts. Register it from the window view. Returning
++// false leaves the event to the system.
++func (c *Context) OnWindowBack(fn func() bool) {
++	if raw := c.build(); raw != nil {
++		raw.rt.windowBack = fn
++	}
++}
++
+ func (rt *engine) actionNode(a action) *node {
+ 	if a.handle != nil {
+ 		b := a.handle.binding(rt, false)
+diff --git a/ui/input.go b/ui/input.go
+--- a/ui/input.go
++++ b/ui/input.go
+@@ -1164,6 +1164,10 @@
+ 		// OnTextKey took it as it came, as HandleInput does, but after the
+ 		// keys and text before it, which it reads.
+ 		rt.blinkStart = rt.now()
++		rt.requestFrame()
++		return true
++	}
++	if (key == KeyEscape || key == KeyBack) && mods == 0 && rt.windowBack != nil && !rt.claimed(k) && rt.windowBack() {
+ 		rt.requestFrame()
+ 		return true
+ 	}

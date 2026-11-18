@@ -79,7 +79,26 @@
       const filtered = filterVideos([...C.heroes,...C.videos],state.category);
       return `${header(tabs,state.homeTab)}<div class="page-title"><div class="eyebrow">${state.homeTab === 'trending' ? 'IN THE SPOTLIGHT' : 'FOLLOW YOUR CURIOSITY'}</div><h1>${escape(state.homeTab === 'trending' ? U.trending : U.categories)}</h1><p>${escape(U.picksNote)}</p></div>${chips([U.any,...new Set([...C.heroes,...C.videos].map(v => v.category.split(' · ')[0]))])}<div class="page-grid">${filtered.map(v => card(v)).join('')}</div>`;
     }
-    return `${header(tabs,state.homeTab)}${hero(C.heroes[state.hero])}${shelf(U.continue,U.continueNote,[...C.heroes,...C.videos].slice(0,7),{progress:true})}${shelf(U.picks,U.picksNote,[...C.videos,...C.heroes])}${shelf(U.up,U.latest,[...C.videos].reverse())}`;
+    return `${header(tabs,state.homeTab)}${hero(C.heroes[state.hero])}${shelf(U.continue,U.continueNote,[...C.heroes,...C.videos].slice(0,7),{progress:true})}${shelf(U.picks,U.picksNote,[...C.videos,...C.heroes])}${shelf(U.up,U.latest,[...C.videos].reverse())}${homeRecommendations()}`;
+  }
+  function recommendationColumns() {
+    const main=$('#main');
+    const styles=getComputedStyle(main);
+    const pixels=property=>parseFloat(styles.getPropertyValue(property));
+    const stride=pixels('--video-card-width')+pixels('--video-card-gap');
+    return Math.max(1,Math.ceil((main.clientWidth-pixels('--shelf-left'))/stride));
+  }
+  function homeRecommendations() {
+    const items=[...C.videos,...C.heroes];
+    const offset=state.recommendationOffset||0;
+    const ordered=[...items.slice(offset),...items.slice(0,offset)];
+    const columns=recommendationColumns();
+    const rows=[];
+    for(let i=0;i<ordered.length;i+=columns){
+      const cards=ordered.slice(i,i+columns).map(item=>card(item).replace(`data-action="detail:${item.id}"`,`data-action="home-recommendation:${item.id}"`));
+      rows.push(`<div class="cards home-recommendation-row">${cards.join('')}</div>`);
+    }
+    return `<section class="shelf home-recommendations" data-columns="${columns}"><div class="shelf-header"><h2>${escape(U.recommendations)}</h2>${button(U.refreshRecommendations,'recommendations-refresh','see-all','refresh')}</div>${rows.join('')}</section>`;
   }
   function chips(labels, action = 'category', selected = state.category) {
     return `<div class="category-chips">${labels.map(label => button(label,`${action}:${label}`,`chip ${selected === label ? 'selected' : ''}`)).join('')}</div>`;
@@ -356,6 +375,14 @@
     if(verb==='nav')return navigate(value);
     if(verb==='tab'){state.homeTab=value;state.category=U.any;renderPage(`tab:${value}`);return;}
     if(verb==='hero'){state.hero=Number(value);renderPage(`hero:${value}`);return;}
+    if(verb==='recommendations-refresh'){
+      const position=$('#main').scrollTop;
+      state.recommendationOffset=((state.recommendationOffset||0)+1)%(C.videos.length+C.heroes.length);
+      renderPage(action);
+      $('#main').scrollTop=position;
+      return;
+    }
+    if(verb==='home-recommendation')return openDetail(value);
     if(verb==='detail')return openDetail(value);
     if(verb==='play')return startPlayer(value);
     if(verb==='creator')return creator(value);
@@ -416,6 +443,18 @@
   function moveFocus(direction) {
     const current=document.activeElement;const elements=visibleElements();
     if(!elements.includes(current)){elements[0]?.focus();return;}
+    const recommendationRow=current.closest('.home-recommendation-row');
+    if(recommendationRow&&(direction==='ArrowLeft'||direction==='ArrowRight')){
+      const cards=$$('.video-card',recommendationRow);
+      const next=cards[cards.indexOf(current)+(direction==='ArrowRight'?1:-1)];
+      if(next){
+        next.focus({preventScroll:true});
+        next.scrollIntoView({behavior:state.reduced?'instant':'smooth',block:'nearest',inline:'nearest'});
+      }else if(direction==='ArrowLeft'){
+        focusAction('nav:home');
+      }
+      return;
+    }
     if(state.page==='account'&&!state.overlay){
       const action=sidebarPages.accountFocus(current.dataset.action,direction);
       if(action){focusAction(action);return;}
@@ -464,6 +503,13 @@
   document.addEventListener('click',(event)=>{const element=event.target.closest('[data-action]');if(!element)return;state.clickX=event.detail>0?event.clientX:null;perform(element.dataset.action,element);});
   document.addEventListener('input',(event)=>{if(pluginPages.onInput(event)||discussion.onInput?.(event))return;if(event.target.dataset.dmSetting){const key=event.target.dataset.dmSetting;const value=Number(event.target.value);$('#dm-'+key+'-value').textContent=value+'%';if(key==='opacity'){state.dmOpacity=value;$('.danmaku').style.opacity=value/100;}else{state.dmDensity=value;$$('.danmaku span').forEach((el,index)=>el.style.display=index<Math.ceil(value/20)?'':'none');}return;}if(event.target.id==='search-input'){state.query=event.target.value;updateSearch();}});
   document.addEventListener('keydown',handleKey);
+  new ResizeObserver(()=>{
+    const recommendations=$('.home-recommendations');
+    if(!recommendations||Number(recommendations.dataset.columns)===recommendationColumns())return;
+    const focus=recommendations.contains(document.activeElement)?document.activeElement.dataset.action:'';
+    recommendations.outerHTML=homeRecommendations();
+    if(focus)focusAction(focus);
+  }).observe($('#main'));
   document.addEventListener('mousemove',event=>{if(state.player&&event.target.closest('.player'))resetHide();});
   document.addEventListener('focusin',(event)=>{if(event.target.classList.contains('focusable'))state.focus=event.target.dataset.action;if(event.target.closest('#main'))state.contentFocus=event.target.dataset.action;pluginPages.onFocus(event.target);playerFeatures.syncChapters();});
   $$('[data-key]').forEach(el=>el.addEventListener('click',()=>{

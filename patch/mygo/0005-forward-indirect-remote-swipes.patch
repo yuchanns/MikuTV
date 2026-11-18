@@ -1,0 +1,151 @@
+diff --git a/internal/tvos/app.go b/internal/tvos/app.go
+--- a/internal/tvos/app.go
++++ b/internal/tvos/app.go
+@@ -115,6 +115,17 @@
+ 				b.window.RequestFrame()
+ 			}
+ 		}},
++		{Cmd: sel("remotePan:"), Fn: func(self id, _ objc.SEL, recognizer id) {
++			const ended = 3 // UIGestureRecognizerStateEnded
++			if w := b.window; w != nil && w.view == self && w.IsFocused() && send(recognizer, "state") == ended {
++				delta := native.panTranslation(recognizer, sel("translationInView:"), w.view)
++				// Indirect UIKit translation is opposite the focus direction.
++				if key := panKey(-delta.X, -delta.Y); key != platform.KeyUnknown {
++					w.sendRemoteKey(key, platform.KeyPressed)
++					w.sendRemoteKey(key, platform.KeyReleased)
++				}
++			}
++		}},
+ 		{Cmd: sel("pressesBegan:withEvent:"), Fn: func(self id, cmd objc.SEL, presses, event id) {
+ 			if b.window == nil || !b.window.press(presses, platform.KeyPressed) {
+ 				sendViewSuper(self, cmd, presses, event)
+diff --git a/internal/tvos/objc.go b/internal/tvos/objc.go
+--- a/internal/tvos/objc.go
++++ b/internal/tvos/objc.go
+@@ -13,6 +13,7 @@
+ 
+ type id = objc.ID
+ type rect struct{ X, Y, Width, Height float64 }
++type point struct{ X, Y float64 }
+ 
+ var native struct {
+ 	applicationMain func(int32, uintptr, id, id) int32
+@@ -26,6 +27,7 @@
+ 	poolPush        func() uintptr
+ 	poolPop         func(uintptr)
+ 	getRect         func(id, objc.SEL) rect
++	panTranslation  func(id, objc.SEL, id) point
+ 	initRect        func(id, objc.SEL, rect) id
+ 	commonModes     uintptr
+ 	defaultMode     uintptr
+@@ -66,6 +68,7 @@
+ 	purego.RegisterLibFunc(&native.poolPush, libobjc, "objc_autoreleasePoolPush")
+ 	purego.RegisterLibFunc(&native.poolPop, libobjc, "objc_autoreleasePoolPop")
+ 	purego.RegisterLibFunc(&native.getRect, libobjc, "objc_msgSend")
++	purego.RegisterLibFunc(&native.panTranslation, libobjc, "objc_msgSend")
+ 	purego.RegisterLibFunc(&native.initRect, libobjc, "objc_msgSend")
+ 	for name, destination := range map[string]*uintptr{
+ 		"kCFRunLoopCommonModes": &native.commonModes, "kCFRunLoopDefaultMode": &native.defaultMode,
+diff --git a/internal/tvos/remote.go b/internal/tvos/remote.go
+--- a/internal/tvos/remote.go
++++ b/internal/tvos/remote.go
+@@ -1,6 +1,10 @@
+ package tvos
+ 
+-import "github.com/egoist/mygo/internal/platform"
++import (
++	"math"
++
++	"github.com/egoist/mygo/internal/platform"
++)
+ 
+ // UIPressType values are stable public UIKit constants, independent of key codes.
+ func remoteKey(press int) platform.Key {
+@@ -24,6 +28,22 @@
+ 	}
+ }
+ 
++func panKey(x, y float64) platform.Key {
++	if x == 0 && y == 0 {
++		return platform.KeyUnknown
++	}
++	if math.Abs(x) >= math.Abs(y) {
++		if x < 0 {
++			return platform.KeyLeft
++		}
++		return platform.KeyRight
++	}
++	if y < 0 {
++		return platform.KeyUp
++	}
++	return platform.KeyDown
++}
++
+ // A consumed press also owns its release, even when the press changed the view.
+ type remotePresses map[platform.Key]bool
+ 
+diff --git a/internal/tvos/remote_test.go b/internal/tvos/remote_test.go
+--- a/internal/tvos/remote_test.go
++++ b/internal/tvos/remote_test.go
+@@ -39,3 +39,20 @@
+ 		t.Fatal("unhandled root Back did not reach UIKit")
+ 	}
+ }
++
++func TestRemotePanUsesItsDominantDirection(t *testing.T) {
++	for _, test := range []struct {
++		x, y float64
++		key  platform.Key
++	}{
++		{x: 42, y: 12, key: platform.KeyRight},
++		{x: -31, y: -8, key: platform.KeyLeft},
++		{x: 15, y: -39, key: platform.KeyUp},
++		{x: -6, y: 46, key: platform.KeyDown},
++		{key: platform.KeyUnknown},
++	} {
++		if got := panKey(test.x, test.y); got != test.key {
++			t.Errorf("panKey(%v, %v) = %v, want %v", test.x, test.y, got, test.key)
++		}
++	}
++}
+diff --git a/internal/tvos/window.go b/internal/tvos/window.go
+--- a/internal/tvos/window.go
++++ b/internal/tvos/window.go
+@@ -37,6 +37,7 @@
+ 	w.native = native.initRect(send(class("UIWindow"), "alloc"), sel("initWithFrame:"), bounds)
+ 	w.view = native.initRect(send(class("MyGoTVView"), "alloc"), sel("initWithFrame:"), rect{Width: bounds.Width, Height: bounds.Height})
+ 	controller := alloc("UIViewController")
++	w.installRemotePan()
+ 	send(controller, "setView:", w.view)
+ 	send(w.native, "setRootViewController:", controller)
+ 	send(controller, "release")
+@@ -135,6 +136,20 @@
+ 	return nil, platform.ErrUnsupported
+ }
+ 
++func (w *window) installRemotePan() {
++	// The remote surface emits indirect touches independently of its buttons.
++	const indirectTouch = 1 // UITouchTypeIndirect
++	number := send(class("NSNumber"), "numberWithInteger:", indirectTouch)
++	recognizer := send(send(class("UIPanGestureRecognizer"), "alloc"), "initWithTarget:action:", w.view, sel("remotePan:"))
++	send(recognizer, "setAllowedTouchTypes:", send(class("NSArray"), "arrayWithObject:", number))
++	send(w.view, "addGestureRecognizer:", recognizer)
++	send(recognizer, "release")
++}
++
++func (w *window) sendRemoteKey(key platform.Key, kind platform.SurfaceEventKind) bool {
++	return w.h.SurfaceEvent(platform.SurfaceEvent{Kind: kind, Key: key, PhysicalKey: key})
++}
++
+ func (w *window) press(presses id, kind platform.SurfaceEventKind) bool {
+ 	handled := false
+ 	items := send(presses, "allObjects")
+@@ -142,7 +157,7 @@
+ 		press := send(items, "objectAtIndex:", index)
+ 		key := remoteKey(int(send(press, "type")))
+ 		if key != platform.KeyUnknown {
+-			taken := w.h.SurfaceEvent(platform.SurfaceEvent{Kind: kind, Key: key, PhysicalKey: key})
++			taken := w.sendRemoteKey(key, kind)
+ 			handled = w.handledKeys.take(key, kind, taken) || handled
+ 		}
+ 	}

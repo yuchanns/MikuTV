@@ -2,6 +2,8 @@ package tvui
 
 import (
 	"context"
+	"fmt"
+	"image"
 	"math"
 	"testing"
 	"time"
@@ -218,11 +220,17 @@ func TestSourceCapabilitiesHideUnsupportedRoutesAndRailFocus(t *testing.T) {
 }
 
 type viewCatalogSession struct {
-	page chan provider.CollectionPage
+	page    chan provider.CollectionPage
+	artwork chan image.Image
 }
 
-func (s viewCatalogSession) Browse(context.Context, provider.BrowseRequest) (provider.CollectionPage, error) {
-	return <-s.page, nil
+func (s viewCatalogSession) Browse(ctx context.Context, _ provider.BrowseRequest) (provider.CollectionPage, error) {
+	select {
+	case page := <-s.page:
+		return page, nil
+	case <-ctx.Done():
+		return provider.CollectionPage{}, ctx.Err()
+	}
 }
 
 func (viewCatalogSession) Item(context.Context, provider.MediaRef) (provider.MediaItem, error) {
@@ -231,7 +239,232 @@ func (viewCatalogSession) Item(context.Context, provider.MediaRef) (provider.Med
 
 func (viewCatalogSession) Close() {}
 
-func TestAsyncCollectionKeepsEntryActionFocused(t *testing.T) {
+func (s viewCatalogSession) LoadCatalogArtwork(ctx context.Context, _ string) (image.Image, error) {
+	select {
+	case art := <-s.artwork:
+		return art, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestHomeKeepsFocusThroughArtworkPagingAndFiltering(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := testEntries()
+	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := viewCatalogSession{
+		page: make(chan provider.CollectionPage, 1), artwork: make(chan image.Image, 1),
+	}
+	completion := make(chan func(), 1)
+	var frame *ui.Context
+	catalog := app.NewCatalog(func(string) provider.Session { return session }, func(fn func()) { completion <- fn }, func() {
+		if frame != nil {
+			frame.Invalidate()
+		}
+	})
+	defer catalog.Close()
+	view := NewView(Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default()})
+	tester := ui.NewTester(func(c *ui.Context) { frame = c; view.Render(c) }, 1920, 1080)
+	view.SyncEntry()
+	tester.Frame()
+	if !tester.Focused(assets.Text.Home.ForYou) {
+		t.Fatal("loading changed the active home tab focus")
+	}
+
+	first := provider.MediaRef{Kind: provider.Video, ID: "first"}
+	session.page <- provider.CollectionPage{NextCursor: "next", Collections: []provider.Collection{{
+		ID: "catalog", Title: "Recommendations",
+		Items: []provider.MediaItem{
+			{Ref: first, Title: "First video", CoverURL: "https://example.com/cover.jpg"},
+			{Ref: provider.MediaRef{Kind: provider.Video, ID: "second"}, Title: "Second video"},
+			{Ref: provider.MediaRef{Kind: provider.Video, ID: "third"}, Title: "Third video"},
+		},
+	}}}
+	(<-completion)()
+	tester.Frame()
+	session.artwork <- image.NewRGBA(image.Rect(0, 0, 16, 9))
+	(<-completion)()
+	tester.Frame()
+	if !tester.Focused(assets.Text.Home.ForYou) {
+		t.Fatal("loading the backdrop lost the focused home tab")
+	}
+	tester.Key(0, ui.KeyDown)
+	if state.Focus != homePlayAction {
+		t.Fatalf("down from the first tab focused %s", state.Focus)
+	}
+	tester.Key(0, ui.KeyDown)
+	if state.Focus != app.FocusID("home/shelf/continue") {
+		t.Fatalf("down from the hero actions focused %s", state.Focus)
+	}
+	tester.Key(0, ui.KeyUp)
+	view.activeScroll.Y = 90
+	state.RecordPosition(app.Position{Focus: homePlayAction, Y: 90})
+	tester.Frame()
+	tester.Key(0, ui.KeyUp)
+	tester.Advance(2 * focusScroll.Duration)
+	if state.Focus != homeTabID("") || view.activeScroll.Y != 0 {
+		t.Fatalf("return to the home tabs left focus %s and scroll offset %v", state.Focus, view.activeScroll.Y)
+	}
+	tester.Advance(homeFeatureInterval)
+	if view.home.selected != 1 {
+		t.Fatalf("idle hero did not rotate with focus on the tab bar: %d", view.home.selected)
+	}
+	state.RecordPosition(app.Position{Focus: homeFeatureID(2)})
+	tester.Frame()
+	tester.Advance(2 * homeFeatureInterval)
+	if view.home.selected != 2 {
+		t.Fatalf("idle timer overwrote the focused feature: %d", view.home.selected)
+	}
+
+	card := catalogCardFocus("catalog", first)
+	y := view.home.layout.end - 900
+	view.activeScroll.Y = y
+	state.RecordPosition(app.Position{Focus: card, Y: y})
+	tester.Frame()
+	if snapshot := catalog.Snapshot(); snapshot.Phase != app.CatalogLoading || !snapshot.Appending {
+		t.Fatalf("reaching the last row did not request continuation: %+v", snapshot)
+	}
+	if got := view.home.layout.sections[0].cards[0]; got != state.Focus {
+		t.Fatalf("prefetch moved focus from the current card: %s", state.Focus)
+	}
+	next := provider.MediaRef{Kind: provider.Video, ID: "next"}
+	overflow := provider.MediaRef{Kind: provider.Video, ID: "overflow"}
+	session.page <- provider.CollectionPage{NextCursor: "repeated", Collections: []provider.Collection{{
+		ID: "catalog", Title: "Recommendations", Items: []provider.MediaItem{
+			{Ref: next, Title: "New video"},
+			{Ref: overflow, Title: "Last video in the row"},
+		},
+	}}}
+	(<-completion)()
+	tester.Frame()
+	if state.Focus != card || !tester.Focused("First video") {
+		t.Fatalf("appending cards moved focus: %s", state.Focus)
+	}
+	if count := len(view.home.layout.sections[0].cards); count != 5 {
+		t.Fatalf("expected old and new cards, got %d", count)
+	}
+	session.page <- provider.CollectionPage{NextCursor: "advanced", Collections: []provider.Collection{{
+		ID: "catalog", Title: "Recommendations", Items: []provider.MediaItem{{Ref: next, Title: "New video"}},
+	}}}
+	(<-completion)()
+	tester.Frame()
+	if snapshot := catalog.Snapshot(); !snapshot.AppendStalled || snapshot.CanLoadMore() {
+		t.Fatal("a repeat-only page did not stop pagination")
+	}
+	rightmost := view.home.layout.sections[0].cards[4]
+	state.RecordPosition(app.Position{Focus: view.home.layout.sections[0].cards[3], Y: view.activeScroll.Y})
+	tester.Frame()
+	if peek := view.focus.item(rightmost); peek == nil || peek.target.X >= 1920 || peek.target.X+peek.target.W <= 1920 || peek.target.W != homeShelfCoverWidth {
+		t.Fatalf("the last thumbnail should extend past the screen at its full width: %+v", peek)
+	}
+	tester.Key(0, ui.KeyRight)
+	tester.Advance(2 * focusScroll.Duration)
+	if revealed := view.focus.item(rightmost); state.Focus != rightmost || revealed == nil || revealed.target.X+revealed.target.W > 1920.5 {
+		t.Fatalf("Right did not reveal the rest of the last card: focus %s, bounds %+v", state.Focus, revealed)
+	}
+	tester.Key(0, ui.KeyRight)
+	if state.Focus != rightmost {
+		t.Fatalf("the last card did not keep focus at the end of its row: %s", state.Focus)
+	}
+	tester.Key(0, ui.KeyUp)
+	if state.Focus != homeRefresh {
+		t.Fatalf("Up from the rightmost card focused %s", state.Focus)
+	}
+	refresh := view.focus.item(homeRefresh)
+	if refresh == nil || refresh.target.X+refresh.target.W != 1920-homeRefreshRight ||
+		refresh.target.W != homeRefreshWidth || refresh.target.H != homeRefreshHeight {
+		t.Fatalf("the refresh action does not match its prototype bounds: %+v", refresh)
+	}
+	tester.Key(0, ui.KeyDown)
+	if state.Focus != rightmost {
+		t.Fatalf("Down from the heading action focused %s", state.Focus)
+	}
+	tester.Key(0, ui.KeyDown)
+	if state.Focus != homeEnd || catalog.Snapshot().Phase != app.CatalogReady {
+		t.Fatal("Down from the last row did not reach the refresh action")
+	}
+	if !tester.Focused(assets.Text.Refresh) {
+		t.Fatal("the refresh action was not focused at the end of recommendations")
+	}
+	tester.Key(0, ui.KeyDown)
+	if state.Focus != homeEnd || catalog.Snapshot().Phase != app.CatalogReady {
+		t.Fatal("Down on the last refresh card should leave focus and pagination unchanged")
+	}
+
+	state.RecordPosition(app.Position{Focus: homeTabID("")})
+	view.activeScroll.Y = 0
+	tester.Frame()
+	for _, tab := range []string{"popular", "ranking", "regions"} {
+		tester.Key(0, ui.KeyRight)
+		if state.Focus != homeTabID(tab) || view.home.tab != tab || catalog.Snapshot().Phase != app.CatalogLoading {
+			t.Fatalf("moving focus to %s did not switch the catalog", tab)
+		}
+		initial := provider.CollectionPage{
+			Filters: []provider.CatalogFilter{{ID: "0", Title: "All"}, {ID: "1", Title: "Animation"}},
+			Collections: []provider.Collection{{ID: tab, Title: tab, Items: []provider.MediaItem{
+				{Ref: first, Title: "First video"},
+			}}},
+		}
+		session.page <- initial
+		(<-completion)()
+		tester.Frame()
+		tester.Advance(2 * focusScroll.Duration)
+
+		tester.Key(0, ui.KeyDown)
+		filter := homeFilterID("1")
+		bounds := func() app.FocusTarget {
+			t.Helper()
+			control := view.focus.item(filter)
+			if control == nil {
+				t.Fatalf("%s filter is missing", tab)
+			}
+			return control.target
+		}
+		before := bounds()
+		tester.Key(0, ui.KeyRight)
+		snapshot := catalog.Snapshot()
+		if snapshot.Phase != app.CatalogLoading || len(snapshot.Page.Collections) != 0 ||
+			view.home.filter != "1" || state.Focus != filter || bounds() != before {
+			t.Fatalf("moving right did not request %s results and keep the tag in place", tab)
+		}
+		session.page <- provider.CollectionPage{Collections: []provider.Collection{{ID: tab, Title: tab, Items: []provider.MediaItem{
+			{Ref: next, Title: "Filtered video"},
+		}}}}
+		(<-completion)()
+		tester.Frame()
+		if state.Focus != filter || bounds() != before {
+			t.Fatalf("receiving %s results changed the tag geometry or focus", tab)
+		}
+		tester.Key(0, ui.KeyDown)
+		if state.Focus != catalogCardFocus(tab, next) {
+			t.Fatalf("moving down reached %s instead of the new %s results", state.Focus, tab)
+		}
+		tester.Key(0, ui.KeyUp)
+		if state.Focus != filter {
+			t.Fatalf("moving up from %s results focused %s", tab, state.Focus)
+		}
+		tester.Key(0, ui.KeyLeft)
+		if catalog.Snapshot().Phase != app.CatalogLoading || view.home.filter != "0" || state.Focus != homeFilterID("0") {
+			t.Fatalf("moving left did not reload the default %s results", tab)
+		}
+		session.page <- initial
+		(<-completion)()
+		tester.Frame()
+		tester.Key(0, ui.KeyUp)
+	}
+}
+
+func TestCatalogHoldMovesAtConstantSpeedUntilRelease(t *testing.T) {
 	assets, err := LoadAssets()
 	if err != nil {
 		t.Fatal(err)
@@ -247,30 +480,82 @@ func TestAsyncCollectionKeepsEntryActionFocused(t *testing.T) {
 	}
 	session := viewCatalogSession{page: make(chan provider.CollectionPage, 1)}
 	completion := make(chan func(), 1)
-	var frame *ui.Context
-	catalog := app.NewCatalog(func(string) provider.Session { return session }, func(fn func()) { completion <- fn }, func() {
-		if frame != nil {
-			frame.Invalidate()
-		}
-	})
+	catalog := app.NewCatalog(func(string) provider.Session { return session }, func(fn func()) { completion <- fn }, func() {})
 	defer catalog.Close()
 	view := NewView(Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default()})
-	catalog.Select(entries[0])
-	tester := ui.NewTester(func(c *ui.Context) { frame = c; view.Render(c) }, 1920, 1080)
-	if !tester.Focused(assets.Text.Cancel) {
-		t.Fatal("loading action did not receive focus")
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	view.SyncEntry()
+	feed := provider.Collection{ID: "feed", Title: "Recommendations"}
+	for n := range 35 {
+		id := fmt.Sprintf("video-%d", n)
+		feed.Items = append(feed.Items, provider.MediaItem{Ref: provider.MediaRef{Kind: provider.Video, ID: id}, Title: id})
 	}
-	session.page <- provider.CollectionPage{Collections: []provider.Collection{{
-		ID: "catalog", Title: "Catalog",
-		Items: []provider.MediaItem{{Ref: provider.MediaRef{Kind: provider.Series, ID: "series"}, Title: "Show"}},
-	}}}
+	session.page <- provider.CollectionPage{Collections: []provider.Collection{feed}}
 	(<-completion)()
 	tester.Frame()
-	if !tester.Focused(assets.Text.SwitchEntry) {
-		t.Fatal("collection replaced the focused action")
+
+	playBounds := view.focus.item(homePlayAction).target
+	tester.KeyDown(ui.KeyDown)
+	tester.Advance(500 * time.Millisecond)
+	if focused := view.focus.item(homePlayAction).target; focused != playBounds {
+		t.Fatalf("play button changed bounds when focused: %+v to %+v", playBounds, focused)
 	}
-	tester.Key(0, ui.KeyEnter)
-	if state.Page != app.Entries {
-		t.Fatalf("entry confirmation is unreachable: %+v", state.Location)
+	if state.Focus != homePlayAction || view.activeScroll.Y != 0 {
+		t.Fatalf("before the repeat, focus is %s and offset is %v", state.Focus, view.activeScroll.Y)
+	}
+	tester.KeyRepeat(0, ui.KeyDown)
+	for n := 1; n <= 40; n++ {
+		tester.Advance((time.Second / 60))
+		want := float32(float64(n) * (time.Second / 60).Seconds() * catalogHoldSpeed)
+		if got := view.activeScroll.Y; got < want-0.01 || got > want+0.01 {
+			t.Fatalf("frame %d offset = %.2f, want %.2f", n, got, want)
+		}
+	}
+	stopped := view.activeScroll.Y
+	tester.KeyUp(ui.KeyDown)
+	tester.Advance(500 * time.Millisecond)
+	if view.home.hold.key != ui.KeyUnknown || view.activeScroll.Y != stopped {
+		t.Fatalf("release left hold active or moved from %.2f to %.2f", stopped, view.activeScroll.Y)
+	}
+	tester.KeyDown(ui.KeyUp)
+	tester.Advance(500 * time.Millisecond)
+	start := view.activeScroll.Y
+	tester.KeyRepeat(0, ui.KeyUp)
+	for n := 1; n <= 15; n++ {
+		tester.Advance((time.Second / 60))
+		want := start - float32(float64(n)*(time.Second / 60).Seconds()*catalogHoldSpeed)
+		if got := view.activeScroll.Y; got < want-0.01 || got > want+0.01 {
+			t.Fatalf("up frame %d offset = %.2f, want %.2f", n, got, want)
+		}
+	}
+	tester.KeyUp(ui.KeyUp)
+}
+
+func TestCatalogBuildsTheViewportWithOneRowOfOverscan(t *testing.T) {
+	for _, sample := range []struct {
+		viewport float32
+		want     int
+	}{{103 + 3*356, 3}, {103 + 3*356 + 1, 4}, {1920 - collapsedRailWidth, 5}, {2240, 7}} {
+		grid := homeGridMetrics(sample.viewport)
+		if grid.columns != sample.want || grid.width(sample.viewport) != homeShelfCoverWidth {
+			t.Fatalf("viewport %v has %d cards of width %v", sample.viewport, grid.columns, grid.width(sample.viewport))
+		}
+	}
+	section := catalogSection{top: 1750, grid: homeGridMetrics(1920 - collapsedRailWidth)}
+	if section.grid.width(1920-collapsedRailWidth) != homeShelfCardSize.width ||
+		section.grid.cover != homeShelfCardSize.cover || section.grid.gap != homeShelfGap {
+		t.Fatal("home cards changed dimensions between a shelf and the recommendation grid")
+	}
+	start := section.top + section.grid.heading
+	for _, total := range []int{100, 1000, 10000} {
+		first, end := section.visibleRows(start+section.grid.stride()*10, 1080, total, 1)
+		if first != 9 || end != 15 {
+			t.Fatalf("%d slots rendered rows [%d,%d), expected [9,15)", total, first, end)
+		}
+	}
+	for _, input := range []struct{ real, slots int }{{0, 5}, {8, 10}, {10, 15}} {
+		if got := section.grid.slots(input.real, true); got != input.slots {
+			t.Errorf("%d real cards produced %d loading slots, want %d", input.real, got, input.slots)
+		}
 	}
 }

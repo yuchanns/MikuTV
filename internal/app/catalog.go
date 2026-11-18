@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
@@ -17,23 +18,34 @@ const (
 )
 
 type CatalogSnapshot struct {
-	Phase CatalogPhase
-	Page  provider.CollectionPage
-	Error provider.ErrorCode
+	Phase         CatalogPhase
+	Page          provider.CollectionPage
+	PageRevision  uint64
+	FeedRevision  uint64
+	Error         provider.ErrorCode
+	Appending     bool
+	AppendStalled bool
+}
+
+func (s CatalogSnapshot) CanLoadMore() bool {
+	return s.Phase == CatalogReady && s.Page.NextCursor != "" && !s.AppendStalled
 }
 
 // Catalog is owned by the application thread. Only the session call runs
 // in a worker, and its result reenters through post before reading state.
 type Catalog struct {
-	open               func(string) provider.Session
-	post               func(func())
-	changed            func()
-	entryID            string
-	session            provider.Session
-	canBrowse          bool
-	generation         uint64
-	pending            context.CancelFunc
-	snapshot           CatalogSnapshot
+	open       func(string) provider.Session
+	post       func(func())
+	changed    func()
+	entryID    string
+	session    provider.Session
+	canBrowse  bool
+	collection string
+	filter     string
+	pending    context.CancelFunc
+	request    provider.BrowseRequest
+	snapshot   CatalogSnapshot
+
 	artwork, backdrops *catalogArtwork
 }
 
@@ -41,6 +53,7 @@ func NewCatalog(open func(string) provider.Session, post func(func()), changed f
 	return &Catalog{open: open, post: post, changed: changed}
 }
 
+// Snapshot returns a read-only view of the published catalog.
 func (c *Catalog) Snapshot() CatalogSnapshot { return c.snapshot }
 
 func (c *Catalog) Authenticator() provider.Authenticator {
@@ -51,6 +64,27 @@ func (c *Catalog) Authenticator() provider.Authenticator {
 func (c *Catalog) AccountReader() provider.AccountReader {
 	reader, _ := c.session.(provider.AccountReader)
 	return reader
+}
+
+func (c *Catalog) ReadItem(ref provider.MediaRef, accept func(provider.MediaItem, error)) context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	session := c.session
+	if session == nil {
+		accept(provider.MediaItem{}, &provider.Error{Code: provider.Unsupported})
+		return cancel
+	}
+	go func() {
+		item, err := session.Item(ctx, ref)
+		c.post(func() {
+			if ctx.Err() != nil {
+				return
+			}
+			cancel()
+			accept(item, err)
+			c.changed()
+		})
+	}()
+	return cancel
 }
 
 func (c *Catalog) Select(entry Entry) {
@@ -75,60 +109,167 @@ func (c *Catalog) Reload() {
 	if !c.canBrowse {
 		return
 	}
-	c.invalidateRequest()
+	c.clearPage()
+	c.browse(c.query(), false)
+}
+
+func (c *Catalog) Show(collection, filter string) {
+	if c.collection == collection && c.filter == filter {
+		return
+	}
+	c.collection, c.filter = collection, filter
+	c.Reload()
+}
+
+func (c *Catalog) query() provider.BrowseRequest {
+	return provider.BrowseRequest{Collection: c.collection, Filter: c.filter}
+}
+
+func (c *Catalog) Refresh() {
+	if c.canBrowse {
+		request := c.query()
+		request.Refresh, request.Cursor = true, c.snapshot.Page.NextCursor
+		c.browse(request, false)
+	}
+}
+
+func (c *Catalog) LoadMore() {
+	if c.canBrowse && c.snapshot.CanLoadMore() {
+		request := c.query()
+		request.Cursor = c.snapshot.Page.NextCursor
+		c.browse(request, true)
+	}
+}
+
+func (c *Catalog) Retry() {
+	if c.snapshot.Phase == CatalogFailed || c.snapshot.Phase == CatalogCanceled {
+		c.browse(c.request, c.snapshot.Appending)
+	}
+}
+
+func (c *Catalog) browse(request provider.BrowseRequest, appendPage bool) {
+	c.cancelRequest()
+	c.request = request
+	c.snapshot.Phase = CatalogLoading
+	c.snapshot.Error = ""
+	c.snapshot.Appending = appendPage
+	c.snapshot.AppendStalled = false
+	previous := c.snapshot.Page
 	session := c.session
 	if session == nil {
-		c.snapshot = CatalogSnapshot{Phase: CatalogFailed, Error: provider.PluginFailed}
+		c.snapshot.Phase, c.snapshot.Error = CatalogFailed, provider.PluginFailed
 		c.changed()
 		return
 	}
-	generation := c.generation
 	ctx, cancel := context.WithCancel(context.Background())
 	c.pending = cancel
-	c.snapshot = CatalogSnapshot{Phase: CatalogLoading}
 	c.changed()
 	go func() {
-		page, err := session.Browse(ctx, provider.BrowseRequest{})
+		page, err := session.Browse(ctx, request)
 		c.post(func() {
-			if generation != c.generation || ctx.Err() != nil {
+			if ctx.Err() != nil {
 				return
 			}
 			cancel()
 			c.pending = nil
-			if err == nil {
-				c.snapshot = CatalogSnapshot{Phase: CatalogReady, Page: page}
+			if err != nil {
+				c.snapshot.Phase, c.snapshot.Error = CatalogFailed, provider.CodeOf(err)
 			} else {
-				c.snapshot = CatalogSnapshot{Phase: CatalogFailed, Error: provider.CodeOf(err)}
+				c.acceptPage(previous, page, request, appendPage)
 			}
 			c.changed()
 		})
 	}()
 }
 
+func (c *Catalog) acceptPage(previous, page provider.CollectionPage, request provider.BrowseRequest, appendPage bool) {
+	if page.NextCursor == request.Cursor {
+		page.NextCursor = ""
+	}
+	var added bool
+	feedRevision := c.snapshot.FeedRevision
+	if appendPage {
+		page, added = mergeCatalog(previous, page)
+	} else {
+		feedRevision++
+		c.clearArtwork()
+		page, _ = mergeCatalog(provider.CollectionPage{}, page)
+	}
+	c.snapshot = CatalogSnapshot{
+		Phase: CatalogReady, Page: page, PageRevision: c.snapshot.PageRevision + 1,
+		FeedRevision: feedRevision, AppendStalled: appendPage && !added,
+	}
+}
+
+func mergeCatalog(previous, next provider.CollectionPage) (provider.CollectionPage, bool) {
+	page := provider.CollectionPage{
+		Collections: slices.Clone(previous.Collections), NextCursor: next.NextCursor,
+		Filters: next.Filters, Shelves: next.Shelves,
+	}
+	if page.Filters == nil {
+		page.Filters = previous.Filters
+	}
+	if page.Shelves == nil {
+		page.Shelves = previous.Shelves
+	}
+	indices := make(map[string]int, len(page.Collections))
+	for index, group := range page.Collections {
+		indices[group.ID] = index
+	}
+	var added bool
+	for _, incoming := range next.Collections {
+		index, exists := indices[incoming.ID]
+		if !exists {
+			index = len(page.Collections)
+			indices[incoming.ID] = index
+			page.Collections = append(page.Collections, provider.Collection{ID: incoming.ID, Title: incoming.Title})
+		}
+		group := &page.Collections[index]
+		seen := make(map[provider.MediaRef]struct{}, len(group.Items)+len(incoming.Items))
+		for _, item := range group.Items {
+			seen[item.Ref] = struct{}{}
+		}
+		for _, item := range incoming.Items {
+			if _, duplicate := seen[item.Ref]; duplicate {
+				continue
+			}
+			seen[item.Ref] = struct{}{}
+			group.Items = append(group.Items, item)
+			added = true
+		}
+	}
+	return page, added
+}
+
 func (c *Catalog) Cancel() {
-	if c.pending != nil {
-		c.invalidateRequest()
-		c.snapshot = CatalogSnapshot{Phase: CatalogCanceled}
+	if c.cancelRequest() {
+		c.snapshot.Phase = CatalogCanceled
 		c.changed()
 	}
 }
 
 func (c *Catalog) Close() {
-	c.invalidateRequest()
-	c.clearArtwork()
+	c.cancelRequest()
+	c.clearPage()
 	if c.session != nil {
 		c.session.Close()
 		c.session = nil
 	}
 	c.entryID = ""
 	c.canBrowse = false
-	c.snapshot = CatalogSnapshot{}
+	c.collection, c.filter = "", ""
 }
 
-func (c *Catalog) invalidateRequest() {
-	c.generation++
-	if c.pending != nil {
-		c.pending()
-		c.pending = nil
+func (c *Catalog) clearPage() {
+	c.clearArtwork()
+	c.snapshot = CatalogSnapshot{PageRevision: c.snapshot.PageRevision + 1, FeedRevision: c.snapshot.FeedRevision + 1}
+}
+
+func (c *Catalog) cancelRequest() bool {
+	if c.pending == nil {
+		return false
 	}
+	c.pending()
+	c.pending = nil
+	return true
 }

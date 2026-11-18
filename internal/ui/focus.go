@@ -57,35 +57,70 @@ func (f *focusController) destination(destination focusDestination) app.FocusID 
 	return ""
 }
 
-func (v *View) move(direction app.Direction) {
-	var current *focusItem
-	for index := range v.focus.controls {
-		if v.focus.controls[index].target.ID == v.State.Focus {
-			current = &v.focus.controls[index]
-			break
+func (f *focusController) item(id app.FocusID) *focusItem {
+	for index := range f.controls {
+		if f.controls[index].target.ID == id {
+			return &f.controls[index]
 		}
 	}
-	if current == nil {
-		return
-	}
-	if current.direction != nil && current.direction(direction) {
-		return
-	}
+	return nil
+}
+
+func (f *focusController) neighbor(current *focusItem, direction app.Direction) app.FocusID {
 	var targets []app.FocusTarget
-	for _, control := range v.focus.controls {
+	for _, control := range f.controls {
 		if control.group == current.group {
 			targets = append(targets, control.target)
 		}
 	}
-	next := app.Neighbor(targets, v.State.Focus, direction)
-	if next == v.State.Focus {
-		if target := v.focus.destination(v.focus.groups[current.group].edges[direction]); target != "" {
+	next := app.Neighbor(targets, current.target.ID, direction)
+	if next == current.target.ID {
+		if target := f.destination(f.groups[current.group].edges[direction]); target != "" {
 			next = target
 		}
 	}
-	if next != v.State.Focus {
-		v.State.Focus, v.State.Area, v.reveal = next, v.focus.area(next), true
+	return next
+}
+
+func (v *View) move(direction app.Direction) {
+	current := v.focus.item(v.State.Focus)
+	if current == nil || (current.direction != nil && current.direction(direction)) {
+		return
 	}
+	next := v.focus.neighbor(current, direction)
+	if next == v.State.Focus {
+		return
+	}
+	v.moveFocus(next, direction, true)
+	if v.State.Page != app.Home || (direction != app.Left && direction != app.Right) {
+		return
+	}
+	switch current.group {
+	case homeHeader:
+		for _, tab := range homeTabs {
+			if next == homeTabID(tab) {
+				v.showHomeTab(tab, "")
+				break
+			}
+		}
+	case homeFilters:
+		for _, filter := range v.home.filters {
+			if next == homeFilterID(filter.ID) {
+				v.showHomeTab(v.home.tab, filter.ID)
+				break
+			}
+		}
+	}
+}
+
+func (v *View) moveFocus(next app.FocusID, direction app.Direction, reveal bool) {
+	if v.State.Page == app.Home {
+		v.home.featureStep = 1
+		if direction == app.Left || direction == app.Up {
+			v.home.featureStep = -1
+		}
+	}
+	v.State.Focus, v.State.Area, v.reveal = next, v.focus.area(next), reveal
 }
 
 func (v *View) bind(element ui.Element, id app.FocusID, group string, active bool, direction func(app.Direction) bool) {
@@ -97,13 +132,16 @@ func (v *View) bind(element ui.Element, id app.FocusID, group string, active boo
 	if v.Trace {
 		element.ObserveInput(func(event ui.InputEvent) {
 			if event.Kind == ui.InputKeyDown {
-				log.Printf("remote input: key=%v focus=%s", event.Key, v.State.Focus)
+				log.Printf("remote input: key=%v focus=%s repeat=%t", event.Key, v.State.Focus, event.Repeat)
 			}
 		})
 	}
 	element.HandleInput(func(event ui.InputEvent) bool {
 		if event.Kind != ui.InputKeyDown {
 			return false
+		}
+		if event.Repeat && v.startCatalogHold(event.Key, group) {
+			return true
 		}
 		switch event.Key {
 		case ui.KeyLeft:
@@ -114,19 +152,24 @@ func (v *View) bind(element ui.Element, id app.FocusID, group string, active boo
 			v.dispatch(func() { v.move(app.Up) })
 		case ui.KeyDown:
 			v.dispatch(func() { v.move(app.Down) })
-		case ui.KeyEscape:
-			return v.goBack()
 		default:
 			return false
 		}
 		return true
 	})
-	if v.drawnRevision != v.State.Revision && v.State.Focus == id {
-		element.Focus(ui.FocusOptions{PreventScroll: true})
+	if v.State.Focus == id {
+		returningToHeader := group == homeHeader && v.activeScroll != nil && v.activeScroll.Scrolling()
+		if v.reveal || v.drawnRevision != v.State.Revision || v.home.hold.key != ui.KeyUnknown || returningToHeader {
+			element.Focus(ui.FocusOptions{PreventScroll: true})
+		}
 	}
 	r := element.Bounds()
 	v.focus.controls = append(v.focus.controls, focusItem{target: app.FocusTarget{ID: id, X: r.X, Y: r.Y, W: r.W, H: r.H}, group: group, direction: direction})
 	if v.reveal && v.State.Focus == id {
-		element.ScrollIntoView()
+		if v.State.Page == app.Home && v.activeScroll != nil && group == homeHeader {
+			v.activeScroll.ScrollTo(0, 0, focusScroll)
+			return
+		}
+		element.ScrollIntoView(ui.ScrollIntoViewOptions{Animation: &focusScroll})
 	}
 }
