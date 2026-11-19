@@ -38,6 +38,8 @@ type Catalog struct {
 	post       func(func())
 	changed    func()
 	entryID    string
+	entryGen   uint64
+	sessionGen uint64
 	session    provider.Session
 	canBrowse  bool
 	collection string
@@ -48,6 +50,7 @@ type Catalog struct {
 
 	artwork, backdrops *catalogArtwork
 }
+
 
 func NewCatalog(open func(string) provider.Session, post func(func()), changed func()) *Catalog {
 	return &Catalog{open: open, post: post, changed: changed}
@@ -67,36 +70,86 @@ func (c *Catalog) AccountReader() provider.AccountReader {
 }
 
 func (c *Catalog) ReadItem(ref provider.MediaRef, accept func(provider.MediaItem, error)) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
-	session := c.session
-	if session == nil {
+	if c.session == nil {
 		accept(provider.MediaItem{}, &provider.Error{Code: provider.Unsupported})
-		return cancel
+		return func() {}
 	}
+	return c.readItem(ref, c.session.Item, accept)
+}
+
+func (c *Catalog) ReadVideoDetail(ref provider.MediaRef, accept func(provider.MediaItem, error)) context.CancelFunc {
+	session, ok := c.session.(provider.VideoDetailReader)
+	if !ok {
+		return c.ReadItem(ref, accept)
+	}
+	return c.readItem(ref, session.VideoDetail, accept)
+}
+
+func (c *Catalog) readItem(ref provider.MediaRef, read func(context.Context, provider.MediaRef) (provider.MediaItem, error),
+	accept func(provider.MediaItem, error),
+) context.CancelFunc {
+	return catalogResult(c, func(ctx context.Context) (provider.MediaItem, error) {
+		return read(ctx, ref)
+	}, accept)
+}
+
+func (c *Catalog) EditVideo(request provider.VideoEdit, accept func(provider.VideoEditResult, error)) context.CancelFunc {
+	editor, _ := c.session.(provider.VideoEditor)
+	return catalogResult(c, func(ctx context.Context) (provider.VideoEditResult, error) {
+		if editor == nil {
+			return provider.VideoEditResult{}, &provider.Error{Code: provider.Unsupported}
+		}
+		return editor.EditVideo(ctx, request)
+	}, accept)
+}
+
+func (c *Catalog) ReadVideoComments(query provider.VideoCommentQuery, accept func(provider.VideoCommentPage, error)) context.CancelFunc {
+	reader, _ := c.session.(provider.VideoCommentReader)
+	return catalogResult(c, func(ctx context.Context) (provider.VideoCommentPage, error) {
+		if reader == nil {
+			return provider.VideoCommentPage{}, &provider.Error{Code: provider.Unsupported}
+		}
+		return reader.VideoComments(ctx, query)
+	}, accept)
+}
+
+func catalogResult[T any](c *Catalog, operation func(context.Context) (T, error), accept func(T, error)) context.CancelFunc {
+	ctx, cancel := context.WithCancel(context.Background())
+	sessionGen := c.sessionGen
 	go func() {
-		item, err := session.Item(ctx, ref)
+		result, err := operation(ctx)
 		c.post(func() {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || c.sessionGen != sessionGen {
 				return
 			}
 			cancel()
-			accept(item, err)
+			accept(result, err)
 			c.changed()
 		})
 	}()
 	return cancel
 }
 
-func (c *Catalog) Select(entry Entry) {
+// Open binds an entry session without starting an initial browse request,
+// allowing account restoration to attach credentials before the first fetch.
+func (c *Catalog) Open(entry Entry) bool {
 	canBrowse := entry.Capabilities.Has(provider.BrowseCatalog)
-	if c.entryID == entry.ID && c.canBrowse == canBrowse {
-		return
+	if c.entryID == entry.ID && c.entryGen == entry.Generation && c.canBrowse == canBrowse {
+		return false
 	}
 	c.Close()
 	c.entryID = entry.ID
+	c.entryGen = entry.Generation
 	c.canBrowse = canBrowse
 	if entry.ID != "" {
 		c.session = c.open(entry.ID)
+	}
+	return true
+}
+
+func (c *Catalog) Select(entry Entry) {
+	if !c.Open(entry) {
+		return
 	}
 	if c.canBrowse {
 		c.Reload()
@@ -109,8 +162,15 @@ func (c *Catalog) Reload() {
 	if !c.canBrowse {
 		return
 	}
+	c.sessionGen++
 	c.clearPage()
 	c.browse(c.query(), false)
+}
+
+func (c *Catalog) EnsureLoaded() {
+	if c.canBrowse && c.snapshot.Phase == CatalogIdle {
+		c.Reload()
+	}
 }
 
 func (c *Catalog) Show(collection, filter string) {
@@ -134,7 +194,7 @@ func (c *Catalog) Refresh() {
 }
 
 func (c *Catalog) LoadMore() {
-	if c.canBrowse && c.snapshot.CanLoadMore() {
+	if c.snapshot.CanLoadMore() {
 		request := c.query()
 		request.Cursor = c.snapshot.Page.NextCursor
 		c.browse(request, true)
@@ -156,11 +216,6 @@ func (c *Catalog) browse(request provider.BrowseRequest, appendPage bool) {
 	c.snapshot.AppendStalled = false
 	previous := c.snapshot.Page
 	session := c.session
-	if session == nil {
-		c.snapshot.Phase, c.snapshot.Error = CatalogFailed, provider.PluginFailed
-		c.changed()
-		return
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.pending = cancel
 	c.changed()
@@ -249,6 +304,7 @@ func (c *Catalog) Cancel() {
 }
 
 func (c *Catalog) Close() {
+	c.sessionGen++
 	c.cancelRequest()
 	c.clearPage()
 	if c.session != nil {
@@ -256,6 +312,7 @@ func (c *Catalog) Close() {
 		c.session = nil
 	}
 	c.entryID = ""
+	c.entryGen = 0
 	c.canBrowse = false
 	c.collection, c.filter = "", ""
 }

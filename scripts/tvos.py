@@ -49,7 +49,6 @@ def prepare():
     for patch in patches:
         arguments = ["git", "apply", "--whitespace=error",
                      "--directory=vendor/github.com/egoist/mygo"]
-        run([*arguments, "--check", str(patch)])
         run([*arguments, str(patch)])
     # Go 1.27 also checks the vendored package index for packages added by patches.
     index = ROOT / "vendor/modules.txt"

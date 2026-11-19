@@ -17,11 +17,6 @@ const (
 	favoriteStatus = "favorite-status"
 )
 
-type favoritePicture struct {
-	art    *app.CatalogArtwork
-	bitmap *ui.Bitmap
-}
-
 func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) {
 	if p.active && p.State.Focus == "" {
 		p.State.Focus = app.ContentAction
@@ -133,7 +128,7 @@ func (p *PageContext) libraryEmpty(c *ui.Context, icon, title, note, action, act
 	}
 	top := float32(55)
 	style := buttonAppearance{height: 62, padding: 27, radius: 12, fontSize: 22, fontWeight: 550, iconSize: 24, iconGap: 13,
-		background: d.secondaryFill, foreground: paint(colors.Text.Secondary),
+		background: d.secondaryFill, foreground: d.secondaryText,
 		border: d.secondaryBorder}
 	if actionIcon != "" {
 		top = 105
@@ -142,7 +137,7 @@ func (p *PageContext) libraryEmpty(c *ui.Context, icon, title, note, action, act
 		ui.Icon(c, p.Assets.Icon(icon)).Size(65, 65).TextColor(paint(colors.Accent.Soft))
 		ui.Text(c, title).Margin(32, 0, 18, 0).FontSize(36).FontWeight(450).LineHeight(1.39)
 		if note != "" {
-			ui.Text(c, note).Margin(0, 0, 34, 0).FontSize(21).LineHeight(1.38).TextColor(paint(colors.Text.Secondary))
+			ui.Text(c, note).Margin(0, 0, 34, 0).FontSize(21).LineHeight(1.38).TextColor(paint(colors.Text.Muted))
 		}
 		p.styledButton(c, action, actionIcon, focus, favoriteStatus, run, style).AlignSelf(ui.Center)
 	})
@@ -150,9 +145,13 @@ func (p *PageContext) libraryEmpty(c *ui.Context, icon, title, note, action, act
 
 func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSection) {
 	colors, text := p.Theme.Colors, p.Assets.Text.Activity
+	entry, _ := p.State.Current()
 	ui.Box(c.Key("favorite-tabs")).FillWidth().Height(102).Children(func() {
 		ui.Row(c).Absolute().Top(45).Left(78).Height(61).Gap(18).Children(func() {
 			for _, section := range libraryTabs {
+				if !entry.Capabilities.Has(section.Capability()) {
+					continue
+				}
 				title := text.libraryTab(section)
 				id := app.FocusID("library/tab/" + section)
 				selected := section == active
@@ -161,11 +160,11 @@ func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSe
 					width = 123
 				}
 				if selected {
-					background, foreground = withAlpha(colors.Playback.Foreground, 0x12), paint(colors.Text.Primary)
+					background, foreground = withAlpha(colors.Text.Primary, 0x12), paint(colors.Text.Primary)
 				}
-				focused := p.State.Focus == id
+				focused := p.paintFocus() == id
 				if focused {
-					background, foreground = withAlpha(colors.Focus.Background, 0x20), paint(colors.Focus.Background)
+					background, foreground = withAlpha(colors.Focus.Background, 0x20), paint(colors.Text.Primary)
 				}
 				button := ui.Button(c.Key(string(id)), "").Label(title).Role(ui.RoleTab).AccessSelected(selected).
 					Size(width, 61).Padding(0, 0).Center().Radius(30).Background(background).TextColor(foreground).
@@ -193,7 +192,7 @@ func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSe
 
 func (p *PageContext) libraryHeading(c *ui.Context, folder provider.AccountRow, inFolder bool, total int) {
 	text, colors := p.Assets.Text.Activity, p.Theme.Colors
-	secondary := paint(colors.Text.Secondary)
+	secondary := paint(colors.Text.Muted)
 	if !inFolder {
 		ui.Text(c, text.FavoritesTitle).Absolute().Top(39).Left(103).FontSize(51).FontWeight(550).LetterSpacing(1)
 		ui.Text(c, text.FavoritesNote).Absolute().Top(132).Left(103).FontSize(22).TextColor(secondary)
@@ -226,15 +225,16 @@ func (p *PageContext) libraryCollectionMeta(c *ui.Context, query provider.Accoun
 	})
 	if query.Section == provider.AccountWatchLater {
 		ui.Box(c).Absolute().Top(top + 7).Right(83).Children(func() {
-			p.libraryTextLink(c, text.PlayAll, "play", libraryPlayAll, libraryMeta, func() {})
+			p.libraryTextLink(c, text.PlayAll, "play", libraryPlayAll, libraryMeta, func() {
+				})
 		})
 	}
 }
 
 func (p *PageContext) libraryTextLink(c *ui.Context, label, icon string, id app.FocusID, region string, action func()) {
 	ink := paint(p.Theme.Colors.Text.Secondary)
-	if p.State.Focus == id {
-		ink = paint(p.Theme.Colors.Playback.Foreground)
+	if p.paintFocus() == id {
+		ink = paint(p.Theme.Colors.Text.Primary)
 	}
 	button := ui.Button(c.Key(string(id)), "").Label(label).Height(28).Padding(0, 0).
 		Border(0, ui.Transparent).Background(ui.Transparent).TextColor(ink).
@@ -332,30 +332,11 @@ func (p *PageContext) prepareAccountArtwork(items []provider.AccountRow) {
 		}
 	}
 	p.host.Catalog.PrepareArtwork(locations)
-	for url, cover := range p.host.favoriteArtwork {
-		if p.host.Catalog.Artwork(url) != cover.art {
-			delete(p.host.favoriteArtwork, url)
-		}
-	}
+	p.pruneCatalogBitmaps()
 }
 
 func (p *PageContext) accountRowImage(location string) *ui.Bitmap {
-	if p.host.Catalog == nil || location == "" {
-		return nil
-	}
-	art := p.host.Catalog.Artwork(location)
-	if art == nil {
-		return nil
-	}
-	if p.host.favoriteArtwork == nil {
-		p.host.favoriteArtwork = make(map[string]favoritePicture)
-	}
-	if cached := p.host.favoriteArtwork[location]; cached.art == art {
-		return cached.bitmap
-	}
-	bitmap := ui.NewBitmap(art.Image)
-	p.host.favoriteArtwork[location] = favoritePicture{art: art, bitmap: bitmap}
-	return bitmap
+	return p.catalogCover(location)
 }
 
 func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, item provider.AccountRow, directory bool, width, cover float32, managing bool) {
@@ -369,7 +350,7 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, it
 		}
 	}
 	id := libraryCardFocus(query, item)
-	focus := p.State.Focus == id
+	focus := p.paintFocus() == id
 	button := ui.Button(c.Key(string(id)), "").Label(item.Title).Width(width).Height(cover+107).Padding(0, 0).
 		Border(0, ui.Transparent).Background(ui.Transparent).Shrink(0)
 	selected := managing && p.host.favorites.management.selected(item.RemovalID)
@@ -386,6 +367,11 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, it
 			})
 		})
 	}
+	if !managing && !directory && item.Ref != nil && item.Ref.EntryID == p.State.CurrentEntry && p.canOpenVideoDetail(*item.Ref) {
+		media := provider.MediaItem{Ref: *item.Ref, Title: item.Title, CoverURL: item.CoverURL,
+			DurationSeconds: item.DurationSeconds, Views: item.Views}
+		button.OnClick(func() { p.dispatch(func() { p.openVideoDetail(media) }) })
+	}
 	p.bind(button, id, favoriteCards)
 	button.Children(func() {
 		radius, title, margin, spacing := float32(13), float32(21), float32(16), float32(.3)
@@ -395,7 +381,7 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, it
 		}
 		ui.Column(c).Fill().Children(func() {
 			d := p.uiColors()
-			poster := ui.Box(c).FillWidth().Height(cover).Radius(radius).Background(paint(colors.Surface.Raised))
+			poster := ui.Box(c).FillWidth().Height(cover).Radius(radius).Background(d.coverFill)
 			if directory {
 				poster.Gradient(paint(colors.Decoration.CardStart), paint(colors.Decoration.CardEnd), 130)
 			}
@@ -410,7 +396,7 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, it
 				ui.Box(c).Fill().Radius(radius).Clip().Children(func() {
 					shade, fade := d.coverShade, float32(.55)
 					if directory {
-						shade, fade = d.coverShade, .8
+						fade = .8
 					}
 					if image := p.accountRowImage(item.CoverURL); image != nil {
 						coverImage := ui.Image(c, image).Fill().Fit(ui.Cover)
@@ -419,7 +405,7 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, it
 						}
 					} else if directory {
 						ui.Box(c).Fill().Center().Children(func() {
-							ui.Icon(c, p.Assets.Icon("folder")).Size(65, 65).TextColor(paint(colors.Text.Muted))
+							ui.Icon(c, p.Assets.Icon("folder")).Size(65, 65).TextColor(paint(colors.Accent.Soft))
 						})
 					} else {
 						ui.Box(c).Fill().Center().Gradient(paint(colors.Decoration.CardStart), paint(colors.Decoration.CardEnd), 110).Children(func() {
@@ -429,7 +415,7 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, it
 					ui.Box(c).Absolute().Top(0).Left(0).Fill().LinearGradient(ui.LinearGradient{
 						Angle: 0, Stops: []ui.GradientStop{{Color: shade}, {Color: ui.Transparent, At: fade}},
 					})
-					if query.Section == provider.AccountHistory && (item.Finished || item.ProgressSeconds != nil && item.DurationSeconds != nil && *item.DurationSeconds > 0) {
+					if query.Section == provider.AccountHistory {
 						var progress float32
 						if item.Finished {
 							progress = 1
@@ -448,18 +434,17 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, it
 						Border(1, paint(colors.Border.Subtle))
 					if item.Count != nil {
 						ui.Text(c, strconv.Itoa(*item.Count)).Absolute().Right(22).Bottom(20).FontSize(26).
-							TextColor(paint(colors.Text.Secondary))
+							TextColor(paint(colors.Playback.Foreground))
 					}
 				}
 				if quality != "" {
 					ui.Text(c, quality).Absolute().Top(12).Left(12).Padding(4, 7).Radius(4).
-						Background(d.badgeFill).Border(1, d.badgeBorder).
+						Background(d.badgeFill).Border(1, d.badgeBorder).TextColor(paint(colors.Playback.Foreground)).
 						FontSize(11).LetterSpacing(1)
 				}
 				if !directory && item.DurationSeconds != nil {
-					seconds := *item.DurationSeconds
-					ui.Text(c, fmt.Sprintf("%02d:%02d", seconds/60, seconds%60)).Absolute().
-						Right(13).Bottom(14).FontSize(14).LetterSpacing(.7)
+					ui.Text(c, catalogDuration(*item.DurationSeconds)).Absolute().
+						Right(13).Bottom(14).FontSize(14).LetterSpacing(.7).TextColor(paint(colors.Playback.Foreground))
 				}
 				if managing && item.RemovalID != "" {
 					p.favoriteSelectionMark(c, selected)
@@ -488,7 +473,7 @@ func (p *PageContext) favoriteCardMetadata(c *ui.Context, item provider.AccountR
 		}
 		return
 	}
-	ink := paint(colors.Text.Muted)
+	ink := paint(colors.Text.Secondary)
 	ui.Row(c).FillWidth().Gap(9).AlignItems(ui.Center).Children(func() {
 		if item.CreatorAvatarURL != "" && item.Subtitle != "" {
 			ui.Box(c).Size(17, 17).Shrink(0).Radius(8.5).Clip().Background(withAlpha(p.Theme.Colors.Text.Secondary, 0x40)).Children(func() {
@@ -504,7 +489,7 @@ func (p *PageContext) favoriteCardMetadata(c *ui.Context, item provider.AccountR
 			if item.Subtitle != "" {
 				ui.Text(c, "\u00b7").FontSize(15).TextColor(ink)
 			}
-			ui.Text(c, strconv.FormatInt(*item.Views, 10)+p.Assets.Text.Activity.FolderViews).FontSize(15).TextColor(ink)
+			ui.Text(c, catalogViews(*item.Views, p.Assets.Text.Home)+p.Assets.Text.Home.Plays).FontSize(15).TextColor(ink)
 		}
 	})
 }

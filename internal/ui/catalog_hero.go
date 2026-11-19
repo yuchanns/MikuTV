@@ -31,6 +31,11 @@ func (info *catalogFeatureInfo) stop() {
 	info.ref, info.due, info.cancel = provider.MediaRef{}, time.Time{}, nil
 }
 
+func (info *catalogFeatureInfo) reset() {
+	info.stop()
+	info.loaded = nil
+}
+
 func (p *PageContext) syncCatalogFeatureInfo(c *ui.Context, snapshot app.CatalogSnapshot) {
 	home := &p.host.home
 	info := &home.featureInfo
@@ -54,9 +59,6 @@ func (p *PageContext) syncCatalogFeatureInfo(c *ui.Context, snapshot app.Catalog
 		return
 	}
 	info.cancel = p.host.Catalog.ReadItem(item.Ref, func(loaded provider.MediaItem, _ error) {
-		if len(info.loaded) == 24 {
-			clear(info.loaded)
-		}
 		if info.loaded == nil {
 			info.loaded = make(map[provider.MediaRef]provider.MediaItem)
 		}
@@ -201,7 +203,7 @@ func catalogEyebrow(now time.Time, index int) string {
 
 func (p *PageContext) catalogHeroMetadata(c *ui.Context, item provider.MediaItem) {
 	colors := p.Theme.Colors
-	secondary := paint(colors.Text.Muted)
+	secondary := paint(colors.Surface.Raised)
 	ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
 		if item.Quality != "" {
 			ui.Text(c, item.Quality).Padding(3, 7).Radius(4).FontSize(13).
@@ -223,26 +225,24 @@ func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem
 	text, colors := p.Assets.Text.Home, p.Theme.Colors
 	ui.Row(c).Absolute().Left(103).Top(498).Gap(16).AlignItems(ui.Center).Children(func() {
 		p.styledButton(c, text.Play, "play-filled", homePlayAction, homeHero, func() {
-			p.openCatalogAction(text.Play, nil, false)
-		}, buttonAppearance{
-			height: 62, padding: 0, radius: 12, fontSize: 22, iconSize: 24, iconGap: 13, fontWeight: 550,
-			background: paint(colors.Surface.Raised), foreground: paint(colors.Text.Secondary),
-			border: paint(colors.Border.Subtle),
-		}).Width(179).Center()
-		p.styledButton(c, text.Details, "info", homeDetailAction, homeHero, func() {
-			p.openCatalogAction(text.Details, item, true)
-		}, buttonAppearance{
-			height: 62, padding: 0, radius: 12, fontSize: 22, iconSize: 28, iconGap: 13, fontWeight: 550,
-			background: paint(colors.Surface.Raised), foreground: paint(colors.Text.Secondary),
-			border: paint(colors.Border.Subtle),
-		}).Width(185).Center()
+			p.openCatalogAction(text.Play, nil)
+		}, p.playButtonAppearance()).Width(179).Center()
+		if item != nil && p.canOpenVideoDetail(item.Ref) {
+			p.styledButton(c, text.Details, "info", homeDetailAction, homeHero, func() {
+				p.openVideoDetail(*item)
+			}, buttonAppearance{
+				height: 62, padding: 0, radius: 12, fontSize: 22, iconSize: 28, iconGap: 13, fontWeight: 550,
+				background: paint(colors.Surface.Raised), foreground: paint(colors.Text.Secondary),
+				border: paint(colors.Border.Subtle),
+			}).Width(185).Center()
+		}
 		background, ink := withAlpha(colors.Playback.Foreground, 0x10), paint(colors.Text.Primary)
 		if p.State.Focus == homeLaterAction {
 			background, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
 		}
 		button := ui.Button(c.Key(string(homeLaterAction)), "").Label(text.Later).Size(62, 62).Radius(12).
 			Border(1, paint(colors.Border.Subtle)).Background(background).TextColor(ink).Center().
-			OnClick(func() { p.dispatch(func() { p.openCatalogAction(text.Later, nil, false) }) })
+			OnClick(func() { p.dispatch(func() { p.openCatalogAction(text.Later, nil) }) })
 		p.animateFocus(button, background, ink)
 		p.bind(button, homeLaterAction, homeHero)
 		button.Children(func() { ui.Icon(c, p.Assets.Icon("plus")).Size(28, 28) })

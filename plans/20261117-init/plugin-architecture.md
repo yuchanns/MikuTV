@@ -131,6 +131,10 @@ Go 调用方使用按领域划分的类型化服务，例如账号、目录、�
 
 `catalog.browse` 接收可选的 `collection`、`cursor` 和 `refresh`。省略参数读取首页首批，传入游标可续页。`refresh` 为 `true` 时替换当前列表，插件可用随附游标定位新的首批。空的下一页游标表示列表已到末尾。推荐卡片可提供 HTTPS `coverURL`、`durationSeconds` 和 `views`。宿主按来源声明的主机权限下载公开封面，下载请求省略账号 Cookie。
 
+`catalog.item` 接收 `MediaRef`，返回同一实体的 `MediaItem`。普通视频详情可附带 `videoDetails.publishedAt`（Unix 秒）、`videoDetails.comments`（评论计数）和 `creator.avatarURL`（公开 HTTPS 头像）。详情入口附加 `includeSections`，读取统一的章节／分 P、首批评论、相关推荐和已登录账号的互动状态。插件有明确权限结果时，可用 `videoDetails.access` 返回 `granted`、`preview` 或 `restricted`，分别表示授权完整观看、提供试看和限制完整观看。页面沿用原型布局。宿主按来源允许的主机下载详情背景和头像，并在执行操作时验证能力和账号。
+
+`account.videoInteraction` 绑定当前登录账号，处理稍后再看、关注、点赞、支持、收藏、快捷支持及评论点赞。宿主在支持和快捷支持确认后发起单次写入，按来源结果更新界面。
+
 分 P、剧集和媒体库目录通过集合与子项表达，宿主根据内容类型和受支持的展示模板渲染。评论分页与直播聊天订阅分别建模，避免混淆两者的生命周期。
 
 支持、快捷支持、追番等网站操作通过可选操作描述提供。宿主渲染统一的操作栏并派发操作，具体语义和请求属于插件。

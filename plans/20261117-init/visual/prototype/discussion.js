@@ -35,7 +35,8 @@ window.createDiscussion = ({ content, icon, escape, button, refresh, openModal, 
       items = ordered.map(comment => item(comment, { root: true, preview: true })).join('');
     }
     const composer = `<footer class="discussion-composer"><span class="composer-avatar">H</span><button class="focusable" data-action="discussion-compose:${root?.id || 'new'}">${icon('comment')}<span>${escape(root ? `${L.replyTo} ${root.author}` : L.composer)}</span></button></footer>`;
-    return `<section class="discussion ${root ? 'discussion-thread' : ''}">${header}<div class="discussion-scroll" tabindex="-1">${items}</div>${composer}</section>`;
+    const rowCount = root ? 1 + (root.replies?.length || 0) : roots().length;
+    return `<section class="discussion ${root ? 'discussion-thread' : ''}" style="--discussion-rows:${Math.min(10, rowCount)}">${header}<div class="discussion-scroll" tabindex="-1">${items}</div>${composer}</section>`;
   }
   function redraw(action = '', position = null) { refresh({ action, position, mode: model.mode }); }
   function compose(rootId, targetId) {

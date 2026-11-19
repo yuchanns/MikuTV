@@ -1,0 +1,86 @@
+diff --git a/ui/cache.go b/ui/cache.go
+--- a/ui/cache.go
++++ b/ui/cache.go
+@@ -45,12 +45,22 @@
+ 	// area returns the area of e's layer, in its own space: its box and
+ 	// what it and those inside it paint around it.
+ 	area(e *node) Rect
++	scale(p *Painter, e *node, area Rect) (float32, bool)
+ 	// draw draws cv as Canvas.drawPart does, unless what fn paints is what
+ 	// it painted last.
+ 	draw(cv *Canvas, p *Painter, scale float32, w, h int, fn func(cp *Painter))
+ }
+ 
+-type keptLayer struct{}
++type keptLayer struct{ motion bool }
++
++func (l keptLayer) scale(p *Painter, e *node, area Rect) (float32, bool) {
++	if l.motion && e.effect == nil && e.blur <= 0 {
++		// A moving page needs a consistent raster size between frames.
++		// The untransformed page returns to the display's native resolution.
++		return min(1, 1/p.scale), false
++	}
++	return p.layerScale(e, area)
++}
+ 
+ func (keptLayer) area(e *node) Rect {
+ 	box := Rect{e.x, e.y, e.w, e.h}
+diff --git a/ui/effect.go b/ui/effect.go
+--- a/ui/effect.go
++++ b/ui/effect.go
+@@ -105,7 +105,7 @@
+ 	// window's.
+ 	q, still := float32(1), false
+ 	if e.cache != nil {
+-		q, still = p.layerScale(e, from)
++		q, still = e.cache.scale(p, e, from)
+ 	}
+ 	ls := s * q
+ 	var cv *Canvas
+diff --git a/ui/transition.go b/ui/transition.go
+--- a/ui/transition.go
++++ b/ui/transition.go
+@@ -93,6 +93,10 @@
+ 	// keeps its lines, growing or shrinking with it, as a title into a
+ 	// heading, and a picture stretches with its box.
+ 	ScaleContent bool
++	// CacheTransform paints the element into a retained layer while its
++	// motion scales or rotates. The layer uses up to one pixel per DIP
++	// with clips rasterized in the element's own coordinates.
++	CacheTransform bool
+ }
+ 
+ // Motion is where an element appearing comes from, or where one going
+@@ -879,11 +883,18 @@
+ 		}
+ 		e.opacity, e.opacitySet = o*max(s.alpha, 0), true
+ 	}
++	r.applyTransform(e, s)
++	if s.blur > 0 {
++		e.blur = addBlur(e.blur, s.blur)
++	}
++}
++
++func (r *transition) applyTransform(e *node, s tbox) {
++	if r.t.CacheTransform && r.moving&moveTurn != 0 && e.cache == nil {
++		e.cache = keptLayer{motion: true}
++	}
+ 	if t, ok := s.turn(); ok {
+ 		e.transform = e.transform.Then(t)
+-	}
+-	if s.blur > 0 {
+-		e.blur = addBlur(e.blur, s.blur)
+ 	}
+ }
+ 
+@@ -994,9 +1005,7 @@
+ 		g.x, g.y = s.x, s.y
+ 		g.opacity, g.opacitySet = r.opacity*max(s.alpha, 0), true
+ 		g.transform = r.turn
+-		if t, ok := s.turn(); ok {
+-			g.transform = g.transform.Then(t)
+-		}
++		r.applyTransform(g, s)
+ 		g.blur = r.blur
+ 		if s.blur > 0 {
+ 			g.blur = addBlur(r.blur, s.blur)

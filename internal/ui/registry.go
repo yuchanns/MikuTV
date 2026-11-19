@@ -32,18 +32,27 @@ type NavigationLink struct {
 
 // Registration binds a component and its navigation policy in one place.
 type Registration struct {
-	Policy             app.RouteSpec
-	Component          Component
-	Title, Icon        string
-	Navigation         *NavigationLink
-	ScreenInsets       *[4]float32
-	ModalWidth         float32
-	ModalHeight        float32
-	ResolveModalHeight func(*View) float32
-	ModalInsets        [4]float32
-	Sync               func(*View)
-	Leave              func(*View)
-	Back               func(*View) bool
+	Policy                app.RouteSpec
+	Component             Component
+	Title, Icon           string
+	Navigation            *NavigationLink
+	FullScreen            bool
+	RawScreen             bool
+	TransparentCanvas     bool
+	PreserveFocusUnderlay bool
+	Transition            *ui.ElementTransition
+	ScreenInsets          *[4]float32
+	ModalWidth            float32
+	ModalHeight           float32
+	ResolveModalHeight    func(*View) float32
+	ModalInsets           [4]float32
+	ModalBlur             float32
+	Sync                  func(*View)
+	Leave                 func(*View)
+	Back                  func(*View) bool
+	HandleKey             func(*View, ui.InputEvent, string) bool
+	BeforeMove            func(*View)
+	AfterMove             func(*View, app.Direction, string, app.FocusID)
 }
 
 type Pages struct {
@@ -66,8 +75,34 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	home.ScreenInsets = &[4]float32{0, 0, 80, 0}
 	home.Policy.ExitFocus = app.RailFocus(app.Home)
 	home.Back = (*View).backFromHome
+	home.Leave = func(v *View) { v.home.featureInfo.reset() }
+	home.HandleKey = func(v *View, event ui.InputEvent, group string) bool {
+		return event.Repeat && v.startCatalogHold(event.Key, group)
+	}
+	home.AfterMove = func(v *View, direction app.Direction, group string, next app.FocusID) {
+		if direction != app.Left && direction != app.Right {
+			return
+		}
+		switch group {
+		case homeHeader:
+			for _, tab := range homeTabs {
+				if next == homeTabID(tab) {
+					v.showHomeTab(tab, "")
+					break
+				}
+			}
+		case homeFilters:
+			for _, filter := range v.home.filters {
+				if next == homeFilterID(filter.ID) {
+					v.showHomeTab(v.home.tab, filter.ID)
+					break
+				}
+			}
+		}
+	}
 	library := content(app.Library, provider.BrowseLibrary)
 	library.Component, library.Sync = libraryPage{}, syncLibrary
+	library.RawScreen = true
 	library.Back = (*View).backFromLibraryManagement
 	library.Leave = pauseLibraryHistory
 	registrations := []Registration{
@@ -76,14 +111,27 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Initial: focus(app.CloseModal), RequiresEntry: true, Modal: true},
 			Component: catalogActionPage{}, ModalWidth: 990, ModalHeight: 620,
 			Leave: func(v *View) {
-				if v.State.Route != (app.Route{Page: app.HomeAction, Section: homeShelfDetailsSection}) {
-					v.home.action.stop()
+				if v.State.Page != app.VideoDetail {
+					v.home.action = catalogAction{}
 				}
 			}},
-		{Policy: app.RouteSpec{Route: app.Route{Page: app.HomeAction, Section: homeShelfDetailsSection},
-			Parent: app.Route{Page: app.HomeAction}, Initial: focus(app.CloseModal), RequiresEntry: true, Modal: true},
-			Component: catalogActionPage{}, ModalWidth: 990, ModalHeight: 620,
-			Leave: func(v *View) { v.home.shelfDetails.stop() }},
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.VideoDetail},
+			Initial: focus(videoDetailPlay), RequiresEntry: true, Capability: provider.GetCatalogItem, Transient: true},
+			Component: videoDetailPage{}, FullScreen: true, PreserveFocusUnderlay: true,
+			Transition: &videoDetailTransition, ScreenInsets: &[4]float32{},
+			Sync: syncVideoDetail, Back: (*View).backFromVideoDetail, Leave: func(v *View) {
+				switch v.State.Page {
+				case app.VideoConfirm, app.VideoCommentCompose, app.SignInQR:
+				default:
+					v.videoDetail.close()
+				}
+			}},
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.VideoConfirm}, Parent: app.Route{Page: app.VideoDetail},
+			Initial: focus(videoConfirmAccept), Modal: true}, Component: videoConfirmPage{}, ModalWidth: 700,
+			ModalHeight: 299, ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.VideoCommentCompose}, Parent: app.Route{Page: app.VideoDetail},
+			Initial: focus(videoCommentEdit), Modal: true}, Component: videoCommentComposePage{}, ModalWidth: 930, ModalHeight: 494,
+			ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
 		content(app.Search, provider.SearchCatalog),
 		content(app.Following, provider.BrowseFollowing),
 		content(app.Series, provider.BrowseSeries),
@@ -117,24 +165,16 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		Registration{Policy: authModal(app.AccountPicker, app.Account, app.AccountAdd), Component: accountPicker{}, ModalWidth: 700, ModalHeight: 460,
 			ModalInsets: [4]float32{50, 50, 50, 50},
 			ResolveModalHeight: func(v *View) float32 {
-				if v.Auth == nil {
-					return 382
-				}
 				return 382 + 70*float32(max(0, len(v.Auth.Accounts().Accounts)-1))
 			},
-			Leave: func(v *View) {
-				if v.Auth != nil {
-					v.Auth.CancelAccountSelection()
-				}
-			}},
+			Leave: func(v *View) { v.Auth.CancelAccountSelection() }},
 		Registration{Policy: authModal(app.SignInQR, app.Account, app.QRAction), Component: qrSignIn{}, ModalWidth: 760, ModalHeight: 584,
 			ModalInsets: [4]float32{59, 58, 53, 58},
 			Leave: func(v *View) {
-				if v.Auth != nil {
-					v.Auth.CancelSignIn()
-				}
+				v.Auth.CancelSignIn()
 				v.qrPayload, v.qrImage = "", nil
 				v.qrHasAction = false
+				v.videoDetail.signInAction = nil
 			}},
 		Registration{Policy: authModal(app.SignOut, app.Account, app.CloseModal), Component: signOutDialog{}, ModalWidth: 700, ModalHeight: 290,
 			ModalInsets: [4]float32{50, 50, 50, 50}},
@@ -142,7 +182,8 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	for _, section := range libraryTabs {
 		tab := Registration{
 			Policy: app.RouteSpec{Route: libraryRoute(section), Parent: library.Policy.Route,
-				Initial: focus(app.ContentAction), ContentFocus: app.ContentAction, RequiresEntry: true},
+				Initial: focus(app.ContentAction), ContentFocus: app.ContentAction, RequiresEntry: true,
+				Capability: section.Capability()},
 			Component: libraryContent{}, Sync: syncLibrary, Back: (*View).backFromLibraryManagement,
 		}
 		if section == provider.AccountHistory {

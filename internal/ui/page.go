@@ -23,6 +23,24 @@ type PageContext struct {
 	outlet        func(*ui.Context)
 }
 
+type listKey struct {
+	location scrollKey
+	name     string
+}
+
+func (p *PageContext) listState(name string) *ui.ListState {
+	if p.host.lists == nil {
+		p.host.lists = make(map[listKey]*ui.ListState)
+	}
+	key := listKey{location: scrollKey{p.State.CurrentEntry, p.Location.Route}, name: name}
+	list := p.host.lists[key]
+	if list == nil {
+		list = &ui.ListState{}
+		p.host.lists[key] = list
+	}
+	return list
+}
+
 func (p *PageContext) Outlet(c *ui.Context) {
 	if p.outlet != nil {
 		p.outlet(c)
@@ -46,26 +64,14 @@ func (p *PageContext) bind(element ui.Element, id app.FocusID, group string) {
 func (p *PageContext) bindDirection(element ui.Element, id app.FocusID, group string, direction func(app.Direction) bool) {
 	p.host.bind(element, id, group, p.active, direction)
 }
+
+func (p *PageContext) paintFocus() app.FocusID {
+	if !p.active && p.Pages != nil &&
+		(p.Pages.components[p.Location.Route].PreserveFocusUnderlay || p.Pages.components[p.State.Route].PreserveFocusUnderlay) {
+		// Keep the recorded highlight under a detail transition or modal.
+		return p.Location.Focus
+	}
+	return p.State.Focus
+}
+
 func (p *PageContext) scroll() *ui.ScrollState { return p.host.scrollFor(p.Location, p.active) }
-
-func (p *PageContext) paintFocus() app.FocusID { return p.State.Focus }
-
-const focusBottomMargin float32 = 24
-
-type listKey struct {
-	location scrollKey
-	name     string
-}
-
-func (p *PageContext) listState(name string) *ui.ListState {
-	if p.host.lists == nil {
-		p.host.lists = make(map[listKey]*ui.ListState)
-	}
-	key := listKey{location: scrollKey{p.State.CurrentEntry, p.Location.Route}, name: name}
-	list := p.host.lists[key]
-	if list == nil {
-		list = &ui.ListState{}
-		p.host.lists[key] = list
-	}
-	return list
-}

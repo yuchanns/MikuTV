@@ -5,6 +5,5 @@ type Preferences struct {
 }
 
 type PreferencesStore interface {
-	Load() (Preferences, error)
 	Save(Preferences) error
 }

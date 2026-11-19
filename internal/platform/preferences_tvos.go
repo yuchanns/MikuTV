@@ -43,19 +43,16 @@ func NewPreferences() (*Preferences, error) {
 	return &Preferences{defaults: defaults, key: key, domain: domain}, nil
 }
 
-func (p *Preferences) Load() (app.Preferences, error) {
+func (p *Preferences) Load() app.Preferences {
 	value := p.defaults.Send(objc.RegisterName("stringForKey:"), p.key)
 	if value == 0 {
-		return app.Preferences{}, nil
+		return app.Preferences{}
 	}
-	return app.Preferences{RecentEntry: objc.Send[string](value, objc.RegisterName("UTF8String"))}, nil
+	return app.Preferences{RecentEntry: objc.Send[string](value, objc.RegisterName("UTF8String"))}
 }
 
 func (p *Preferences) Save(preferences app.Preferences) error {
 	value := objc.ID(objc.GetClass("NSString")).Send(objc.RegisterName("stringWithUTF8String:"), preferences.RecentEntry)
-	if value == 0 {
-		return fmt.Errorf("encode recent entry")
-	}
 	return p.saveString(p.key, value, "")
 }
 
@@ -76,9 +73,6 @@ func (p *Preferences) SaveHistorySync(entry, owner string, enabled bool) error {
 	}
 	value := objc.ID(objc.GetClass("NSString")).Send(objc.RegisterName("stringWithUTF8String:"), state)
 	key := historySyncKey(entry, owner)
-	if key == 0 || value == 0 {
-		return fmt.Errorf("encode history sync preference")
-	}
 	return p.saveString(key, value, "")
 }
 
@@ -100,9 +94,6 @@ func (p *Preferences) SavePluginStorage(pluginID, entryID string, data []byte) e
 	stringClass := objc.ID(objc.GetClass("NSString"))
 	key := stringClass.Send(objc.RegisterName("stringWithUTF8String:"), pluginStorageKey(pluginID, entryID))
 	value := stringClass.Send(objc.RegisterName("stringWithUTF8String:"), string(data))
-	if key == 0 || value == 0 {
-		return fmt.Errorf("encode plugin storage")
-	}
 	return p.saveString(key, value, pluginID)
 }
 

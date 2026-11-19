@@ -61,7 +61,8 @@ func (s *Session) Close() {
 func (s *Source) Verify(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	_, err := s.execute(ctx, nil, nil, "", nil, false)
+	storage, _ := NewStorage(nil, nil)
+	_, err := s.execute(ctx, nil, storage, "", nil, false)
 	return err
 }
 
@@ -96,11 +97,28 @@ func (s *Session) Browse(ctx context.Context, request provider.BrowseRequest) (p
 }
 
 func (s *Session) Item(ctx context.Context, ref provider.MediaRef) (provider.MediaItem, error) {
+	return s.item(ctx, ref, false)
+}
+
+func (s *Session) VideoDetail(ctx context.Context, ref provider.MediaRef) (provider.MediaItem, error) {
+	return s.item(ctx, ref, true)
+}
+
+func (s *Session) item(ctx context.Context, ref provider.MediaRef, includeSections bool) (provider.MediaItem, error) {
 	var item provider.MediaItem
 	if ref.EntryID != s.entryID || !ref.Kind.Valid() || ref.ID == "" {
 		return item, &provider.Error{Code: provider.Denied}
 	}
-	if err := s.call(ctx, provider.GetCatalogItem, ref, &item); err != nil {
+	input := struct {
+		provider.MediaRef
+		IncludeSections bool `json:"includeSections,omitempty"`
+		SignedIn        bool `json:"signedIn,omitempty"`
+	}{MediaRef: ref, IncludeSections: includeSections}
+	s.requests.RLock()
+	client, scope, signedIn := s.active, s.scope, s.accountID != ""
+	s.requests.RUnlock()
+	input.SignedIn = signedIn
+	if err := s.invoke(ctx, scope, client, provider.GetCatalogItem, "getItem", input, &item); err != nil {
 		return item, err
 	}
 	if item.Ref.Kind != ref.Kind || item.Ref.ID != ref.ID {
@@ -123,6 +141,19 @@ func (s *Session) ownItem(item *provider.MediaItem) error {
 		item.Views != nil && *item.Views < 0 || item.ProgressSeconds != nil && *item.ProgressSeconds < 0 {
 		return &provider.Error{Code: provider.PluginFailed}
 	}
+	if detail := item.VideoDetails; detail != nil {
+		if detail.PublishedAt < 0 || detail.Comments != nil && *detail.Comments < 0 {
+			return &provider.Error{Code: provider.PluginFailed}
+		}
+		switch detail.Access {
+		case "", provider.VideoAccessGranted, provider.VideoAccessPreview, provider.VideoAccessRestricted:
+		default:
+			return &provider.Error{Code: provider.PluginFailed}
+		}
+		if err := s.ownVideoSections(detail); err != nil {
+			return err
+		}
+	}
 	if item.CoverURL != "" && httpsURL(item.CoverURL) == nil {
 		item.CoverURL = ""
 	}
@@ -133,15 +164,41 @@ func (s *Session) ownItem(item *provider.MediaItem) error {
 	return nil
 }
 
-func (s *Session) call(ctx context.Context, op provider.Capability, request, result any) error {
-	s.requests.RLock()
-	client, scope := s.active, s.scope
-	s.requests.RUnlock()
-	return s.invoke(ctx, scope, client, op, operations[op][0], request, result)
+func (s *Session) ownVideoSections(detail *provider.VideoDetails) error {
+	switch detail.SegmentKind {
+	case "", provider.VideoChapters, provider.VideoParts, provider.VideoCollection:
+	default:
+		return &provider.Error{Code: provider.PluginFailed}
+	}
+	for _, segment := range detail.Segments {
+		if strings.TrimSpace(segment.Title) == "" || segment.StartSeconds < 0 ||
+			segment.DurationSeconds != nil && *segment.DurationSeconds < 0 {
+			return &provider.Error{Code: provider.PluginFailed}
+		}
+		if segment.Ref != nil {
+			if segment.Ref.Kind != provider.Video || segment.Ref.ID == "" {
+				return &provider.Error{Code: provider.PluginFailed}
+			}
+			segment.Ref.EntryID = s.entryID
+		}
+	}
+	if err := ownVideoComments(detail.Discussion, true); err != nil {
+		return err
+	}
+	for index := range detail.Related {
+		item := &detail.Related[index]
+		if item.VideoDetails != nil {
+			return &provider.Error{Code: provider.PluginFailed}
+		}
+		if err := s.ownItem(item); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Session) ReadAccount(ctx context.Context, request provider.AccountRequest) (provider.AccountPage, error) {
-	if !request.AccountQuery.Valid() || len(request.Folder) > 512 || len(request.Cursor) > 4096 {
+	if len(request.Folder) > 512 {
 		return provider.AccountPage{}, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
@@ -257,7 +314,7 @@ func (s *Session) invoke(ctx, scope context.Context, client *http.Client, op pro
 	if err := decodeJSON(data, result); err != nil {
 		return &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
-	return ctx.Err()
+	return nil
 }
 
 const invokeBody = `
@@ -285,9 +342,6 @@ var invokeScript = func() *moejs.Script {
 // Each operation owns its loop. Stopping it cannot interrupt a different call,
 // and a completed call cannot leave its timers or promises running.
 func (s *Source) execute(ctx context.Context, client *http.Client, store *Storage, export string, params []byte, secure bool) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	rt := moejs.NewRuntime(moejs.Options{MemoryLimit: heapLimit, DisableDynamicCode: true})
 	loop, err := eventloop.New(rt, eventloop.Options{})
 	if err != nil {

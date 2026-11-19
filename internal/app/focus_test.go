@@ -23,3 +23,31 @@ func TestSpatialFocusKeepsColumnsAndReachesOffscreenRows(t *testing.T) {
 		}
 	}
 }
+
+func TestHorizontalFocusRejectsControlsAboveAndBelow(t *testing.T) {
+	targets := []FocusTarget{
+		{ID: "play", X: 100, Y: 500, W: 180, H: 62},
+		{ID: "later", X: 720, Y: 506, W: 180, H: 62},
+		{ID: "creator", X: 150, Y: 430, W: 110, H: 40},
+		{ID: "follow", X: 230, Y: 430, W: 100, H: 40},
+		{ID: "overview", X: 190, Y: 585, W: 100, H: 40},
+	}
+	for _, move := range []struct {
+		from, want FocusID
+		direction  Direction
+	}{
+		{"play", "later", Right},
+		{"later", "play", Left},
+		{"play", "creator", Up},
+		{"play", "play", Left},
+		{"later", "later", Right},
+	} {
+		if got := Neighbor(targets, move.from, move.direction); got != move.want {
+			t.Fatalf("from %q toward %v: got %q, want %q", move.from, move.direction, got, move.want)
+		}
+	}
+	targets[1].W = 0
+	if got := Neighbor(targets, "play", Right); got != "play" {
+		t.Fatalf("Right with an unlaid neighbor jumped to %q", got)
+	}
+}

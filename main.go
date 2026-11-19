@@ -45,10 +45,7 @@ func main() {
 		} else {
 			log.Printf("credential store unavailable: %v", err)
 		}
-		saved, err := preferences.Load()
-		if err != nil {
-			log.Print(err)
-		}
+		saved := preferences.Load()
 		pages, err := tvui.NewPages(assets)
 		if err != nil {
 			log.Fatal(err)
@@ -59,14 +56,13 @@ func main() {
 		for _, source := range sources {
 			info := source.Manifest()
 			entry := app.Entry{ID: info.ID, SourceID: info.ID, Name: info.Name,
-				Description: info.Description, Artwork: info.ID, Available: true,
+				Description: info.Description, Artwork: info.ID,
 				Capabilities: source.Capabilities(), Auth: source.AuthPresentation()}
 			store, err := plugin.NewStorage(preferences.LoadPluginStorage(entry.SourceID, entry.ID), func(data []byte) error {
 				return preferences.SavePluginStorage(entry.SourceID, entry.ID, data)
 			})
 			if err != nil {
-				log.Printf("plugin %s: storage is unavailable", info.ID)
-				store, _ = plugin.NewStorage(nil, nil)
+				log.Fatalf("open plugin %s storage: %v", info.ID, err)
 			}
 			installed[entry.ID], stores[entry.ID] = source, store
 			entries = append(entries, entry)
@@ -84,10 +80,7 @@ func main() {
 			}
 		}
 		catalog := app.NewCatalog(func(entryID string) provider.Session {
-			if source := installed[entryID]; source != nil {
-				return source.NewSession(entryID, stores[entryID])
-			}
-			return nil
+			return installed[entryID].NewSession(entryID, stores[entryID])
 		}, mygo.RunOnMain, invalidate)
 		activity := app.NewAccountActivity(preferences, mygo.RunOnMain, invalidate)
 		var view *tvui.View
@@ -97,7 +90,7 @@ func main() {
 			if view != nil {
 				view.SyncAccountActivity()
 			}
-		})
+		}, func() { view.PromptSignIn() })
 		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Auth: auth, Activity: activity, Pages: pages, Assets: assets,
 			Preferences: preferences, Theme: theme.Default(), Version: appVersion})
 		view.Trace = os.Getenv("MIKUTV_NAV_TRACE") == "1"

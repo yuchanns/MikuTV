@@ -33,7 +33,7 @@ func TestRegisteredComponentsAndNestedOverlaysNeedNoShellCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view := NewView(Options{State: state, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default(), Version: "test"})
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default(), Version: "test"})
 	var context *ui.Context
 	tester := ui.NewTester(func(c *ui.Context) { context = c; view.Render(c) }, 1920, 1080)
 	view.dispatch(func() { state.Navigate(screen) })

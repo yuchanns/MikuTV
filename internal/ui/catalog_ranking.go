@@ -29,7 +29,7 @@ func (p *PageContext) catalogPodium(c *ui.Context, section catalogSection) {
 				})
 				if item.RankScore != nil {
 					ui.Text(c, fmt.Sprintf("%s %s", labels.RankingHeat, catalogViews(*item.RankScore, labels))).
-						Absolute().Left(numberWidth).Top(300).FontSize(16).TextColor(paint(colors.Surface.Raised))
+						Absolute().Left(numberWidth).Top(300).FontSize(16).TextColor(paint(colors.Text.Secondary))
 				}
 			})
 		}
@@ -37,14 +37,16 @@ func (p *PageContext) catalogPodium(c *ui.Context, section catalogSection) {
 }
 
 func (p *PageContext) catalogRankingRow(c *ui.Context, id app.FocusID, item provider.MediaItem, rank int, width float32, direction func(app.Direction) bool) {
-	colors, labels := p.Theme.Colors, p.Assets.Text.Home
-	background, foreground, secondary := ui.Transparent, paint(colors.Text.Primary), paint(colors.Surface.Raised)
-	if p.State.Focus == id {
-		background, foreground, secondary = paint(colors.Focus.Background), paint(colors.Focus.Foreground), paint(colors.Accent.Foreground)
+	colors, d, labels := p.Theme.Colors, p.uiColors(), p.Assets.Text.Home
+	background, foreground, secondary := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Secondary)
+	if p.paintFocus() == id {
+		background, foreground, secondary = paint(colors.Focus.Background), paint(colors.Focus.Foreground), d.focusSubtext
 	}
 	row := ui.Button(c.Key(string(id)), "").Label(item.Title).Size(width, rankingGridMetrics.height).
-		Radius(8).Border(0, ui.Transparent).Padding(0, 0).Shrink(0).Background(background).TextColor(foreground).
-		OnClick(func() { p.dispatch(func() { p.openCatalogAction(labels.Details, &item, true) }) })
+		Radius(8).Border(0, ui.Transparent).Padding(0, 0).Shrink(0).Background(background).TextColor(foreground)
+	if p.canOpenVideoDetail(item.Ref) {
+		row.OnClick(func() { p.dispatch(func() { p.openVideoDetail(item) }) })
+	}
 	p.animateFocus(row, background, foreground)
 	p.bindDirection(row, id, homeCards, direction)
 	row.Children(func() {
@@ -52,7 +54,7 @@ func (p *PageContext) catalogRankingRow(c *ui.Context, id app.FocusID, item prov
 		ui.Row(c).Fill().Padding(0, 12).Gap(18).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, fmt.Sprintf("%02d", rank)).Width(45).Shrink(0).FontSize(28).TextColor(secondary)
 			ui.Box(c).Size(120, rankingGridMetrics.cover).Shrink(0).Clip().Radius(7).
-				Background(paint(colors.Surface.Raised)).Children(func() {
+				Background(d.coverFill).Children(func() {
 				if image := p.catalogCover(item.CoverURL); image != nil {
 					ui.Image(c, image).Fill().Fit(ui.Cover)
 				}

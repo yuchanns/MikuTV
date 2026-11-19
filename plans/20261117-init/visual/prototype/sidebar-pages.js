@@ -57,16 +57,16 @@ window.createSidebarPages = ({content:C,state,icon,escape:e,button,header,modal,
     if(index>=0){
       if(direction==='ArrowUp')return 'side-login';
       if(direction==='ArrowDown')return 'side-sync';
-      if(direction==='ArrowLeft')return shortcuts[index-1]||'nav:account';
+      if(direction==='ArrowLeft')return shortcuts[index-1]||'account';
       return shortcuts[index+1]||'';
     }
     return {
-      'community-messages':{ArrowDown:'side-login',ArrowLeft:'nav:account'},
-      'side-login':{ArrowUp:'community-messages',ArrowDown:shortcuts[0],ArrowRight:'side-membership',ArrowLeft:'nav:account'},
+      'community-messages':{ArrowDown:'side-login',ArrowLeft:'account'},
+      'side-login':{ArrowUp:'community-messages',ArrowDown:shortcuts[0],ArrowRight:'side-membership',ArrowLeft:'account'},
       'side-membership':{ArrowUp:'community-messages',ArrowDown:shortcuts[0],ArrowLeft:'side-login'},
-      'side-sync':{ArrowUp:shortcuts[0],ArrowDown:'side-logout',ArrowLeft:'nav:account'},
-      'side-logout':{ArrowUp:'side-sync',ArrowLeft:'nav:account'},
-      'nav:account':{ArrowRight:'side-login'}
+      'side-sync':{ArrowUp:shortcuts[0],ArrowDown:'side-logout',ArrowLeft:'account'},
+      'side-logout':{ArrowUp:'side-sync',ArrowLeft:'account'},
+      'account':{ArrowRight:'side-login'}
     }[action]?.[direction]||'';
   }
   function handle(action){

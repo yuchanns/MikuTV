@@ -191,9 +191,6 @@ func (p *PageContext) accountProfile(c *ui.Context, account provider.Account) {
 }
 
 func (p *PageContext) accountInbox(c *ui.Context) {
-	if p.host.Activity == nil {
-		return
-	}
 	activity := p.host.Activity
 	if !activity.Available(provider.AccountNotifications) {
 		return

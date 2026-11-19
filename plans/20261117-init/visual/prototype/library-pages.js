@@ -56,7 +56,7 @@ window.createLibraryPages = ({content:C,state,icon,escape:e,button,header,card,f
     const [verb,key]=action.split(':');
     if(verb==='favorite'){chooser(state.player||state.detail);return true;}
     if(verb==='lib-open'){model.folder=key;model.editing=false;refresh('lib-back');return true;}
-    if(verb==='lib-back'){model.folder=null;model.editing=false;refresh();return true;}
+    if(verb==='lib-back'){const origin='lib-open:'+model.folder;model.folder=null;model.editing=false;refresh(origin);return true;}
     if(verb==='library'){model.folder=null;model.editing=false;model.selected.clear();return false;}
     if(verb==='lib-manage'){model.editing=!model.editing;model.selected.clear();refresh(action);return true;}
     if(verb==='lib-select'){model.selected.has(key)?model.selected.delete(key):model.selected.add(key);refresh(action);return true;}
@@ -100,5 +100,5 @@ window.createLibraryPages = ({content:C,state,icon,escape:e,button,header,card,f
   }
   C.courses.forEach(course=>state.owned.add(course.id));
   syncFavorites();
-  return {render,handle,folders,model,chooser,saveToDefault(id){folders[0].ids.add(id);syncFavorites();},back(){if(state.page!=='library')return false;if(model.editing){model.editing=false;refresh('lib-manage');return true;}if(model.folder){model.folder=null;refresh();return true;}return false;}};
+  return {render,handle,folders,model,chooser,saveToDefault(id){folders[0].ids.add(id);syncFavorites();},back(){if(state.page!=='library')return false;if(model.editing){model.editing=false;refresh('lib-manage');return true;}if(model.folder){const origin='lib-open:'+model.folder;model.folder=null;refresh(origin);return true;}return false;}};
 };

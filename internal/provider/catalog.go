@@ -53,21 +53,75 @@ type Creator struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatarURL,omitempty"`
+	Following bool   `json:"following,omitempty"`
+}
+
+type VideoAccess string
+
+const (
+	VideoAccessGranted    VideoAccess = "granted"
+	VideoAccessPreview    VideoAccess = "preview"
+	VideoAccessRestricted VideoAccess = "restricted"
+)
+
+type VideoDetails struct {
+	PublishedAt int64            `json:"publishedAt,omitempty"`
+	Comments    *int64           `json:"comments,omitempty"`
+	Access      VideoAccess      `json:"access,omitempty"`
+	Segments    []VideoSegment   `json:"segments,omitempty"`
+	SegmentKind VideoSegmentKind `json:"segmentKind,omitempty"`
+	Discussion  []VideoComment   `json:"discussion,omitempty"`
+	Related     []MediaItem      `json:"related,omitempty"`
+	Engagement  VideoEngagement  `json:"engagement,omitempty"`
+}
+
+type VideoSegmentKind string
+
+const (
+	VideoChapters   VideoSegmentKind = "chapters"
+	VideoParts      VideoSegmentKind = "parts"
+	VideoCollection VideoSegmentKind = "collection"
+)
+
+type VideoSegment struct {
+	Title           string    `json:"title"`
+	DurationSeconds *int64    `json:"durationSeconds,omitempty"`
+	Ref             *MediaRef `json:"ref,omitempty"`
+	PartID          string    `json:"partID,omitempty"`
+	StartSeconds    int64     `json:"startSeconds,omitempty"`
+}
+
+type VideoComment struct {
+	ID            string         `json:"id"`
+	Author        string         `json:"author,omitempty"`
+	ReplyToAuthor string         `json:"replyToAuthor,omitempty"`
+	AvatarURL     string         `json:"avatarURL,omitempty"`
+	Body          string         `json:"body"`
+	PublishedAt   int64          `json:"publishedAt,omitempty"`
+	Location      string         `json:"location,omitempty"`
+	Likes         *int64         `json:"likes,omitempty"`
+	ReplyCount    *int64         `json:"replyCount,omitempty"`
+	Liked         bool           `json:"liked,omitempty"`
+	Disliked      bool           `json:"disliked,omitempty"`
+	Pinned        bool           `json:"pinned,omitempty"`
+	IsCreator     bool           `json:"isCreator,omitempty"`
+	Replies       []VideoComment `json:"replies,omitempty"`
 }
 
 type MediaItem struct {
-	Ref             MediaRef `json:"ref"`
-	Title           string   `json:"title"`
-	Subtitle        string   `json:"subtitle,omitempty"`
-	Creator         *Creator `json:"creator,omitempty"`
-	CoverURL        string   `json:"coverURL,omitempty"`
-	BackdropURL     string   `json:"backdropURL,omitempty"`
-	DurationSeconds *int64   `json:"durationSeconds,omitempty"`
-	Views           *int64   `json:"views,omitempty"`
-	RankScore       *int64   `json:"rankScore,omitempty"`
-	Category        string   `json:"category,omitempty"`
-	Quality         string   `json:"quality,omitempty"`
-	ProgressSeconds *int64   `json:"progressSeconds,omitempty"`
+	RankScore       *int64        `json:"rankScore,omitempty"`
+	Ref             MediaRef      `json:"ref"`
+	Title           string        `json:"title"`
+	Subtitle        string        `json:"subtitle,omitempty"`
+	Creator         *Creator      `json:"creator,omitempty"`
+	CoverURL        string        `json:"coverURL,omitempty"`
+	BackdropURL     string        `json:"backdropURL,omitempty"`
+	DurationSeconds *int64        `json:"durationSeconds,omitempty"`
+	Views           *int64        `json:"views,omitempty"`
+	Category        string        `json:"category,omitempty"`
+	Quality         string        `json:"quality,omitempty"`
+	ProgressSeconds *int64        `json:"progressSeconds,omitempty"`
+	VideoDetails    *VideoDetails `json:"videoDetails,omitempty"`
 }
 
 type Collection struct {
@@ -98,6 +152,10 @@ type BrowseRequest struct {
 type Catalog interface {
 	Browse(context.Context, BrowseRequest) (CollectionPage, error)
 	Item(context.Context, MediaRef) (MediaItem, error)
+}
+
+type VideoDetailReader interface {
+	VideoDetail(context.Context, MediaRef) (MediaItem, error)
 }
 
 type CatalogArtworkLoader interface {

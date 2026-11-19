@@ -17,6 +17,7 @@ type FocusTarget struct {
 }
 
 // Neighbor uses committed geometry, including offscreen scroll content.
+// Horizontal moves stay within the vertical span of the current control.
 func Neighbor(targets []FocusTarget, current FocusID, direction Direction) FocusID {
 	var origin FocusTarget
 	found := false
@@ -32,9 +33,16 @@ func Neighbor(targets []FocusTarget, current FocusID, direction Direction) Focus
 		}
 		return current
 	}
+	if origin.W <= 0 || origin.H <= 0 {
+		return current
+	}
+	horizontal := direction == Left || direction == Right
 	best, score := current, math.Inf(1)
 	for _, target := range targets {
 		if target.ID == current || target.W <= 0 || target.H <= 0 {
+			continue
+		}
+		if horizontal && min(origin.Y+origin.H, target.Y+target.H) <= max(origin.Y, target.Y) {
 			continue
 		}
 		dx := float64(target.X + target.W/2 - origin.X - origin.W/2)

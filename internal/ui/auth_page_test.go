@@ -38,7 +38,7 @@ func TestExpiredQRCodeKeepsConfirmAndBackReachable(t *testing.T) {
 	]}`)}
 	auth := app.NewAuth(store, post, func() {}, catalog.Reload, func() {})
 	defer auth.Close()
-	view := NewView(Options{Auth: auth, Catalog: catalog, Assets: assets, Pages: pages, State: state, Theme: theme.Default()})
+	view := newTestView(t, Options{Auth: auth, Catalog: catalog, Assets: assets, Pages: pages, State: state, Theme: theme.Default()})
 	tester := ui.NewTester(view.Render, 1920, 1080)
 	await := func(done func() bool) {
 		t.Helper()
@@ -106,6 +106,9 @@ func TestExpiredQRCodeKeepsConfirmAndBackReachable(t *testing.T) {
 	tester.Key(0, ui.KeyEnter)
 	if state.Page != app.AccountPicker {
 		t.Fatal("guest could not open the saved accounts")
+	}
+	if state.Focus != app.AccountFocus("backup") {
+		t.Fatalf("guest picker initial focus = %q, want first saved account", state.Focus)
 	}
 	first, firstOK := tester.Find("Backup viewer")
 	second, secondOK := tester.Find("Saved viewer")

@@ -2,6 +2,7 @@ package tvui
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
@@ -170,17 +171,17 @@ func (p *PageContext) catalogShelf(c *ui.Context, shelf catalogShelf, idx int, s
 		Children(func() {
 			ui.Row(c).FillWidth().Padding(0, 79, 0, 0).Height(40).Gap(18).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, shelf.title).FontSize(27).FontWeight(550).LetterSpacing(1.5)
-				ui.Text(c, shelf.note).FontSize(15).LetterSpacing(0.5).Translate(0, 5).TextColor(paint(colors.Surface.Raised))
+				ui.Text(c, shelf.note).FontSize(15).LetterSpacing(0.5).Translate(0, 5).TextColor(paint(colors.Text.Secondary))
 				ui.Spacer(c).Grow(1)
 				p.styledButton(c, text.Home.SeeAll, "", app.FocusID("home/shelf/"+shelf.id), shelf.id, func() {
 					if shelf.id == "continue" && p.State.Allows(app.RouteSpec{RequiresEntry: true, Capability: provider.AccountHistory.Capability()}) {
 						p.State.Push(libraryRoute(provider.AccountHistory))
 						return
 					}
-					p.openCatalogShelf(shelf)
+					p.openCatalogAction(shelf.title, shelf.items)
 				}, buttonAppearance{
 					height: 40, radius: 8, fontSize: 17,
-					background: ui.Transparent, foreground: paint(colors.Surface.Raised),
+					background: ui.Transparent, foreground: paint(colors.Text.Muted),
 				}).Width(92).Center()
 			})
 			ui.Box(c).Height(homeShelfHeading - 40)
@@ -188,46 +189,115 @@ func (p *PageContext) catalogShelf(c *ui.Context, shelf catalogShelf, idx int, s
 				ui.Text(c, text.EmptyTitle).Margin(26, 0, 0, 4).FontSize(22).TextColor(paint(colors.Text.Secondary))
 				return
 			}
-			ui.ScrollHorizontal(c.Key("home-shelf-cards/" + shelf.id)).FillWidth().Height(homeCardHeight).Children(func() {
-				ui.Row(c).Gap(homeShelfGap).Padding(0, 20, 0, 0).Children(func() {
-					for _, item := range shelf.items[:min(homeShelfLimit, len(shelf.items))] {
-						p.catalogCard(c, catalogCardFocus(shelf.id, item.Ref), shelf.id, item, homeShelfCardSize, nil)
-					}
-				})
-			})
+			home := &p.host.home
+			if home.shelfScrolls == nil {
+				home.shelfScrolls = make(map[string]*ui.ScrollState)
+			}
+			scroll := home.shelfScrolls[shelf.id]
+			if scroll == nil {
+				scroll = &ui.ScrollState{}
+				home.shelfScrolls[shelf.id] = scroll
+			}
+			p.catalogStrip(c, shelf.id, shelf.items[:min(homeShelfLimit, len(shelf.items))], scroll)
 		})
 }
 
+func (p *PageContext) catalogStrip(c *ui.Context, shelf string, items []provider.MediaItem, scroll *ui.ScrollState) {
+	cardWidth := homeShelfCardSize.width
+	region, viewport := shelf, p.Width-103
+	top, left, gap := float32(0), float32(0), float32(homeShelfGap)
+	if shelf == videoDetailRelatedShelf {
+		region, viewport = videoDetailRelatedRegion, p.Width-2*videoDetailInset
+		top, left, gap = 6, 4, 27
+	}
+	stride := cardWidth + gap
+	first, end := visibleItemRange(scroll.X-left, viewport, stride, len(items), 2)
+	focused := -1
+	for i, item := range items {
+		if p.State.Focus == catalogCardFocus(shelf, item.Ref) {
+			focused = i
+			break
+		}
+	}
+	width := left + float32(len(items))*stride - gap + 20
+	ui.ScrollHorizontal(c.Key("catalog-strip/"+shelf)).FillWidth().Height(homeCardHeight+top).
+		Margin(min(top, 2), 0, 0, 0).TrackScroll(scroll).Children(func() {
+		ui.Box(c).Width(width).Height(homeCardHeight + top).Children(func() {
+			draw := func(i int) {
+				item := items[i]
+				id := catalogCardFocus(shelf, item.Ref)
+				ui.Box(c.Key("strip-card/"+string(id))).Absolute().Top(top).Left(left+float32(i)*stride).
+					Size(cardWidth, homeCardHeight).Children(func() {
+					p.catalogCard(c, id, region, item, homeShelfCardSize, nil)
+				})
+			}
+			for i := first; i < end; i++ {
+				draw(i)
+			}
+			if focused >= 0 {
+				for i := max(0, focused-1); i < min(len(items), focused+2); i++ {
+					if i < first || i >= end {
+						draw(i)
+					}
+				}
+			}
+		})
+	})
+}
+
 func (p *PageContext) catalogCard(c *ui.Context, id app.FocusID, region string, item provider.MediaItem, size catalogCardSize, direction func(app.Direction) bool) {
-	colors := p.Theme.Colors
+	colors, d := p.Theme.Colors, p.uiColors()
+	related := region == videoDetailRelatedRegion
 	card := ui.Button(c.Key(string(id)), "").Size(size.width, size.height).Shrink(0).Padding(0, 0).
-		Border(0, ui.Transparent).Background(ui.Transparent).Label(item.Title).
-		OnClick(func() { p.dispatch(func() { p.openCatalogAction(p.Assets.Text.Home.Details, &item, true) }) })
+		Border(0, ui.Transparent).Background(ui.Transparent).Label(item.Title)
+	if p.canOpenVideoDetail(item.Ref) {
+		card.OnClick(func() { p.dispatch(func() { p.openVideoDetail(item) }) })
+	}
 	p.bindDirection(card, id, region, direction)
 	card.Children(func() {
 		ui.Column(c).Fill().Children(func() {
-			ui.Box(c).FillWidth().Height(size.cover).Radius(13).Clip().
-				Background(paint(colors.Surface.Raised)).Children(func() {
-				scale, stroke := float32(1), ui.Transparent
-				if p.State.Focus == id {
-					scale, stroke = 1.035, paint(colors.Focus.Ring)
+			scale, stroke := float32(1), ui.Transparent
+			focused := p.paintFocus() == id
+			if focused {
+				scale, stroke = 1.035, paint(colors.Focus.Ring)
+			}
+			cover := ui.Box(c.Key("card-cover")).FillWidth().Height(size.cover).Radius(13).Clip().
+				Background(d.coverFill)
+			if related {
+				shadow := withAlpha(colors.Overlay.Shadow, 0x22)
+				offset, blur := float32(8), float32(24)
+				if focused {
+					shadow = withAlpha(colors.Overlay.Shadow, 0x66)
+					offset, blur = 14, 36
 				}
+				animation := ui.Animation{Duration: 300 * time.Millisecond}
+				cover.Shadow(0, cover.AnimateTo("shadow-offset", offset, animation),
+					cover.AnimateTo("shadow-blur", blur, animation), 0, cover.AnimateColor("shadow-ink", shadow, animation))
+				cover.Shadow(0, 0, 0, 3, cover.AnimateColor("focus-ring", stroke, animation))
+			}
+			cover.Children(func() {
 				if image := p.catalogCover(item.CoverURL); image != nil {
 					photo := ui.Image(c.Key("card-photo"), image).Fill().Fit(ui.Cover)
 					zoom := photo.AnimateTo("focus-zoom", scale, ui.Animation{Duration: focusDuration})
 					photo.Scale(zoom, zoom)
 					ui.Box(c).Absolute().Left(0).Top(0).Fill().LinearGradient(ui.LinearGradient{
-						Angle: 0, Stops: []ui.GradientStop{{Color: paint(colors.Surface.Raised)}, {Color: ui.Transparent, At: 0.55}},
+						Angle: 0, Stops: []ui.GradientStop{{Color: d.coverShade}, {Color: ui.Transparent, At: 0.55}},
 					})
 				}
 				if item.DurationSeconds != nil {
-					ui.Text(c, catalogDuration(*item.DurationSeconds)).Absolute().Right(13).Bottom(12).ZIndex(1).
-						FontSize(14).LetterSpacing(0.7)
+					duration := ui.Text(c, catalogDuration(*item.DurationSeconds)).Absolute().Right(13).Bottom(12).
+						ZIndex(1).FontSize(14).LetterSpacing(0.7).TextColor(paint(colors.Playback.Foreground))
+					if related {
+						duration.Bottom(14)
+					}
 				}
 				if item.Quality != "" {
-					ui.Text(c, item.Quality).Absolute().Left(12).Top(12).ZIndex(1).Padding(3, 7).
-						FontSize(11).LetterSpacing(1).Radius(4).Border(1, paint(colors.Border.Subtle)).
-						Background(paint(colors.Surface.Panel))
+					tag := ui.Text(c, item.Quality).Absolute().Left(12).Top(12).ZIndex(1).Padding(3, 7).
+						FontSize(11).LetterSpacing(1).Radius(4).Border(1, d.badgeBorder).
+						Background(d.badgeFill).TextColor(paint(colors.Playback.Foreground))
+					if related {
+						tag.Padding(4, 7).FontWeight(400)
+					}
 				}
 				if item.ProgressSeconds != nil && item.DurationSeconds != nil && *item.DurationSeconds > 0 {
 					progress := min(1, float32(*item.ProgressSeconds)/float32(*item.DurationSeconds))
@@ -236,8 +306,10 @@ func (p *PageContext) catalogCard(c *ui.Context, id app.FocusID, region string, 
 					ui.Box(c).Absolute().Bottom(0).Left(0).Size(size.width*progress, 3).ZIndex(1).
 						Background(paint(colors.Playback.Progress))
 				}
-				ring := ui.Box(c.Key("card-focus")).Absolute().Left(0).Top(0).Fill().ZIndex(1).Radius(13)
-				ring.Border(4, ring.AnimateColor("focus-ring", stroke, ui.Animation{Duration: focusDuration, NonMotion: true}))
+				if !related {
+					ring := ui.Box(c.Key("card-focus")).Absolute().Left(0).Top(0).Fill().ZIndex(1).Radius(13)
+					ring.Border(4, ring.AnimateColor("focus-ring", stroke, ui.Animation{Duration: focusDuration, NonMotion: true}))
+				}
 			})
 			ui.Text(c, item.Title).FillWidth().Margin(16, 0, 9, 0).FontSize(size.title).FontWeight(500).
 				LetterSpacing(0.3).SingleLine()
@@ -248,18 +320,30 @@ func (p *PageContext) catalogCard(c *ui.Context, id app.FocusID, region string, 
 
 func (p *PageContext) catalogCardMetadata(c *ui.Context, item provider.MediaItem, width float32) {
 	colors, text := p.Theme.Colors, p.Assets.Text.Home
+	related := p.Location.Page == app.VideoDetail
+	ink := paint(colors.Text.Secondary)
 	ui.Row(c).FillWidth().Gap(9).AlignItems(ui.Center).Children(func() {
 		if item.Creator != nil {
-			p.catalogCreatorPortrait(c, item.Creator.AvatarURL)
+			if related {
+				ui.Box(c).Size(17, 17).Shrink(0).Radius(8.5).Clip().Center().
+					Background(paint(colors.Surface.Raised)).Children(func() {
+					if portrait := p.catalogCover(item.Creator.AvatarURL); portrait != nil {
+						ui.Image(c, portrait).Fill().Fit(ui.Cover)
+					} else {
+						ui.Icon(c, p.Assets.Icon("user")).Size(10, 10).TextColor(ink)
+					}
+				})
+			} else {
+				p.catalogCreatorPortrait(c, item.Creator.AvatarURL)
+			}
 			ui.Text(c, item.Creator.Name).Shrink(1).MaxWidth(0.62 * width).
-				FontSize(15).SingleLine().TextColor(paint(colors.Surface.Raised))
+				FontSize(15).SingleLine().TextColor(ink)
 		}
 		if item.Views != nil {
 			if item.Creator != nil {
-				ui.Text(c, "\u00b7").FontSize(15).TextColor(paint(colors.Surface.Raised))
+				ui.Text(c, "\u00b7").FontSize(15).TextColor(ink)
 			}
-			ui.Text(c, catalogViews(*item.Views, text)+text.Plays).
-				FontSize(15).SingleLine().TextColor(paint(colors.Surface.Raised))
+			ui.Text(c, catalogViews(*item.Views, text)+text.Plays).FontSize(15).SingleLine().TextColor(ink)
 		}
 	})
 }

@@ -16,17 +16,159 @@ import (
 
 func testEntries() []app.Entry {
 	return []app.Entry{{
-		ID: "test-source", SourceID: "test-source", Name: "Test Source", Available: true,
+		ID: "test-source", SourceID: "test-source", Name: "Test Source",
 		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.SearchCatalog},
 	}}
 }
 
-type memoryPreferences struct{ value app.Preferences }
+type memoryPreferences struct {
+	value               app.Preferences
+	historySyncDisabled bool
+}
 
-func (p *memoryPreferences) Load() (app.Preferences, error) { return p.value, nil }
 func (p *memoryPreferences) Save(value app.Preferences) error {
 	p.value = value
 	return nil
+}
+
+func (p *memoryPreferences) HistorySync(string, string) bool { return !p.historySyncDisabled }
+
+func (p *memoryPreferences) SaveHistorySync(_, _ string, enabled bool) error {
+	p.historySyncDisabled = !enabled
+	return nil
+}
+
+func newTestView(t *testing.T, options Options) *View {
+	t.Helper()
+	post := func(func()) {}
+	changed := func() {}
+	preferences := &memoryPreferences{}
+	if options.Preferences == nil {
+		options.Preferences = preferences
+	}
+	if options.Catalog == nil {
+		options.Catalog = app.NewCatalog(func(string) provider.Session { return viewCatalogSession{} }, post, changed)
+		t.Cleanup(options.Catalog.Close)
+	}
+	if options.Auth == nil {
+		options.Auth = app.NewAuth(uiTestKeychain{}, post, changed, changed, changed)
+		t.Cleanup(options.Auth.Close)
+	}
+	if options.Activity == nil {
+		options.Activity = app.NewAccountActivity(preferences, post, changed)
+		t.Cleanup(options.Activity.Close)
+	}
+	return NewView(options)
+}
+
+func TestWindowBackUsesHistoryForNewPagesAndModals(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := app.Route{Page: "test-page"}
+	dialog := app.Route{Page: "test-dialog"}
+	empty := ComponentFunc(func(*ui.Context, *PageContext) {})
+	pages, err := NewPages(assets,
+		Registration{Policy: app.RouteSpec{Route: page, Transient: true}, Component: empty},
+		Registration{Policy: app.RouteSpec{Route: dialog, Parent: page, Modal: true}, Component: empty},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default()})
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	if !state.Push(page) || !state.Push(dialog) {
+		t.Fatal("could not open the empty page and dialog")
+	}
+	tester.Frame()
+	for _, want := range []app.Route{page, {Page: app.Home}} {
+		tester.Key(0, ui.KeyEscape)
+		if state.Route != want {
+			t.Fatalf("Back restored %v, want %v", state.Route, want)
+		}
+	}
+	state.RecordPosition(app.Position{Focus: app.RailFocus(app.Home), Area: app.NavigationArea})
+	if view.goBack() {
+		t.Fatal("the root consumed the system Back action")
+	}
+}
+
+func TestHomeBackScrollsToTheCurrentTabBeforeExpandingRail(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := testEntries()
+	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := viewCatalogSession{page: make(chan provider.CollectionPage, 1)}
+	completion := make(chan func(), 1)
+	catalog := app.NewCatalog(func(string) provider.Session { return session }, func(fn func()) { completion <- fn }, func() {})
+	t.Cleanup(catalog.Close)
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
+	var frame *ui.Context
+	tester := ui.NewTester(func(c *ui.Context) { frame = c; view.Render(c) }, 1920, 1080)
+	view.SyncEntry()
+	session.page <- provider.CollectionPage{}
+	(<-completion)()
+	tester.Frame()
+	tester.Key(0, ui.KeyRight)
+	if view.home.tab != "popular" {
+		t.Fatalf("Right selected home tab %q, want popular", view.home.tab)
+	}
+
+	feed := provider.Collection{ID: "popular", Title: "Popular"}
+	for index := range 50 {
+		id := fmt.Sprintf("video-%d", index)
+		feed.Items = append(feed.Items, provider.MediaItem{Ref: provider.MediaRef{Kind: provider.Video, ID: id}, Title: id})
+	}
+	session.page <- provider.CollectionPage{Collections: []provider.Collection{feed}}
+	(<-completion)()
+	tester.Frame()
+	tab := homeTabID("popular")
+	tester.Key(0, ui.KeyDown)
+	if state.Focus == tab || view.activeScroll.Y != 0 {
+		t.Fatalf("did not select a card in the first viewport: focus=%q scroll=%v", state.Focus, view.activeScroll.Y)
+	}
+	tester.Key(0, ui.KeyEscape)
+	if ui.FocusedValue(frame, &state.Focus) != tab || view.activeScroll.Y != 0 {
+		t.Fatalf("Menu skipped the tab in the first viewport: focus=%q scroll=%v", state.Focus, view.activeScroll.Y)
+	}
+
+	card := catalogCardFocus(feed.ID, feed.Items[36].Ref)
+	state.RecordPosition(app.Position{Focus: card, Y: view.activeScroll.MaxY})
+	view.activeScroll.Y = view.activeScroll.MaxY
+	tester.Frame()
+	start := view.activeScroll.Y
+	if start <= 1080 || ui.FocusedValue(frame, &state.Focus) != card {
+		t.Fatalf("did not start from a deep card: focus=%q scroll=%v", state.Focus, start)
+	}
+
+	tester.Key(0, ui.KeyBack)
+	tester.Advance(homeReturnScroll.Duration / 2)
+	if offset := view.activeScroll.Y; offset <= 0 || offset >= start || ui.FocusedValue(frame, &state.Focus) != tab {
+		t.Fatalf("Back did not animate toward the original tab: focus=%q scroll=%v", state.Focus, offset)
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Advance(homeReturnScroll.Duration/2 + time.Second/60)
+	if state.Area != app.ContentArea || state.Focus != tab || view.activeScroll.Y != 0 {
+		t.Fatalf("Menu interrupted the return to the tab: %+v scroll=%v", state.Location, view.activeScroll.Y)
+	}
+	tester.Key(0, ui.KeyEscape)
+	if state.Area != app.NavigationArea || ui.FocusedValue(frame, &state.Focus) != app.RailFocus(app.Home) {
+		t.Fatalf("Menu at the top did not expand the sidebar: %+v", state.Location)
+	}
 }
 
 func TestNavigationConfirmationReturnsFocusToContent(t *testing.T) {
@@ -42,7 +184,7 @@ func TestNavigationConfirmationReturnsFocusToContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view := NewView(Options{State: state, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default(), Version: "test"})
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default(), Version: "test"})
 	var context *ui.Context
 	tester := ui.NewTester(func(c *ui.Context) { context = c; view.Render(c) }, 1920, 1080)
 	for _, step := range []struct {
@@ -69,11 +211,13 @@ func TestExpandedNavigationPushesContentWithoutReflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
+	entries := testEntries()
+	entries[0].Capabilities = nil
+	state, err := app.NewState(entries, "test-source", pages.Routes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view := NewView(Options{State: state, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default(), Version: "test"})
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default(), Version: "test"})
 	tester := ui.NewTester(view.Render, 1920, 1080)
 	before, ok := tester.Find(assets.Text.EmptyTitle)
 	if !ok {
@@ -112,7 +256,7 @@ func TestSettingsKeepFocusAndModalReturnsToItsTrigger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := NewView(Options{State: state, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default(), Version: "test"})
+	v := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default(), Version: "test"})
 	var context *ui.Context
 	tester := ui.NewTester(func(c *ui.Context) { context = c; v.Render(c) }, 1920, 1080)
 	v.dispatch(func() { state.Navigate(app.Route{Page: app.Settings}) })
@@ -166,7 +310,7 @@ func TestEmptyEntriesKeepManagementReachable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := NewView(Options{State: state, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default(), Version: "test"})
+	v := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default(), Version: "test"})
 	var context *ui.Context
 	tester := ui.NewTester(func(c *ui.Context) { context = c; v.Render(c) }, 1920, 1080)
 	if len(pages.navigation(state, primaryNavigation)) != 0 || len(pages.navigation(state, utilityNavigation)) != 2 {
@@ -203,7 +347,8 @@ func TestSourceCapabilitiesHideUnsupportedRoutesAndRailFocus(t *testing.T) {
 		t.Fatal("declared capability could not open search")
 	}
 	entries[0].Capabilities = provider.Capabilities{provider.BrowseCatalog}
-	if err := state.SetEntries(entries); err != nil {
+	state, err = app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if state.Page != app.Home || state.Navigate(app.Route{Page: app.Search}) {
@@ -273,7 +418,7 @@ func TestHomeKeepsFocusThroughArtworkPagingAndFiltering(t *testing.T) {
 		}
 	})
 	defer catalog.Close()
-	view := NewView(Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default()})
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
 	tester := ui.NewTester(func(c *ui.Context) { frame = c; view.Render(c) }, 1920, 1080)
 	view.SyncEntry()
 	tester.Frame()
@@ -482,7 +627,7 @@ func TestCatalogHoldMovesAtConstantSpeedUntilRelease(t *testing.T) {
 	completion := make(chan func(), 1)
 	catalog := app.NewCatalog(func(string) provider.Session { return session }, func(fn func()) { completion <- fn }, func() {})
 	defer catalog.Close()
-	view := NewView(Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Preferences: &memoryPreferences{}, Theme: theme.Default()})
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
 	tester := ui.NewTester(view.Render, 1920, 1080)
 	view.SyncEntry()
 	feed := provider.Collection{ID: "feed", Title: "Recommendations"}
@@ -503,10 +648,11 @@ func TestCatalogHoldMovesAtConstantSpeedUntilRelease(t *testing.T) {
 	if state.Focus != homePlayAction || view.activeScroll.Y != 0 {
 		t.Fatalf("before the repeat, focus is %s and offset is %v", state.Focus, view.activeScroll.Y)
 	}
+	const holdStep = time.Second / 60
 	tester.KeyRepeat(0, ui.KeyDown)
 	for n := 1; n <= 40; n++ {
-		tester.Advance((time.Second / 60))
-		want := float32(float64(n) * (time.Second / 60).Seconds() * catalogHoldSpeed)
+		tester.Advance(holdStep)
+		want := float32(float64(n) * holdStep.Seconds() * catalogHoldSpeed)
 		if got := view.activeScroll.Y; got < want-0.01 || got > want+0.01 {
 			t.Fatalf("frame %d offset = %.2f, want %.2f", n, got, want)
 		}
@@ -522,8 +668,8 @@ func TestCatalogHoldMovesAtConstantSpeedUntilRelease(t *testing.T) {
 	start := view.activeScroll.Y
 	tester.KeyRepeat(0, ui.KeyUp)
 	for n := 1; n <= 15; n++ {
-		tester.Advance((time.Second / 60))
-		want := start - float32(float64(n)*(time.Second / 60).Seconds()*catalogHoldSpeed)
+		tester.Advance(holdStep)
+		want := start - float32(float64(n)*holdStep.Seconds()*catalogHoldSpeed)
 		if got := view.activeScroll.Y; got < want-0.01 || got > want+0.01 {
 			t.Fatalf("up frame %d offset = %.2f, want %.2f", n, got, want)
 		}
@@ -557,5 +703,59 @@ func TestCatalogBuildsTheViewportWithOneRowOfOverscan(t *testing.T) {
 		if got := section.grid.slots(input.real, true); got != input.slots {
 			t.Errorf("%d real cards produced %d loading slots, want %d", input.real, got, input.slots)
 		}
+	}
+}
+
+type artworkStubSession struct {
+	viewCatalogSession
+}
+
+func (artworkStubSession) LoadCatalogArtwork(context.Context, string) (image.Image, error) {
+	return image.NewRGBA(image.Rect(0, 0, 2, 2)), nil
+}
+
+func TestCatalogBitmapInitializesLazilyAndEvictsLRU(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbacks := make(chan func(), 128)
+	catalog := app.NewCatalog(func(string) provider.Session { return artworkStubSession{} }, func(fn func()) { callbacks <- fn }, func() {})
+	defer catalog.Close()
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
+	view.SyncEntry()
+	// Confirm home.images is nil before Home renders.
+	if view.home.images != nil {
+		t.Fatal("expected nil home.images before Home render")
+	}
+	page := view.context(state.Location, true, 1920, 1080)
+	// Request artwork without ever calling catalogPage.Render.
+	catalog.PrepareArtwork([]string{"https://img.example/first.jpg"})
+	for catalog.Artwork("https://img.example/first.jpg") == nil {
+		(<-callbacks)()
+	}
+	if bmp := page.catalogCover("https://img.example/first.jpg"); bmp == nil {
+		t.Fatal("catalogCover returned nil for loaded artwork")
+	}
+	if len(view.home.images) != 1 {
+		t.Fatalf("home.images size = %d, want 1", len(view.home.images))
+	}
+	// Populate more than maxCatalogBitmaps entries and verify LRU bound holds.
+	for i := range maxCatalogBitmaps + 16 {
+		url := fmt.Sprintf("https://img.example/%03d.jpg", i)
+		view.home.imageClock++
+		view.home.images[catalogImageKey{location: url}] = catalogImage{lastUsed: view.home.imageClock}
+	}
+	page.pruneCatalogBitmaps()
+	if len(view.home.images) > maxCatalogBitmaps {
+		t.Fatalf("home.images exceeded bound: %d > %d", len(view.home.images), maxCatalogBitmaps)
 	}
 }

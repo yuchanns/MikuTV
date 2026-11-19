@@ -25,6 +25,9 @@ var operations = map[provider.Capability][]string{
 	provider.BrowseLibrary:                     {"readAccount"},
 	provider.BrowseCatalog:                     {"browse"},
 	provider.GetCatalogItem:                    {"getItem"},
+	provider.EditVideo:                         {"editVideo"},
+	provider.ReadVideoComments:                 {"videoComments"},
+	provider.WriteVideoComments:                {"editVideo"},
 	provider.SignIn:                            {beginSignIn, pollSignIn, restoreAccount, signOut},
 	provider.AccountHistory.Capability():       {"readAccount"},
 	provider.AccountWatchLater.Capability():    {"readAccount"},
@@ -47,8 +50,8 @@ type Source struct {
 }
 
 func (s *Source) Manifest() Manifest        { return s.manifest.Manifest }
-func (s *Source) Cover() []byte             { return bytes.Clone(s.cover) }
-func (s *Source) AuthArtwork() []byte       { return bytes.Clone(s.authArtwork) }
+func (s *Source) Cover() []byte             { return s.cover }
+func (s *Source) AuthArtwork() []byte       { return s.authArtwork }
 func (s *Source) Digest() [sha256.Size]byte { return s.digest }
 func (s *Source) Capabilities() provider.Capabilities {
 	return append(provider.Capabilities(nil), s.manifest.Capabilities...)
@@ -64,7 +67,7 @@ func Open(ctx context.Context, data []byte, appVersion string) (*Source, error) 
 }
 
 func openPackage(ctx context.Context, input io.ReaderAt, size int64, digest [sha256.Size]byte, appVersion string) (*Source, error) {
-	files, err := readArchive(ctx, input, size)
+	files, err := readArchive(input, size)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +130,7 @@ type packageArchive struct {
 	remaining uint64
 }
 
-func readArchive(ctx context.Context, input io.ReaderAt, size int64) (*packageArchive, error) {
+func readArchive(input io.ReaderAt, size int64) (*packageArchive, error) {
 	reader, err := zip.NewReader(input, size)
 	if err != nil {
 		return nil, fmt.Errorf("plugin archive: %w", err)
@@ -137,9 +140,6 @@ func readArchive(ctx context.Context, input io.ReaderAt, size int64) (*packageAr
 	archive := &packageArchive{files: make(map[string]*zip.File), remaining: heapLimit}
 	paths := make(map[string]bool)
 	for _, file := range reader.File {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		name := strings.TrimSuffix(file.Name, "/")
 		lower := strings.ToLower(name)
 		if !packagePath(name) || file.Mode()&fs.ModeSymlink != 0 {

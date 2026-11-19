@@ -32,15 +32,14 @@ func NewState(entries []Entry, recent string, routes *Routes) (*State, error) {
 	if routes == nil {
 		return nil, fmt.Errorf("registered routes are required")
 	}
-	s := &State{routes: routes, positions: make(map[viewKey]Location), sessions: make(map[string]session)}
-	if err := s.SetEntries(entries); err != nil {
-		return nil, err
-	}
-	if s.available(recent) {
+	s := &State{routes: routes, entries: slices.Clone(entries), positions: make(map[viewKey]Location), sessions: make(map[string]session)}
+	initial := routes.Picker
+	if _, ok := s.entry(recent); ok {
 		s.CurrentEntry = recent
-		spec, _ := routes.Resolve(routes.Root)
-		s.show(routes.initial(s, spec))
+		initial = routes.Root
 	}
+	spec, _ := routes.Resolve(initial)
+	s.show(routes.initial(s, spec))
 	return s, nil
 }
 

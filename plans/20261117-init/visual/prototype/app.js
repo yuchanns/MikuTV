@@ -18,7 +18,7 @@
     query:'', searchKind:'all', sort:0, later:new Set(['mountains','forest']),
     favorites:new Set(['orbit','city']), likes:new Set(), following:new Set([...C.heroes,...C.videos].map(v=>v.creator)),
     tracked:new Set(['show-1']), history:['orbit','mountains','city','forest'],
-    overlay:null, detail:null, detailTab:'about', player:null, playing:true,
+    overlay:null, detail:null, detailTab:'about', detailPart:0, detailHistory:[], player:null, playing:true,
     position:542, quality:'1080P', subtitles:U.off, danmaku:true, reduced:false,
     preview:true, focus:null, returnFocus:null, autoHide:null, toastTimer:null,
     account:true, member:false, scenario:'free', coins:1, historyStack:[], tour:false, panel:null
@@ -192,22 +192,51 @@
     const isShow=C.shows.some(item=>item.id===v.id);
     return `<div class="episode-grid">${(isShow ? Array.from({length:8},(_,i)=>`${String(i+1).padStart(2,'0')} / ${C.chapters[i%4]}`) : C.chapters).map((title,i)=>button(`${String(i+1).padStart(2,'0')}   ${title}`,`chapter:${i}`,'episode', '',`data-chapter="${i}"`)).join('')}</div>`;
   }
-  function openDetail(id) {
-    if(state.overlay==='creator')state.creatorReturn={id:communityPages.model.creator,tab:communityPages.model.creatorTab,focus:document.activeElement?.dataset.action};
-    state.returnFocus=document.activeElement?.dataset.action;
+  function detailEpisodes(v) {
+    return v.collection?.length>1?v.collection:playerFeatures.episodeData(v)||[];
+  }
+  function detailEpisodeIndex(v) {
+    return v.collection?.length>1?v.collection.findIndex(episode=>episode.id===v.id):state.detailPart;
+  }
+  function renderDetailEpisodes(v) {
+    const episodes=detailEpisodes(v);
+    if(episodes.length<2)return `<p class="detail-no-episodes">${escape(U.detailNoEpisodes)}</p>`;
+    const current=detailEpisodeIndex(v);
+    const available=v.episodeCount||episodes.length;
+    const rows=episodes.map((episode,i)=>{
+      const selected=i===current;
+      const title=typeof episode==='string'?episode:episode.title;
+      return `<button class="episode focusable" data-action="detail-episode:${i}" aria-pressed="${selected}" ${i>=available?'disabled':''}><b>${String(i+1).padStart(2,'0')}</b><span>${escape(title)}</span>${icon(i>=available?'lock':selected?'check':'play')}</button>`;
+    });
+    return `<div class="episode-list-heading"><span>${escape(U.detailEpisodes)}</span><small>${available} / ${episodes.length}</small></div><div class="episode-grid">${rows.join('')}</div>`;
+  }
+  function openDetail(id,fromEpisode=false) {
+    const focus=document.activeElement?.dataset.action;
+    if(fromEpisode){
+      state.detailHistory.push({id:state.detail,tab:state.detailTab,part:state.detailPart,focus,position:$('.detail').scrollTop});
+    }else{
+      state.detailHistory=[];
+      if(state.overlay==='creator')state.creatorReturn={id:communityPages.model.creator,tab:communityPages.model.creatorTab,focus};
+      state.returnFocus=focus;
+    }
     if(find(id).live){startPlayer(id);if(state.player===id)openPanel('description');return;}
-    state.detail=id;state.detailTab='about';state.overlay='detail';renderDetail();
+    state.detail=id;state.detailTab='about';state.detailPart=0;state.overlay='detail';renderDetail();
     focusAction(`play:${id}`);
   }
   function renderDetail() {
     const v=find(state.detail);const tracked=state.tracked.has(v.id);const isShow=C.shows.includes(v);
-    $('#overlay').innerHTML=`<article class="detail"><div class="detail-bg" style="background-image:url('${asset(v.image)}')"></div><div class="detail-copy"><div class="eyebrow">${escape(v.category)} / ${isShow?'SERIES':'CREATOR’S CUT'}</div><h1>${escape(v.short||v.title)}</h1>${meta(v)}<div class="creator-line"><img src="${asset(v.image)}" alt=""><button class="focusable" data-action="creator:${v.id}">${escape(v.creator)}</button>${button(state.following.has(v.creator)?U.followed:U.follow,`follow:${v.id}`,'focusable')}</div><p class="hero-description">${escape(v.description||U.seriesSub).replace(/\n/g,'<br>')}</p><div class="actions">${button(contentAccess.label(v),`play:${v.id}`,'primary',contentAccess.kind(v)?'lock':'play')}${button(U.later,`later:${v.id}`,'secondary',state.later.has(v.id)?'check':'plus')}${isShow?button(tracked?U.seasonFollowed:U.seasonFollow,`track:${v.id}`,'secondary',tracked?'check':'plus'):button(U.triple,'triple','secondary','like')}</div><div class="detail-stats"><span>${escape(v.views||'32.6')}${escape(U.playCount)}</span><span>${escape(U.commentCount)}</span><span>2026.11.16</span></div></div><div class="detail-body"><div class="tabs">${[['about',U.about],['episodes',U.episodes],['comments',U.comments],['related',U.related]].map(([id,label])=>button(label,`detailtab:${id}`,`tab ${state.detailTab===id?'selected':''}`)).join('')}</div><div id="detail-content" class="detail-content">${detailContent(v)}</div></div></article>`;
+    const episodes=detailEpisodes(v);
+    const episode=episodes.length>1?episodes[detailEpisodeIndex(v)]:undefined;
+    $('#overlay').innerHTML=`<article class="detail"><div class="detail-bg" style="background-image:url('${asset(v.image)}')"></div><div class="detail-copy"><div class="eyebrow">${escape(v.category)} / ${isShow?'SERIES':'CREATOR’S CUT'}</div><h1>${escape(v.short||v.title)}</h1>${meta({...v,duration:episode?.duration||v.duration})}<div class="creator-line"><img src="${asset(v.image)}" alt=""><button class="focusable" data-action="creator:${v.id}">${escape(v.creator)}</button>${button(state.following.has(v.creator)?U.followed:U.follow,`follow:${v.id}`,'focusable')}</div><p class="hero-description">${escape(v.description||U.seriesSub).replace(/\n/g,'<br>')}</p><div class="actions">${button(contentAccess.label(v),`play:${v.id}`,'primary',contentAccess.kind(v)?'lock':'play')}${button(U.later,`later:${v.id}`,'secondary',state.later.has(v.id)?'check':'plus')}${isShow?button(tracked?U.seasonFollowed:U.seasonFollow,`track:${v.id}`,'secondary',tracked?'check':'plus'):button(U.triple,'triple','secondary','like')}</div><div class="detail-stats"><span>${escape(v.views||'32.6')}${escape(U.playCount)}</span><span>${escape(U.commentCount)}</span><span>2026.11.16</span></div></div><div class="detail-body"><div class="tabs">${[['about',U.about],['episodes',U.detailEpisodes],['comments',U.comments],['related',U.related]].map(([id,label])=>button(label,`detailtab:${id}`,`tab ${state.detailTab===id?'selected':''}`)).join('')}</div><div id="detail-content" class="detail-content">${detailContent(v)}</div></div></article>`;
   }
   function detailContent(v) {
     if(state.detailTab==='comments')return comments();
-    if(state.detailTab==='episodes')return chapters(v);
+    if(state.detailTab==='episodes')return renderDetailEpisodes(v);
     if(state.detailTab==='related')return `<div class="cards">${C.videos.map(item=>card(item)).join('')}</div>`;
-    return `<div class="about-grid"><div><p>${escape(v.description||U.seriesSub).replace(/\n/g,'<br>')}</p><div class="actions">${button(U.like,'like','secondary','like')}${button(U.coin,'coin','secondary','coin')}${button(U.favorite,'favorite','secondary','star')}</div></div><div><div class="mini-label">${escape(v.parts?C.playerFeatures.parts:C.courses.includes(v)?C.playerFeatures.lessons:C.shows.includes(v)?C.playerFeatures.episodes:C.playerFeatures.chapters)}</div><p>${escape(v.chapters?.[0]?.title||((C.episodeFixtures[v.id]||v.parts)?.[0]?.title)||C.episodeFixtures[v.id]?.[0]||v.short||v.title)}<br><small>${escape(v.duration)}</small></p></div></div>`;
+    const episodes=detailEpisodes(v);
+    const episode=episodes.length>1?episodes[detailEpisodeIndex(v)]:undefined;
+    const title=typeof episode==='string'?episode:episode?.title;
+    return `<div class="about-grid"><div><p>${escape(v.description||U.seriesSub).replace(/\n/g,'<br>')}</p><div class="actions">${button(U.like,'like','secondary','like')}${button(U.coin,'coin','secondary','coin')}${button(U.favorite,'favorite','secondary','star')}</div></div><div><div class="mini-label">${escape(episode?U.detailEpisodes:U.detailCurrentVideo)}</div><p>${escape(title||v.short||v.title)}<br><small>${escape(episode?.duration||v.duration)}</small></p></div></div>`;
   }
   function startPlayer(id,options={}) {
     if(!state.overlay)state.returnFocus=document.activeElement?.dataset.action;
@@ -335,6 +364,12 @@
     clearTimeout(state.autoHide);
     if(state.overlay==='modal'&&state.modalReturn){const parent=state.modalReturn;state.modalReturn=null;if(parent==='player'){startPlayer(state.player);return;}if(parent==='detail'){state.overlay='detail';renderDetail();return;}}
     if(state.player&&state.detail){state.player=null;state.overlay='detail';renderDetail();focusAction(`play:${state.detail}`);return;}
+    if(state.overlay==='detail'&&state.detailHistory.length){
+      const origin=state.detailHistory.pop();
+      state.detail=origin.id;state.detailTab=origin.tab;state.detailPart=origin.part;
+      renderDetail();$('.detail').scrollTop=origin.position;focusAction(origin.focus);
+      return;
+    }
     if(state.overlay==='detail'&&!state.player&&state.creatorReturn){const origin=state.creatorReturn;state.creatorReturn=null;communityPages.openCreator(origin.id,origin);return;}
     state.overlay=null;state.player=null;state.detail=null;$('#overlay').innerHTML='';
     focusAction(state.returnFocus||(['settings','account'].includes(state.page)?state.page:`nav:${state.page}`));
@@ -389,7 +424,28 @@
     if(verb==='later')return saveLater(value);
     if(verb==='category'){state.category=value;renderPage(`category:${value}`);return;}
     if(verb==='library'){state.libraryTab=value;renderPage(`library:${value}`);return;}
-    if(verb==='detailtab'){if(value==='comments')discussion.reset('detail');state.detailTab=value;renderDetail();focusAction(action);$('.detail').scrollTo({top:420,behavior:state.reduced?'instant':'smooth'});return;}
+    if(verb==='detail-episode'){
+      const video=find(state.detail),index=Number(value);
+      const episode=detailEpisodes(video)[index];
+      if(!episode)return;
+      if(episode.id&&episode.id!==video.id){openDetail(episode.id,true);return;}
+      if(video.collection?.length>1)return;
+      state.detailPart=index;
+      $('.detail .meta').outerHTML=meta({...video,duration:episode.duration||video.duration});
+      $('#detail-content').innerHTML=renderDetailEpisodes(video);
+      focusAction(action);
+      return;
+    }
+    if(verb==='detailtab'){
+      if(value==='comments')discussion.reset('detail');
+      state.detailTab=value;renderDetail();focusAction(action);
+      const detail=$('.detail');
+      const bounds=detail.getBoundingClientRect();
+      const scale=bounds.height/detail.clientHeight;
+      const tabTop=($('.detail .tabs').getBoundingClientRect().top-bounds.top)/scale;
+      detail.scrollTo({top:value==='comments'?Math.max(0,tabTop-125):420,behavior:state.reduced?'instant':'smooth'});
+      return;
+    }
     if(verb==='follow'){const v=find(value);const isFollowed=state.following.has(v.creator);isFollowed?state.following.delete(v.creator):state.following.add(v.creator);element.textContent=isFollowed?U.follow:U.followed;showToast(isFollowed?U.follow:U.followed);return;}
     if(verb==='track'){state.tracked.has(value)?state.tracked.delete(value):state.tracked.add(value);if(state.detail)renderDetail();else renderPage();focusAction(action);return;}
     if(verb==='panel')return openPanel(value);
@@ -443,8 +499,9 @@
   function moveFocus(direction) {
     const current=document.activeElement;const elements=visibleElements();
     if(!elements.includes(current)){elements[0]?.focus();return;}
+    const horizontal=direction==='ArrowLeft'||direction==='ArrowRight';
     const recommendationRow=current.closest('.home-recommendation-row');
-    if(recommendationRow&&(direction==='ArrowLeft'||direction==='ArrowRight')){
+    if(recommendationRow&&horizontal){
       const cards=$$('.video-card',recommendationRow);
       const next=cards[cards.indexOf(current)+(direction==='ArrowRight'?1:-1)];
       if(next){
@@ -453,6 +510,12 @@
       }else if(direction==='ArrowLeft'){
         focusAction('nav:home');
       }
+      return;
+    }
+    if(horizontal&&current.matches('.detail .tabs [data-action^="detailtab:"]')){
+      const tabs=$$('.detail .tabs [data-action^="detailtab:"]');
+      const next=tabs[tabs.indexOf(current)+(direction==='ArrowRight'?1:-1)];
+      if(next)perform(next.dataset.action,next);
       return;
     }
     if(state.page==='account'&&!state.overlay){
@@ -467,7 +530,14 @@
       if(primary<5)continue;const score=primary+cross*3.2+(cross>primary*1.4?350:0);
       if(score<bestScore){bestScore=score;best=el;}
     }
-    if(best){best.focus({preventScroll:true});best.scrollIntoView({behavior:state.reduced?'instant':'smooth',block:'nearest',inline:'nearest'});}
+    if(best){
+      const currentGroup=current.dataset.action?.split(':')[0];
+      if(horizontal&&state.page==='home'&&!state.overlay&&['tab','category','rank-genre'].includes(currentGroup)&&best.dataset.action?.split(':')[0]===currentGroup){
+        perform(best.dataset.action,best);
+        return;
+      }
+      best.focus({preventScroll:true});best.scrollIntoView({behavior:state.reduced?'instant':'smooth',block:'nearest',inline:'nearest'});
+    }
   }
   function handleKey(event) {
     if(textInput.handleKey(event)||pluginPages.handleKey(event)||playerFeatures.handleKey(event))return;

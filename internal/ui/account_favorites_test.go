@@ -13,6 +13,11 @@ import (
 
 type favoriteTestReader map[string][]provider.AccountRow
 
+type favoriteTestSession struct {
+	uiAuthSource
+	favoriteTestReader
+}
+
 func (rows favoriteTestReader) ReadAccount(_ context.Context, request provider.AccountRequest) (provider.AccountPage, error) {
 	return provider.AccountPage{Rows: rows[request.Folder]}, nil
 }
@@ -27,7 +32,7 @@ func TestFavoriteCardsNavigateBetweenFolderAndVideos(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := testEntries()
-	entries[0].Capabilities = append(entries[0].Capabilities, provider.BrowseLibrary, provider.AccountFavorites.Capability())
+	entries[0].Capabilities = provider.Capabilities{provider.SignIn, provider.BrowseLibrary, provider.AccountFavorites.Capability()}
 	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
 	if err != nil {
 		t.Fatal(err)
@@ -37,15 +42,35 @@ func TestFavoriteCardsNavigateBetweenFolderAndVideos(t *testing.T) {
 		{ID: "second", Title: "Second folder", Ref: &provider.MediaRef{EntryID: entries[0].ID, Kind: provider.CollectionKind, ID: "second"}},
 	}
 	videos := []provider.AccountRow{{ID: "one", Title: "First saved video"}, {ID: "two", Title: "Second saved video"}}
-	completed := make(chan func(), 1)
-	activity := app.NewAccountActivity(nil, func(fn func()) { completed <- fn }, func() {})
+	completed := make(chan func(), 4)
+	post, unchanged := func(fn func()) { completed <- fn }, func() {}
+	deliver := func() {
+		t.Helper()
+		select {
+		case fn := <-completed:
+			fn()
+		case <-time.After(time.Second):
+			t.Fatal("missing account request callback")
+		}
+	}
+	session := &favoriteTestSession{favoriteTestReader: favoriteTestReader{"": folders, "second": videos}}
+	catalog := app.NewCatalog(func(string) provider.Session { return session }, post, unchanged)
+	defer catalog.Close()
+	auth := app.NewAuth(uiTestKeychain{data: []byte(`{"selected":"owner","accounts":[{"account":{"id":"owner","name":"Owner"},"data":"e30="}]}`)},
+		post, unchanged, unchanged, unchanged)
+	defer auth.Close()
+	preferences := &memoryPreferences{}
+	activity := app.NewAccountActivity(preferences, post, unchanged)
 	defer activity.Close()
-	activity.Bind(entries[0], "owner", favoriteTestReader{"": folders, "second": videos})
 	state.Navigate(libraryRoute(provider.AccountFavorites))
-	activity.Ensure(provider.AccountQuery{Section: provider.AccountFavorites})
-	(<-completed)()
-	view := NewView(Options{State: state, Activity: activity, Pages: pages, Assets: assets,
-		Preferences: &memoryPreferences{}, Theme: theme.Default()})
+	view := NewView(Options{State: state, Activity: activity, Auth: auth, Catalog: catalog, Pages: pages, Assets: assets,
+		Preferences: preferences, Theme: theme.Default()})
+	view.SyncEntry()
+	for auth.Accounts().CurrentID != "owner" {
+		deliver()
+	}
+	view.SyncAccountActivity()
+	deliver()
 	tester := ui.NewTester(view.Render, 1920, 1080)
 	tester.Frame()
 	tester.Key(0, ui.KeyDown)
@@ -57,8 +82,7 @@ func TestFavoriteCardsNavigateBetweenFolderAndVideos(t *testing.T) {
 	if state.Section != favoriteFolderSection || activity.Folder().ID != folders[1].ID {
 		t.Fatal("the focused folder was not opened")
 	}
-	activity.Ensure(libraryQuery(view))
-	(<-completed)()
+	deliver()
 	tester.Frame()
 	tester.Key(0, ui.KeyDown)
 	tester.Key(0, ui.KeyRight)
@@ -113,7 +137,7 @@ func TestAccountShortcutsAndFavoriteManagement(t *testing.T) {
 	defer catalog.Close()
 	activity := app.NewAccountActivity(nil, post, func() {})
 	defer activity.Close()
-	store := uiTestKeychain{data: []byte(`{"selected":"owner","accounts":[{"account":{"id":"owner","name":"Viewer"},"data":{}}]}`)}
+	store := uiTestKeychain{data: []byte(`{"selected":"owner","accounts":[{"account":{"id":"owner","name":"Viewer"},"data":"e30="}]}`)}
 	var view *View
 	auth := app.NewAuth(store, post, func() {}, func() {
 		catalog.Reload()
@@ -173,6 +197,11 @@ func TestAccountShortcutsAndFavoriteManagement(t *testing.T) {
 	if state.Route != libraryRoute(provider.AccountWatchLater) {
 		t.Fatal("the watch-later shortcut did not open its list")
 	}
+	await(func() bool { return activity.Snapshot(libraryQuery(view)).Phase == app.CatalogReady })
+	tester.Frame()
+	move(ui.KeyDown, libraryPlayAll)
+	move(ui.KeyDown, libraryCardFocus(libraryQuery(view), folder))
+	move(ui.KeyUp, app.ContentAction)
 	move(ui.KeyEscape, later)
 	move(ui.KeyLeft, favorites)
 	tester.Key(0, ui.KeyEnter)

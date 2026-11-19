@@ -92,6 +92,9 @@ func (p *PageContext) styledButton(c *ui.Context, label, icon string, id app.Foc
 		Padding(0, style.padding).Radius(style.radius).
 		Border(border, style.border).Background(background).TextColor(foreground).FontSize(style.fontSize).
 		AlignSelf(ui.Start).OnClick(func() { p.dispatch(action) })
+	if style.focusShadow {
+		p.addVideoFocusShadow(e, focused)
+	}
 	if style.fontWeight > 0 {
 		e.FontWeight(style.fontWeight)
 	}

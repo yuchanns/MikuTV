@@ -1,11 +1,11 @@
 package tvui
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"maps"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +43,7 @@ const (
 	homeDiscoveryHeight               = 360
 	homeColumns                       = 5
 	homeFeatureInterval               = 8 * time.Second
+	maxCatalogBitmaps                 = 64
 )
 
 var homeTabs = [...]string{"", "popular", "ranking", "regions"}
@@ -57,8 +58,9 @@ type catalogImageKey struct {
 }
 
 type catalogImage struct {
-	art    *app.CatalogArtwork
-	source *ui.Bitmap
+	art      *app.CatalogArtwork
+	source   *ui.Bitmap
+	lastUsed uint64
 }
 
 type catalogHome struct {
@@ -76,9 +78,10 @@ type catalogHome struct {
 	rotateAt     time.Time
 	hold         catalogHold
 	images       map[catalogImageKey]catalogImage
+	imageClock   uint64
+	shelfScrolls map[string]*ui.ScrollState
 	rowScrolls   map[string]*ui.ScrollState
 	action       catalogAction
-	shelfDetails catalogAction
 }
 
 type catalogShelf struct {
@@ -86,16 +89,8 @@ type catalogShelf struct {
 	items           []provider.MediaItem
 }
 
-type catalogAction struct {
-	title, errorText string
-	item             *provider.MediaItem
-	items            []provider.MediaItem
-	cancel           context.CancelFunc
-	loading          bool
-}
-
 func syncHome(v *View) {
-	if v.Activity != nil && v.Activity.HistorySync() {
+	if v.Activity.HistorySync() {
 		v.Activity.Ensure(homeHistory)
 	}
 }
@@ -125,7 +120,7 @@ func (v *View) backFromHome() bool {
 func (catalogPage) Render(c *ui.Context, p *PageContext) {
 	catalog := p.host.Catalog
 	entry, _ := p.State.Current()
-	if catalog == nil || !entry.Capabilities.Has(provider.BrowseCatalog) {
+	if !entry.Capabilities.Has(provider.BrowseCatalog) {
 		ui.Column(c).FillWidth().Padding(148, 83, 0, 103).Gap(44).
 			Children(func() { contentPage{}.Render(c, p) })
 		return
@@ -141,8 +136,7 @@ func (catalogPage) Render(c *ui.Context, p *PageContext) {
 	if home.feedRevision != current.FeedRevision {
 		home.feedRevision, home.featured = current.FeedRevision, nil
 		home.rowScrolls = nil
-		home.featureInfo.stop()
-		home.featureInfo.loaded = nil
+		home.featureInfo.reset()
 		home.rotateAt = time.Time{}
 	}
 	picks := firstCatalogItems(current.Page.Collections)
@@ -245,7 +239,7 @@ func catalogCardFocus(collection string, ref provider.MediaRef) app.FocusID {
 func (p *PageContext) homeShelves(sourceShelves []provider.Collection, picks []provider.MediaItem) []catalogShelf {
 	text := p.Assets.Text.Home
 	var history []provider.MediaItem
-	if activity := p.host.Activity; activity != nil && activity.HistorySync() {
+	if activity := p.host.Activity; activity.HistorySync() {
 		for _, row := range activity.Snapshot(homeHistory).Page.Rows {
 			if item := row.Item; item != nil && item.ProgressSeconds != nil && *item.ProgressSeconds > 0 &&
 				(item.DurationSeconds == nil || *item.ProgressSeconds < *item.DurationSeconds) {
@@ -283,7 +277,7 @@ func (p *PageContext) catalogRegions(shelves []catalogShelf, emptyFeed bool) {
 		app.Up: {Focus: app.ContentAction}, app.Down: {Region: shelves[0].id}, app.Right: {Region: homePager},
 	})
 	p.region(homePager, focusEdges{
-		app.Up: {Focus: app.ContentAction}, app.Down: {Region: shelves[0].id}, app.Left: {Focus: homeLaterAction},
+		app.Up: {Focus: app.ContentAction}, app.Down: {Region: shelves[0].id}, app.Left: {Focus: homeLaterAction, Region: homeHero},
 	})
 	previous := homeHero
 	for idx, shelf := range shelves {
@@ -356,12 +350,18 @@ func (p *PageContext) selectCatalogFeature(c *ui.Context, current app.CatalogSna
 	home := &p.host.home
 	if home.tab != "" || len(picks) == 0 {
 		home.featured, home.selected = nil, 0
+		home.featureInfo.reset()
 		home.rotateAt = time.Time{}
 		return
 	}
 	selectGroup := func(items []provider.MediaItem, index int) {
 		start := min(index/3*3, max(0, len(items)-3))
 		home.featured = items[start:min(start+3, len(items))]
+		for ref := range home.featureInfo.loaded {
+			if !slices.ContainsFunc(home.featured, func(item provider.MediaItem) bool { return item.Ref == ref }) {
+				delete(home.featureInfo.loaded, ref)
+			}
+		}
 		home.selected = index - start
 	}
 	if len(home.featured) == 0 {
@@ -415,25 +415,22 @@ func (p *PageContext) catalogHeader(c *ui.Context) {
 		ui.Row(c).Absolute().Top(45).Left(78).Height(61).Gap(18).AlignItems(ui.Center).Children(func() {
 			for idx, tab := range homeTabs {
 				id := homeTabID(tab)
-				background, ink := ui.Transparent, paint(colors.Text.Secondary)
-				if tab == home.tab {
-					background, ink = withAlpha(colors.Playback.Foreground, 0x12), paint(colors.Playback.Foreground)
+				background, ink := ui.Transparent, paint(colors.Text.Muted)
+				selected, focused := tab == home.tab, p.State.Focus == id
+				if selected {
+					background, ink = withAlpha(colors.Text.Primary, 0x12), paint(colors.Text.Primary)
 				}
-				if p.State.Focus == id {
-					background, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+				if focused {
+					background, ink = withAlpha(colors.Focus.Background, 0x13), paint(colors.Text.Primary)
 				}
 				button := ui.Button(c.Key(string(id)), "").Label(titles[idx]).Size(widths[idx], 61).Padding(0, 0).
-					Radius(30).Background(background).TextColor(ink).Center().
+					Radius(30).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
 					OnClick(func() { p.dispatch(func() { p.host.showHomeTab(tab, "") }) })
 				p.animateFocus(button, background, ink)
 				p.bind(button, id, homeHeader)
 				button.Children(func() {
 					ui.Text(c, titles[idx]).FontSize(24).LetterSpacing(1)
-					if tab == home.tab {
-						ui.Row(c).Absolute().Left(0).Right(0).Bottom(0).Height(3).Center().Children(func() {
-							ui.Box(c).Size(15, 3).Radius(2).Background(paint(colors.Accent.Primary))
-						})
-					}
+					p.tabUnderline(c, selected, focused, 0)
 				})
 			}
 		})
@@ -521,7 +518,7 @@ func (p *PageContext) catalogDiscovery(c *ui.Context, current app.CatalogSnapsho
 	ui.Box(c.Key("catalog-discovery")).FillWidth().Height(homeDiscoveryHeight).Children(func() {
 		ui.Row(c).Absolute().Top(69).Left(103).Height(22).Gap(15).AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Size(24, 1).Background(paint(colors.Accent.Soft))
-			ui.Text(c, eyebrow).FontSize(16).FontWeight(500).LetterSpacing(3).TextColor(paint(colors.Accent.Soft))
+			ui.Text(c, eyebrow).FontSize(16).FontWeight(500).LetterSpacing(3).TextColor(paint(colors.Text.Secondary))
 		})
 		ui.Text(c, title).Absolute().Top(110).Left(103).FontSize(54).FontWeight(550).LetterSpacing(2)
 		ui.Text(c, note).Absolute().Top(208).Left(103).FontSize(23).TextColor(paint(colors.Text.Muted))
@@ -548,13 +545,13 @@ func (p *PageContext) catalogDiscovery(c *ui.Context, current app.CatalogSnapsho
 }
 
 func (p *PageContext) catalogFilter(c *ui.Context, filter provider.CatalogFilter) {
-	home, colors := &p.host.home, p.Theme.Colors
+	home, colors, d := &p.host.home, p.Theme.Colors, p.uiColors()
 	id := homeFilterID(filter.ID)
 	selected := filter.ID == home.filter || (home.filter == "" && filter.ID == home.filters[0].ID)
-	focused := p.State.Focus == id
-	background, ink, border := withAlpha(colors.Playback.Foreground, 4), paint(colors.Text.Secondary), paint(colors.Border.Subtle)
+	focused := p.paintFocus() == id
+	background, ink, border := d.subtleFill, paint(colors.Text.Secondary), paint(colors.Border.Subtle)
 	if selected {
-		background, ink, border = paint(colors.Surface.Raised), paint(colors.Focus.Foreground), ui.Transparent
+		background, ink, border = paint(colors.Focus.Background), paint(colors.Focus.Foreground), ui.Transparent
 	}
 	if focused {
 		background, ink, border = paint(colors.Focus.Background), paint(colors.Focus.Foreground), ui.Transparent
@@ -663,11 +660,6 @@ func (p *PageContext) prepareCatalogArtwork(rows []catalogWindow, shelves []cata
 			backdrops = append(backdrops, next)
 		}
 	}
-	for _, action := range []*catalogAction{&home.action, &home.shelfDetails} {
-		if item := action.item; item != nil {
-			include([]provider.MediaItem{*item})
-		}
-	}
 	for idx, shelf := range shelves {
 		top := float32(homeHeaderHeight + homeHeroHeight + idx*homeShelfHeight)
 		if top+homeShelfHeight >= scroll && top < scroll+p.Height {
@@ -711,12 +703,28 @@ func (p *PageContext) prepareCatalogArtwork(rows []catalogWindow, shelves []cata
 	}
 	p.host.Catalog.PrepareArtwork(locations)
 	p.host.Catalog.PrepareBackdrops(backdrops)
+	p.pruneCatalogBitmaps()
+}
+
+func (p *PageContext) pruneCatalogBitmaps() {
+	home := &p.host.home
 	if home.images == nil {
-		home.images = make(map[catalogImageKey]catalogImage, len(locations))
+		return
 	}
 	maps.DeleteFunc(home.images, func(key catalogImageKey, cached catalogImage) bool {
 		return p.catalogArtwork(key) != cached.art
 	})
+	for len(home.images) > maxCatalogBitmaps {
+		var oldestKey catalogImageKey
+		var oldestUse uint64
+		first := true
+		for k, entry := range home.images {
+			if first || entry.lastUsed < oldestUse {
+				oldestKey, oldestUse, first = k, entry.lastUsed, false
+			}
+		}
+		delete(home.images, oldestKey)
+	}
 }
 
 func (p *PageContext) catalogCover(location string) *ui.Bitmap {
@@ -724,6 +732,9 @@ func (p *PageContext) catalogCover(location string) *ui.Bitmap {
 }
 
 func (p *PageContext) catalogArtwork(key catalogImageKey) *app.CatalogArtwork {
+	if p.host.Catalog == nil || key.location == "" {
+		return nil
+	}
 	if key.backdrop {
 		return p.host.Catalog.BackdropArtwork(key.location)
 	}
@@ -735,14 +746,25 @@ func (p *PageContext) catalogBitmap(key catalogImageKey) *ui.Bitmap {
 	if art == nil {
 		return nil
 	}
-	cached := p.host.home.images[key]
-	if cached.art != art {
-		cached = catalogImage{art: art, source: ui.NewBitmap(art.Image)}
-		p.host.home.images[key] = cached
-		if key.backdrop && p.host.Trace {
-			size := art.Image.Bounds().Size()
-			log.Printf("catalog backdrop: %dx%d", size.X, size.Y)
-		}
+	home := &p.host.home
+	if home.images == nil {
+		home.images = make(map[catalogImageKey]catalogImage)
+	}
+	home.imageClock++
+	cached := home.images[key]
+	if cached.art == art {
+		cached.lastUsed = home.imageClock
+		home.images[key] = cached
+		return cached.source
+	}
+	cached = catalogImage{art: art, source: ui.NewBitmap(art.Image), lastUsed: home.imageClock}
+	home.images[key] = cached
+	if key.backdrop && p.host.Trace {
+		size := art.Image.Bounds().Size()
+		log.Printf("catalog backdrop: %dx%d", size.X, size.Y)
+	}
+	if len(home.images) > maxCatalogBitmaps {
+		p.pruneCatalogBitmaps()
 	}
 	return cached.source
 }

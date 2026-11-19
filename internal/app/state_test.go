@@ -4,9 +4,8 @@ import "testing"
 
 func entriesForTest() []Entry {
 	return []Entry{
-		{ID: "first", SourceID: "source", Name: "First", Available: true},
-		{ID: "second", SourceID: "other", Name: "Second", Available: true},
-		{ID: "disabled", SourceID: "other", Name: "Disabled"},
+		{ID: "first", SourceID: "source", Name: "First"},
+		{ID: "second", SourceID: "other", Name: "Second"},
 	}
 }
 
@@ -57,13 +56,13 @@ func TestEntrySessionsRestoreRoutesAndPositions(t *testing.T) {
 }
 
 func TestUnavailableRecentEntryKeepsManagementReachable(t *testing.T) {
-	for _, recent := range []string{"", "missing", "disabled"} {
+	for _, recent := range []string{"", "missing"} {
 		s := stateForTest(t, recent)
 		if s.Page != Entries || s.CurrentEntry != "" {
 			t.Fatalf("unavailable entry was restored: %q", recent)
 		}
-		if s.SelectEntry("disabled") {
-			t.Fatal("disabled entry was activated")
+		if s.SelectEntry("missing") {
+			t.Fatal("missing entry was activated")
 		}
 		s.Navigate(Route{Page: Settings, Section: "plugins"})
 		if s.Page != Settings || !s.Back() || s.Page != Entries {
@@ -72,24 +71,6 @@ func TestUnavailableRecentEntryKeepsManagementReachable(t *testing.T) {
 		if s.CanGoBack() || s.Back() {
 			t.Fatal("returning to the application root retained a transient page")
 		}
-	}
-}
-
-func TestRemovingCurrentEntryDropsItsBackStack(t *testing.T) {
-	s := stateForTest(t, "first")
-	s.Navigate(Route{Page: Settings, Section: "about"})
-	s.Focus = ShowLicenses
-	s.Push(Route{Page: Licenses, Section: "about"})
-	entries := entriesForTest()
-	entries[0].Available = false
-	if err := s.SetEntries(entries); err != nil {
-		t.Fatal(err)
-	}
-	if s.CurrentEntry != "" || s.Page != Entries || s.Back() {
-		t.Fatal("removed entry left a stale route reachable")
-	}
-	if !s.SelectEntry("second") || s.Page != Home {
-		t.Fatal("remaining entry is not usable")
 	}
 }
 

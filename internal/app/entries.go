@@ -1,9 +1,7 @@
 package app
 
 import (
-	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
@@ -14,56 +12,67 @@ type Entry struct {
 	Name         string                    `json:"name"`
 	Description  string                    `json:"description"`
 	Artwork      string                    `json:"artwork"`
-	Available    bool                      `json:"available"`
 	Capabilities provider.Capabilities     `json:"capabilities,omitempty"`
 	Auth         provider.AuthPresentation `json:"auth,omitzero"`
 	Generation   uint64                    `json:"-"`
 }
 
-func (s *State) SetEntries(entries []Entry) error {
-	seen := make(map[string]bool, len(entries))
-	for _, entry := range entries {
-		if strings.TrimSpace(entry.ID) == "" || strings.TrimSpace(entry.SourceID) == "" || strings.TrimSpace(entry.Name) == "" {
-			return fmt.Errorf("entry identity, source and name are required")
-		}
-		if seen[entry.ID] {
-			return fmt.Errorf("duplicate entry identity %q", entry.ID)
-		}
-		seen[entry.ID] = true
+// Entries returns a snapshot of the registered entries.
+func (s *State) Entries() []Entry { return s.entries }
+
+// UpdateEntries replaces the active entry list (e.g. on plugin install,
+// in-place update, disable, or uninstall) and reconciles the current route.
+func (s *State) UpdateEntries(entries []Entry) {
+	previous := make(map[string]Entry, len(s.entries))
+	for _, item := range s.entries {
+		previous[item.ID] = item
 	}
-	s.entries = slices.Clone(entries)
-	for index := range s.entries {
-		s.entries[index].Capabilities = slices.Clone(s.entries[index].Capabilities)
+	next := make([]Entry, len(entries))
+	present := make(map[string]bool, len(entries))
+	for i, item := range entries {
+		present[item.ID] = true
+		if old, ok := previous[item.ID]; ok && item.Generation == old.Generation {
+			if item.SourceID != old.SourceID || item.Name != old.Name || item.Description != old.Description ||
+				item.Artwork != old.Artwork || item.Auth != old.Auth || !slices.Equal(item.Capabilities, old.Capabilities) {
+				item.Generation = old.Generation + 1
+			}
+		}
+		next[i] = item
 	}
-	if !s.available(s.CurrentEntry) {
+	s.entries = next
+	for key := range s.positions {
+		if key.EntryID != "" && !present[key.EntryID] {
+			delete(s.positions, key)
+		}
+	}
+	for id := range s.sessions {
+		if !present[id] {
+			delete(s.sessions, id)
+		}
+	}
+	if s.CurrentEntry != "" && !present[s.CurrentEntry] {
 		s.CurrentEntry = ""
 		s.history = nil
 		spec, _ := s.routes.Resolve(s.routes.Picker)
 		s.show(s.routes.initial(s, spec))
-	} else if s.Route == s.routes.Picker {
-		valid := slices.ContainsFunc(s.entries, func(entry Entry) bool { return entry.Available && EntryFocus(entry.ID) == s.Focus })
-		if !valid {
-			s.Focus = s.PickerFocus()
-		}
-	} else {
-		s.restoreSession(s.Location, s.history)
+		return
 	}
-	return nil
-}
-
-func (s *State) AvailableEntries() []Entry {
-	var entries []Entry
-	for _, entry := range s.entries {
-		if entry.Available {
-			entries = append(entries, entry)
+	if s.CurrentEntry != "" {
+		if spec, ok := s.routes.Resolve(s.Route); !ok || !s.Allows(spec) {
+			s.history = nil
+			root, _ := s.routes.Resolve(s.root())
+			s.show(s.routes.initial(s, root))
+			return
 		}
 	}
-	return entries
+	s.Revision++
 }
 
-func (s *State) Current() (Entry, bool) {
+func (s *State) Current() (Entry, bool) { return s.entry(s.CurrentEntry) }
+
+func (s *State) entry(id string) (Entry, bool) {
 	for _, entry := range s.entries {
-		if entry.ID == s.CurrentEntry && entry.Available {
+		if entry.ID == id {
 			return entry, true
 		}
 	}
@@ -72,13 +81,13 @@ func (s *State) Current() (Entry, bool) {
 
 func (s *State) OpenEntries(preferred string) {
 	s.Navigate(s.routes.Picker)
-	if s.available(preferred) {
+	if _, ok := s.entry(preferred); ok {
 		s.Focus = EntryFocus(preferred)
 	}
 }
 
 func (s *State) SelectEntry(id string) bool {
-	if !s.available(id) {
+	if _, ok := s.entry(id); !ok {
 		return false
 	}
 	if id == s.CurrentEntry && len(s.history) > 0 {
@@ -98,17 +107,11 @@ func (s *State) SelectEntry(id string) bool {
 }
 
 func (s *State) PickerFocus() FocusID {
-	if s.available(s.CurrentEntry) {
+	if s.CurrentEntry != "" {
 		return EntryFocus(s.CurrentEntry)
 	}
-	for _, entry := range s.entries {
-		if entry.Available {
-			return EntryFocus(entry.ID)
-		}
+	if len(s.entries) != 0 {
+		return EntryFocus(s.entries[0].ID)
 	}
 	return ManagePlugins
-}
-
-func (s *State) available(id string) bool {
-	return id != "" && slices.ContainsFunc(s.entries, func(entry Entry) bool { return entry.ID == id && entry.Available })
 }

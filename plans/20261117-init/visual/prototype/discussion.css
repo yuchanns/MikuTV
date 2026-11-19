@@ -10,7 +10,7 @@
 .discussion-sort button{height:42px;font-size:19px;padding:4px 4px 14px;border-radius:5px;position:relative;color:#94a1b5}
 .discussion-sort button.selected{color:var(--accent-soft)}
 .discussion-sort button.selected:after{content:"";position:absolute;left:4px;right:4px;bottom:0;height:3px;border-radius:3px;background:var(--accent-soft)}
-.discussion-sort button:focus{background:#ffffff0d!important;color:#fff!important;transform:none!important;box-shadow:0 0 0 2px #9babbe!important}
+.discussion-sort button:focus{background:#ffffff0d!important;color:#fff!important;transform:none!important;box-shadow:0 0 0 2px var(--focus-ring)!important}
 .discussion-scroll{overflow-y:auto;overflow-x:hidden;scrollbar-width:none;padding:8px 28px 24px;overscroll-behavior:contain;scroll-behavior:smooth}
 .discussion-scroll::-webkit-scrollbar{display:none}
 .discussion-item{display:grid;grid-template-columns:40px minmax(0,1fr);column-gap:14px;padding:25px 4px 23px;border-bottom:1px solid #ffffff0b;border-radius:8px;transition:background .2s}
@@ -35,7 +35,7 @@
 .preview-author{display:block;color:#bdcada;font-size:14px;margin-bottom:3px}
 .preview-author i{font-size:10px;border:1px solid rgb(var(--accent-rgb) / 0.533);border-radius:2px;color:var(--accent-soft);font-style:normal;padding:0 3px;margin-left:6px}
 .preview-text{display:block;font-size:15px;color:#94a6bd;line-height:1.6}
-.reply-preview:focus{background:#1f2b3d!important;color:#e1e8f2!important;transform:none!important;box-shadow:0 0 0 2px #92a3ba!important}
+.reply-preview:focus{background:#1f2b3d!important;color:#e1e8f2!important;transform:none!important;box-shadow:0 0 0 2px var(--focus-ring)!important}
 .view-replies{display:flex;align-items:center;gap:5px;color:#a9c5e7;font-size:15px;height:36px;padding:4px 6px;margin-top:4px;border-radius:6px}
 .view-replies:focus{transform:none!important}
 .discussion-composer{padding:18px 28px 22px;display:flex;align-items:center;gap:12px;border-top:1px solid #ffffff10;background:#111722}
@@ -43,19 +43,20 @@
 .discussion-composer>button{height:48px;border-radius:11px;border:1px solid #ffffff12;display:flex;align-items:center;gap:10px;padding:0 14px;flex:1;text-align:left;font-size:17px;color:#a4b2c6;background:#ffffff05}
 .discussion-composer svg{width:20px;height:20px;flex:none}
 .discussion-composer>button:focus{transform:none!important}
-.discussion-back{height:42px;display:flex;align-items:center;gap:8px;border-radius:8px;padding:0 7px;font-size:22px;color:#d7e1ee}
-.discussion-back svg{width:22px;height:22px}
-.thread-count{font-size:16px;color:#9bacbf;padding:19px 0 21px}
+.discussion-thread{--back-padding:7px;--back-icon-size:22px;--back-gap:8px}
+.discussion-back{height:42px;display:flex;align-items:center;gap:var(--back-gap);border-radius:8px;padding:0 var(--back-padding);font-size:22px;color:#d7e1ee}
+.discussion-back svg{width:var(--back-icon-size);height:var(--back-icon-size)}
+.thread-count{font-size:16px;color:#9bacbf;padding:19px 0 21px calc(var(--back-padding) + var(--back-icon-size) + var(--back-gap))}
 .thread-original{border-bottom:7px solid #080d16;margin:0 -28px;padding:18px 28px 2px;background:#ffffff02}
 .thread-original-label{font-size:12px;color:#93a3ba}
 .thread-original>.discussion-item{padding-top:14px;border:0}
 .thread-replies>.discussion-item{padding-top:26px}
 .reply-mention{color:#a7c2e3}
 .discussion-draft{display:block;width:100%;height:190px;border:1px solid #60708a;background:#111b29;padding:18px;color:#e6edf7;border-radius:12px;font:inherit;font-size:23px;line-height:1.7;resize:none;outline:none;margin-top:28px}
-.discussion-draft:focus{border-color:#d6e2f3;box-shadow:0 0 0 2px #d6e2f31a}
+.discussion-draft:focus{border-color:var(--focus-ring);box-shadow:0 0 0 2px var(--focus-ring)}
 .discussion-draft::placeholder{color:#8da0b9}
 .comment-input-error{font-size:17px!important;color:var(--accent-soft)!important;margin:8px 0 0!important;min-height:28px}
-.detail-content .discussion{height:650px;max-width:1480px;grid-template-rows:auto minmax(0,1fr) auto;background:transparent;border:1px solid #ffffff0d;border-radius:18px}
+.detail-content .discussion{height:max(650px,calc(255px + 180px * var(--discussion-rows, 0)));max-width:1480px;grid-template-rows:auto minmax(0,1fr) auto;background:transparent;border:1px solid #ffffff0d;border-radius:18px}
 .detail-content .discussion-header,.detail-content .discussion-composer{background:#101722}
 .detail-content .discussion-scroll{padding-left:32px;padding-right:32px}
 .detail-content .discussion-item{grid-template-columns:44px minmax(0,1fr);gap:18px}
@@ -65,10 +66,10 @@
 
 .discussion-actions{height:40px}.comment-vote,.comment-reply{height:40px;min-width:40px}.discussion-sort button{min-width:44px}.discussion-back:focus{transform:none!important}
 
-.discussion-back:focus{background:#ffffff0c!important;color:#f4f6fa!important;box-shadow:0 0 0 2px #91a0b5!important}
+.discussion-back:focus{background:#ffffff0c!important;color:#f4f6fa!important;box-shadow:0 0 0 2px var(--focus-ring)!important}
 
 #rail{display:flex;align-items:flex-start;padding-top:40px;overflow:hidden;transition:width .28s var(--ease),box-shadow .28s var(--ease)}#rail:focus-within{width:288px;align-items:flex-start}.logo{width:116px;min-width:116px;flex:none}.nav-items,.nav-footer{width:288px;min-width:288px;display:flex;flex-direction:column;gap:20px;padding:56px 24px 0;margin:0}.nav-footer{padding:0 24px 36px;gap:16px}.nav-spacer{flex:1}.nav-button{display:grid;grid-template-columns:40px minmax(0,1fr);column-gap:16px;align-items:center;justify-content:start;width:240px;min-width:240px;height:66px;padding:0 12px;border-radius:16px;overflow:visible;white-space:normal;background:none!important;box-shadow:none!important;isolation:isolate;transform:none!important}.nav-button:after{content:"";position:absolute;z-index:-1;left:0;top:0;width:68px;height:66px;border-radius:16px;background:transparent;transition:width .28s var(--ease),background .18s}.nav-button.active:after{background:#ffffff0d}.nav-button.active:before{left:-24px}.nav-button .nav-symbol{opacity:1!important;visibility:visible!important;width:40px;min-width:40px;height:40px;display:grid;place-items:center;overflow:visible}.nav-button .nav-symbol svg{width:26px;height:26px;min-width:26px;display:block}.nav-button .nav-label{opacity:0;visibility:hidden;display:block;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:22px;line-height:32px;transform:translateX(4px);transition:opacity .18s,transform .28s;pointer-events:none}#rail:focus-within .nav-label{opacity:1;visibility:visible;transform:none}#rail:focus-within .nav-button:after{width:240px}.stage .nav-button:focus{color:#111722!important;background:none!important;box-shadow:none!important;transform:none!important}.nav-button:focus:after{background:#edf1f7}.nav-avatar{width:34px;height:34px;border-radius:50%;background:#3b4c64;color:#e5edf7;display:grid;place-items:center;font-size:18px;line-height:1;opacity:1!important;visibility:visible!important}#rail:focus-within .nav-avatar{opacity:1}.nav-button:focus .nav-avatar{background:#34465f;color:white}
-#stage .round-close{width:44px!important;min-width:44px!important;max-width:44px!important;height:44px!important;min-height:44px!important;max-height:44px!important;flex:0 0 44px!important;aspect-ratio:1;padding:0!important;border-radius:50%!important;display:grid;place-items:center;line-height:1}#stage .round-close>svg{width:23px;height:23px;display:block;flex:none}#stage .round-close:focus{transform:none!important;box-shadow:0 0 0 3px #ffffff24}
+#stage .round-close{width:44px!important;min-width:44px!important;max-width:44px!important;height:44px!important;min-height:44px!important;max-height:44px!important;flex:0 0 44px!important;aspect-ratio:1;padding:0!important;border-radius:50%!important;display:grid;place-items:center;line-height:1}#stage .round-close>svg{width:23px;height:23px;display:block;flex:none}#stage .round-close:focus{transform:none!important;box-shadow:0 0 0 3px var(--focus-ring)}
 
 .nav-button,.nav-button .nav-label{text-align:left}#main:after{content:"";position:fixed;inset:0;z-index:20;background:#0006;opacity:0;pointer-events:none;transition:opacity .25s}#stage:has(#rail:focus-within) #main:after{opacity:1}
 

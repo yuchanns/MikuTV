@@ -9,8 +9,8 @@ diff --git a/internal/tvos/app.go b/internal/tvos/app.go
 +			const ended = 3 // UIGestureRecognizerStateEnded
 +			if w := b.window; w != nil && w.view == self && w.IsFocused() && send(recognizer, "state") == ended {
 +				delta := native.panTranslation(recognizer, sel("translationInView:"), w.view)
-+				// Indirect UIKit translation is opposite the focus direction.
-+				if key := panKey(-delta.X, -delta.Y); key != platform.KeyUnknown {
++				// Remote focus follows the user's swipe direction.
++				if key := panKey(delta.X, delta.Y); key != platform.KeyUnknown {
 +					w.sendRemoteKey(key, platform.KeyPressed)
 +					w.sendRemoteKey(key, platform.KeyReleased)
 +				}

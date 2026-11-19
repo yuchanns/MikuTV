@@ -18,7 +18,7 @@ func (entriesPage) Render(c *ui.Context, p *PageContext) {
 		note = text.CurrentEntry + " · " + entry.Name
 	}
 	p.heading(c, text.EntriesTitle, note)
-	entries := p.State.AvailableEntries()
+	entries := p.State.Entries()
 	if len(entries) == 0 {
 		p.empty(c, text.EmptyEntries, text.EmptyEntryNote, text.Manage, app.ManagePlugins, "entries", func() {
 			p.State.Navigate(app.Route{Page: app.Settings, Section: "plugins"})
@@ -27,10 +27,24 @@ func (entriesPage) Render(c *ui.Context, p *PageContext) {
 	}
 	columns := max(1, min(3, int(width/430)))
 	cardWidth := (width - float32(columns-1)*30) / float32(columns)
-	ui.Grid(c).FillWidth().Columns(columns).Gap(30).Children(func() {
-		for _, entry := range entries {
-			p.entryCard(c, entry, cardWidth)
+	list := p.listState("entries")
+	if p.active && p.host.reveal {
+		for i, entry := range entries {
+			if p.State.Focus == app.EntryFocus(entry.ID) {
+				list.ScrollIntoView(i / columns)
+				break
+			}
 		}
+	}
+	ui.List(c.Key("entries"), list, (len(entries)+columns-1)/columns).FillWidth().MaxHeight(p.Height*0.65).
+		Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
+		c := row.Context
+		first := row.Index * columns
+		ui.Row(c).FillWidth().Gap(30).Margin(0, 0, 30, 0).Children(func() {
+			for _, entry := range entries[first:min(len(entries), first+columns)] {
+				p.entryCard(c, entry, cardWidth)
+			}
+		})
 	})
 }
 
@@ -41,7 +55,7 @@ func (p *PageContext) entryCard(c *ui.Context, entry app.Entry, width float32) {
 	if p.State.Focus == id {
 		border = paint(colors.Focus.Ring)
 	}
-	e := ui.Column(c.Key(string(id))).FillWidth().Gap(14).Role(ui.RoleButton).Label(entry.Name).
+	e := ui.Column(c.Key(string(id))).Width(width).Shrink(0).Gap(14).Role(ui.RoleButton).Label(entry.Name).
 		OnClick(func() {
 			p.dispatch(func() {
 				if p.State.SelectEntry(entry.ID) {

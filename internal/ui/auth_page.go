@@ -267,12 +267,19 @@ func (v *View) dismissAfter(page app.Page) func() {
 		if v.State.Page != page {
 			return
 		}
+		var resume func()
+		if page == app.SignInQR {
+			resume = v.videoDetail.signInAction
+		}
 		v.dispatch(func() {
 			v.State.Back()
 			if v.State.Page == app.Account {
 				v.State.Focus = app.AccountAction
 			}
 		})
+		if resume != nil {
+			v.resumeVideoAfterSignIn(resume)
+		}
 	}
 }
 

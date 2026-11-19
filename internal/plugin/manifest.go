@@ -54,9 +54,9 @@ type sourceManifest struct {
 }
 
 var (
-	hostLabel                = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
-	pluginIDPattern          = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
-	cgnatPrefix              = netip.MustParsePrefix("100.64.0.0/10")
+	hostLabel               = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+	pluginIDPattern         = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
+	cgnatPrefix             = netip.MustParsePrefix("100.64.0.0/10")
 	allowLocalNetworkForTest bool
 )
 
@@ -116,6 +116,10 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 	if manifest.Capabilities.Has(provider.SignIn) != (len(manifest.Authentication.Methods) != 0) {
 		return sourceManifest{}, fmt.Errorf("%w: sign-in capability and authentication method must be declared together", ErrIncompatible)
 	}
+	if (manifest.Capabilities.Has(provider.EditVideo) || manifest.Capabilities.Has(provider.WriteVideoComments)) &&
+		!manifest.Capabilities.Has(provider.SignIn) {
+		return sourceManifest{}, fmt.Errorf("%w: video interaction requires sign-in", ErrIncompatible)
+	}
 	if manifest.Capabilities.Has(provider.BrowseLibrary) && !manifest.Capabilities.Has(provider.SignIn) {
 		return sourceManifest{}, fmt.Errorf("%w: %s requires sign-in", ErrIncompatible, provider.BrowseLibrary)
 	}
@@ -148,20 +152,32 @@ func validVersion(version string) bool {
 	return semver.IsValid(v) && semver.Canonical(v) == strings.TrimSuffix(v, semver.Build(v))
 }
 
+func isPublicIP(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	return ip.IsValid() && ip.Zone() == "" &&
+		!ip.IsLoopback() && !ip.IsPrivate() &&
+		!ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() &&
+		!ip.IsMulticast() && !ip.IsUnspecified() &&
+		!cgnatPrefix.Contains(ip)
+}
+
 func validHostPattern(host string) bool {
-	wildcard := strings.HasPrefix(host, "*.")
-	base := strings.TrimPrefix(host, "*.")
-	if base == "" || len(base) > 253 {
+	if host == "" {
 		return false
 	}
-	if ip, err := netip.ParseAddr(base); err == nil {
-		if wildcard || ip.Zone() != "" {
+	wildcard := strings.HasPrefix(host, "*.")
+	base := strings.TrimPrefix(host, "*.")
+	if !wildcard {
+		if ip, err := netip.ParseAddr(host); err == nil {
+			return ip.Zone() == "" && (isPublicIP(ip) || allowLocalNetworkForTest)
+		}
+	} else {
+		if _, err := netip.ParseAddr(base); err == nil {
 			return false
 		}
-		if allowLocalNetworkForTest {
-			return true
-		}
-		return isPublicAddr(ip)
+	}
+	if len(base) == 0 || len(base) > 253 {
+		return false
 	}
 	labels := strings.Split(base, ".")
 	for _, label := range labels {
@@ -169,36 +185,27 @@ func validHostPattern(host string) bool {
 			return false
 		}
 	}
-	if base == "localhost" || strings.HasSuffix(base, ".localhost") {
-		return allowLocalNetworkForTest
+	if !allowLocalNetworkForTest && (base == "localhost" || strings.HasSuffix(base, ".localhost")) {
+		return false
 	}
 	if wildcard {
-		// Reject wildcards spanning an entire public suffix (e.g. "*.com", "*.co.uk") or an IP tail.
-		if _, err := publicsuffix.EffectiveTLDPlusOne(base); err != nil {
+		if len(labels) < 2 {
 			return false
 		}
-		allDigits := true
-		for _, label := range labels {
-			for i := 0; i < len(label); i++ {
-				if label[i] < '0' || label[i] > '9' {
-					allDigits = false
-					break
-				}
+		tld := labels[len(labels)-1]
+		hasAlpha := false
+		for i := range len(tld) {
+			if tld[i] >= 'a' && tld[i] <= 'z' {
+				hasAlpha = true
+				break
 			}
 		}
-		if allDigits {
+		if !hasAlpha {
 			return false
 		}
-	}
-	return true
-}
-
-func isPublicAddr(addr netip.Addr) bool {
-	addr = addr.Unmap()
-	if !addr.IsValid() || addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() ||
-		addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() ||
-		addr.IsInterfaceLocalMulticast() || cgnatPrefix.Contains(addr) {
-		return false
+		if etld, err := publicsuffix.EffectiveTLDPlusOne(base); err != nil || etld == "" {
+			return false
+		}
 	}
 	return true
 }

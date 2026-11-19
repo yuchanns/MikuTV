@@ -70,7 +70,7 @@ func (p *PageContext) railButton(c *ui.Context, registration Registration, width
 	colors := p.Theme.Colors
 	background, foreground := ui.Transparent, paint(colors.Text.Muted)
 	if selected {
-		background, foreground = withAlpha(colors.Playback.Foreground, 0x0e), paint(colors.Text.Primary)
+		background, foreground = withAlpha(colors.Text.Primary, 0x0e), paint(colors.Text.Primary)
 	}
 	if p.State.Focus == id {
 		background, foreground = paint(colors.Focus.Background), paint(colors.Focus.Foreground)

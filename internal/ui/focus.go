@@ -18,15 +18,18 @@ type focusRegion struct {
 }
 type focusItem struct {
 	target    app.FocusTarget
+	elementID uint64
 	group     string
 	direction func(app.Direction) bool
 }
 type focusController struct {
+	context  *ui.Context
 	controls []focusItem
 	groups   map[string]focusRegion
 }
 
-func (f *focusController) begin() {
+func (f *focusController) begin(c *ui.Context) {
+	f.context = c
 	f.controls = f.controls[:0]
 	if f.groups == nil {
 		f.groups = make(map[string]focusRegion)
@@ -70,7 +73,8 @@ func (f *focusController) neighbor(current *focusItem, direction app.Direction) 
 	var targets []app.FocusTarget
 	for _, control := range f.controls {
 		if control.group == current.group {
-			targets = append(targets, control.target)
+			r := f.context.CommittedBounds(control.elementID)
+			targets = append(targets, app.FocusTarget{ID: control.target.ID, X: r.X, Y: r.Y, W: r.W, H: r.H})
 		}
 	}
 	next := app.Neighbor(targets, current.target.ID, direction)
@@ -164,12 +168,15 @@ func (v *View) bind(element ui.Element, id app.FocusID, group string, active boo
 		}
 	}
 	r := element.Bounds()
-	v.focus.controls = append(v.focus.controls, focusItem{target: app.FocusTarget{ID: id, X: r.X, Y: r.Y, W: r.W, H: r.H}, group: group, direction: direction})
+	v.focus.controls = append(v.focus.controls, focusItem{
+		target:    app.FocusTarget{ID: id, X: r.X, Y: r.Y, W: r.W, H: r.H},
+		elementID: element.ID(), group: group, direction: direction,
+	})
 	if v.reveal && v.State.Focus == id {
 		if v.State.Page == app.Home && v.activeScroll != nil && group == homeHeader {
 			v.activeScroll.ScrollTo(0, 0, focusScroll)
 			return
 		}
-		element.ScrollIntoView(ui.ScrollIntoViewOptions{Animation: &focusScroll})
+		element.ScrollIntoView(ui.ScrollIntoViewOptions{Animation: &focusScroll, BlockEndMargin: focusBottomMargin})
 	}
 }

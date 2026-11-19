@@ -1,0 +1,227 @@
+diff --git a/ui/effect.go b/ui/effect.go
+--- a/ui/effect.go
++++ b/ui/effect.go
+@@ -164,8 +164,9 @@
+ 	case cv.img.W < w || cv.img.H < h || cv.img.W-w >= 2*effectLayerStep || cv.img.H-h >= 2*effectLayerStep:
+ 		cv.resize(layerSide(w), layerSide(h))
+ 	}
+-	// Drawn anew whenever it shows, unless kept (Cache).
+-	cv.img.Transient = e.cache == nil
++	// The canvas is needed only while the layer is drawn. Cache keeps
++	// its content version steady across those frames.
++	cv.img.Transient = true
+ 	return cv, x0, y0, w, h
+ }
+ 
+diff --git a/internal/scene/scene.go b/internal/scene/scene.go
+--- a/internal/scene/scene.go
++++ b/internal/scene/scene.go
+@@ -464,10 +464,9 @@
+ 	// PixVersion is the version Pix holds.
+ 	Scene      *Scene
+ 	PixVersion uint64
+-	// Transient marks a canvas drawn anew in every frame that shows it,
+-	// as an element's effect layer: renderers free its texture once
+-	// frames stop drawing it, rather than once it is collected, which
+-	// the little memory it takes of Go's heap may put off for minutes.
++	// Transient marks a canvas whose GPU texture is needed only while
++	// frames draw it, as with an element's effect layer. The texture
++	// can be freed as soon as the canvas leaves the frame.
+ 	Transient bool
+ 	// Restore re-creates Pix when a renderer needs the pixels after an
+ 	// owner dropped them, to upload or to draw them again, and Dropped
+diff --git a/internal/gpu/metal/metal.go b/internal/gpu/metal/metal.go
+--- a/internal/gpu/metal/metal.go
++++ b/internal/gpu/metal/metal.go
+@@ -361,6 +361,11 @@
+ 	// gpu marks an image's texture that its GPUSource gave, which shows
+ 	// memory of its own (an IOSurface): never one to upload pixels into.
+ 	gpu bool
++}
++
++type imageBlurKey struct {
++	id, version uint64
++	area        scene.Backdrop
+ }
+ 
+ // drawState is what drawing scenes into a target keeps from frame to
+@@ -477,7 +482,10 @@
+ 	// (gpu.Builder.BlurredImage), the first used of them, and blurTmp the
+ 	// textures their passes go through; stopsTex is the texture of the
+ 	// stops of the scene drawn.
+-	blurred  []texture
+-	used     int
++	// blurredCache holds blurred retained canvases keyed independently of draw
++	// order while frames continue referencing them.
++	blurred      []texture
++	blurredCache map[imageBlurKey]*texture
++	used         int
+ 	blurTmp  [2]texture
+ 	stopsTex id
+@@ -1171,7 +1179,12 @@
+ 
+ // encode encodes drawing s into target, whole, returning the
+ // autoreleased command buffer, not yet committed.
+-func (r *Renderer) encode(s *scene.Scene, target id) (id, error) {
++func (r *Renderer) encode(s *scene.Scene, target id) (cb id, err error) {
++	defer func() {
++		if err != nil {
++			r.forgetFrames()
++		}
++	}()
+ 	cb, built, err := r.prepare(s)
+ 	if err != nil {
+ 		return 0, err
+@@ -1223,6 +1236,8 @@
+ 	if built, err = r.build(cb, s, &r.drawState); err != nil {
+ 		return 0, nil, err
+ 	}
++	r.sweepCanvases()
++	r.sweepBlurredCache()
+ 	return cb, built, nil
+ }
+ 
+@@ -1601,10 +1616,18 @@
+ func (r *Renderer) blurImage(cb id, img *scene.Image, bk scene.Backdrop) uintptr {
+ 	src := id(r.imageTexture(img))
+ 	w, h := bk.Size()
+-	f := &r.formats[0]
+ 	if src == 0 || w <= 0 || h <= 0 {
+ 		return 0
+ 	}
++	var key imageBlurKey
++	if img.Scene != nil {
++		key = imageBlurKey{id: img.ID(), version: img.Version(), area: bk}
++		if cached := r.blurredCache[key]; cached != nil && cached.tex != 0 {
++			cached.lastFrame = r.frame
++			return uintptr(cached.tex)
++		}
++	}
++	f := &r.formats[0]
+ 	if f.downPipe == 0 {
+ 		if err := r.makePipelines(f); err != nil {
+ 			return 0
+@@ -1622,30 +1644,62 @@
+ 			t.w, t.h = nw, nh
+ 		}
+ 	}
++	if key.id != 0 {
++		tex := r.newTexture(w, h, pixelFormatBGRA8Unorm, usageRenderTarget|usageShaderRead, nil, 0)
++		if tex == 0 {
++			return 0
++		}
++		r.encodeBlurPasses(cb, f, src, tex, w, h, bk)
++		if r.blurredCache == nil {
++			r.blurredCache = make(map[imageBlurKey]*texture)
++		}
++		r.blurredCache[key] = &texture{tex: tex, w: w, h: h, lastFrame: r.frame}
++		return uintptr(tex)
++	}
+ 	if r.used == len(r.blurred) {
+ 		r.blurred = append(r.blurred, texture{})
+ 	}
+ 	out := &r.blurred[r.used]
+-	r.used++
+ 	if out.tex == 0 || out.w != w || out.h != h {
+ 		release(&out.tex)
+ 		if out.tex = r.newTexture(w, h, pixelFormatBGRA8Unorm, usageRenderTarget|usageShaderRead, nil, 0); out.tex == 0 {
+ 			*out = texture{}
+ 			return 0
+ 		}
+ 		out.w, out.h = w, h
+ 	}
++	r.used++
++	r.encodeBlurPasses(cb, f, src, out.tex, w, h, bk)
++	return uintptr(out.tex)
++}
++
++func (r *Renderer) encodeBlurPasses(cb id, f *formatState, src, dst id, w, h int, bk scene.Backdrop) {
+ 	p := gpu.ImageDownPass(bk)
+ 	if bk.Radius == 0 {
+-		r.pass(cb, f.downPipe, src, out.tex, w, h, &p)
+-		return uintptr(out.tex)
++		r.pass(cb, f.downPipe, src, dst, w, h, &p)
++		return
+ 	}
+ 	r.pass(cb, f.downPipe, src, r.blurTmp[0].tex, w, h, &p)
+ 	p = gpu.ImageBlurPass(bk, [2]int32{1, 0})
+ 	r.pass(cb, f.blurPipe, r.blurTmp[0].tex, r.blurTmp[1].tex, w, h, &p)
+ 	p = gpu.ImageBlurPass(bk, [2]int32{0, 1})
+-	r.pass(cb, f.blurPipe, r.blurTmp[1].tex, out.tex, w, h, &p)
+-	return uintptr(out.tex)
++	r.pass(cb, f.blurPipe, r.blurTmp[1].tex, dst, w, h, &p)
++}
++
++func (r *Renderer) discardBlurredCache() {
++	for key, t := range r.blurredCache {
++		release(&t.tex)
++		delete(r.blurredCache, key)
++	}
++}
++
++func (r *Renderer) sweepBlurredCache() {
++	for key, t := range r.blurredCache {
++		if t.lastFrame != r.frame {
++			release(&t.tex)
++			delete(r.blurredCache, key)
++		}
++	}
+ }
+ 
+ // readBackdrop encodes the passes computing the backdrop bk of what
+@@ -1954,6 +1990,11 @@
+ func (r *Renderer) forgetFrames() {
+ 	r.ages.Reset()
+ 	r.diff.Invalidate()
++	// An abandoned command buffer may not have written the cached textures.
++	for _, canvas := range r.canvases {
++		canvas.ver = 0
++	}
++	r.discardBlurredCache()
+ }
+ 
+ // fit sizes the layer and its drawables for frames of w×h pixels at
+@@ -1999,6 +2040,7 @@
+ 	for i := range r.blurred {
+ 		release(&r.blurred[i].tex)
+ 	}
++	r.discardBlurredCache()
+ 	r.blurred, r.used = nil, 0
+ 	for i := range r.blurTmp {
+ 		release(&r.blurTmp[i].tex)
+@@ -2172,11 +2214,7 @@
+ // sweepEvery is how many frames go by between sweeps.
+ const sweepEvery = 120
+ 
+-// sweepIfDue sweeps once sweepEvery frames went by since the last sweep.
+-// Every frame presented calls it, whether render drew it at once or
+-// finishPending once its drawable came: frames of an animation mostly
+-// take the second way, and counting only the first, they swept seldom if
+-// ever, while each frame's transient canvases piled up on the GPU.
++// sweepIfDue frees images that frames have not drawn for a while.
+ func (r *Renderer) sweepIfDue() {
+ 	if r.frame-r.swept >= sweepEvery {
+ 		r.swept = r.frame
+@@ -2184,8 +2222,7 @@
+ 	}
+ }
+ 
+-// sweep frees the textures of images no frame drew for a while, and
+-// those of canvases gone, or transient and not drawn this frame.
++// sweep frees the textures of images no frame drew for a while.
+ func (r *Renderer) sweep() {
+ 	for key, t := range r.images {
+ 		if r.frame-t.lastFrame > 240 {
+@@ -2193,6 +2230,12 @@
+ 			delete(r.images, key)
+ 		}
+ 	}
++}
++
++// sweepCanvases frees canvases that went away or were scoped to drawing a
++// layer that is no longer used. In-flight command buffers retain the textures
++// and buffers they encoded.
++func (r *Renderer) sweepCanvases() {
+ 	for key, t := range r.canvases {
+ 		if c := t.canvas.Value(); c == nil || c.Transient && t.lastFrame != r.frame {
+ 			release(&t.tex)

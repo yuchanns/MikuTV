@@ -1,6 +1,7 @@
 package tvui
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -29,19 +30,59 @@ type labels struct {
 	Auth                                                                  authLabels
 	Activity                                                              accountActivityLabels
 	Home                                                                  homeLabels
+	Detail                                                                detailLabels
+	Playback                                                              playbackLabels
+}
+
+type playbackLabels struct {
+	Info, Previous, Next, Play, Pause, Comments, Danmaku, Subtitles, Quality, Speed, Progress, Chapters   string
+	ShowControls, On, Off, Auto, Buffering, Failed, Ended, Replay                                         string
+	FailedNote, EndedNote, Reconnect, Episodes                                                            string
+	Access                                                                                                playbackAccessLabels
+	LoginLimit, MembershipLimit, PurchaseLimit, RegionLimit, DeviceLimit, SourceLimit                     string
+	Density, Opacity, SendDanmaku, DanmakuPlaceholder, Send, DanmakuSent, ScrollMode, TopMode, BottomMode string
+	SubtitleFailed, PickFavoriteFolders, FavoriteSaved, ChapterHere, SeekTo, MoreComments                 string
+	QualityGuest, QualitySignedIn, QualityMember                                                          string
+}
+
+type playbackAccessLabels struct {
+	DeviceTitle, DeviceBody, DeviceGeneric, DeviceGenericBody, UseSDR, Keep, UseBest, SourceTitle, SourceBody, SourceGeneric      string
+	RegionTitle, RegionBody, SeeRelated, VIPTitle, VIPBody, VIPNoPreview, MembershipHelp, MembershipInstructions, Refresh, Return string
+	PurchaseTitle, PurchaseBody, TrialMinutes, TrialState, TrialLeft                                                              string
+	TrialEndedTitle, TrialEndedBody, PurchaseTrialEndedBody, QualityVIPTitle, QualityVIPBody                                      string
+	TrialSeconds                                                                                                                  string
+}
+
+type detailLabels struct {
+	Overview, Loading, Empty, CommentCount, Unavailable, Denied, SignIn, LoadFailed        string
+	AccessGranted, AccessPreview, AccessRestricted                                         string
+	Episodes, CurrentVideo, Collection, Comments, Related                                  string
+	Follow, Followed, Unfollowed, Triple, Like, Coin, Favorite, Preview, GetAccess         string
+	ActionsUnavailable, NoComments, NoRelated, NoSegments, UnknownAuthor                   string
+	UpdateFailed, Partial                                                                  string
+	Confirm, ConfirmCoin, CoinNote, Reconsider                                             string
+	CoinSent, TripleSent, LaterAdded, LaterRemoved, FavoriteAdded, FavoriteRemoved         string
+	FavoriteAddedTo                                                                        string
+	WriteComment, Reply, Liked, More, Collapse                                             string
+	Hot, Latest, AllComments, RootComment, AllReplies, ReplyCount, MoreReplies             string
+	CommentPlaceholder, ReplyTo, CreatorMark, Pinned, Dislike, EditComment                 string
+	PostComment, CommentInput, CommentPosted, CommentLoadFailed, Done, KeyboardPlaceholder string
+	MinutesAgo, HoursAgo, DaysAgo, JustNow, Kicker                                         string
 }
 
 type homeLabels struct {
-	ForYou, Popular, Ranking, Regions, RankingNote                              string
-	PopularEyebrow, RankingEyebrow, RegionsEyebrow, RankingHeat                 string
-	Continue, ContinueNote, Picks, PicksNote, Following, FollowingNote, SeeAll  string
+	ForYou, Popular, Ranking, Regions, RankingNote                                         string
+	PopularEyebrow, RankingEyebrow, RegionsEyebrow, RankingHeat                            string
+	HeroCaption, EyebrowAfterHours, EyebrowMorning, EyebrowMidday, EyebrowAfternoon        string
+	EyebrowTonight                                                                         string
+	Continue, ContinueNote, Picks, PicksNote, Following, FollowingNote, SeeAll             string
 	Play, Details, Later, Featured, Feature, Refresh, RefreshFailed, MoreFailed string
 	Recommendations, RateLimited, Plays, TenThousand, HundredMillion            string
 }
 
 type accountActivityLabels struct {
 	History, Favorites, WatchLater, Messages, MessagesNote, MessagesUnread  string
-	NotificationTab, PrivateMessageTab, ReadAllNotices                      string
+	NotificationTab, ReadAllNotices                                         string
 	RefreshingRights, RefreshedRights                                       string
 	All, Replies, Likes, System                                             string
 	SyncOn, SyncOff, SyncNote, SyncAction                                   string
@@ -49,7 +90,7 @@ type accountActivityLabels struct {
 	PrivacyIntro                                                            string
 	More, Unavailable, SignInNeeded, SignInAction                           string
 	FavoritesTitle, FavoritesNote, FoldersBack, FolderContents              string
-	FolderCount, FolderPrivate, FolderPublic, FolderViews                   string
+	FolderCount, FolderPrivate, FolderPublic                                string
 	CreateFolder, FolderSettings, EditFolder, DeleteFolder                  string
 	FolderName, FolderNamePlaceholder, FolderNameRequired, FolderDuplicate  string
 	PrivateFolder, SaveFolder, ManageFolder, DoneManaging                   string
@@ -102,7 +143,11 @@ func LoadAssets() (*Assets, error) {
 		if err != nil {
 			return nil, fmt.Errorf("decode icon %s: %w", file.Name(), err)
 		}
-		a.icons[file.Name()[:len(file.Name())-4]] = icon
+		name := file.Name()[:len(file.Name())-4]
+		a.icons[name] = icon
+		if err := a.loadDetailIconVariants(name, data); err != nil {
+			return nil, err
+		}
 	}
 	for _, image := range []struct {
 		path string
@@ -123,6 +168,34 @@ func LoadAssets() (*Assets, error) {
 	}
 	a.License = string(license)
 	return a, nil
+}
+
+func (a *Assets) loadDetailIconVariants(name string, data []byte) error {
+	type strokeVariant struct{ prefix, from, to string }
+	var variants []strokeVariant
+	switch name {
+	case "back", "check", "comment", "pin", "play", "plus", "reply", "star", "user":
+		variants = []strokeVariant{{"detail/", "2", "1.7"}}
+	case "coin":
+		variants = []strokeVariant{{"detail-primary/", "1.7", "2"}}
+	case "like":
+		variants = []strokeVariant{{"detail-primary/", "1.7", "2"}, {"detail-vote/", "1.7", "1.8"}}
+	case "dislike":
+		variants = []strokeVariant{{"detail-vote/", "2", "1.8"}}
+	}
+	for _, variant := range variants {
+		from, to := fmt.Sprintf(`stroke-width="%s"`, variant.from), fmt.Sprintf(`stroke-width="%s"`, variant.to)
+		variantData := bytes.Replace(data, []byte(from), []byte(to), 1)
+		if bytes.Equal(data, variantData) {
+			return fmt.Errorf("missing %s on icon %s", from, name)
+		}
+		icon, err := ui.ParseSVG(variantData)
+		if err != nil {
+			return fmt.Errorf("decode icon %s%s: %w", variant.prefix, name, err)
+		}
+		a.icons[variant.prefix+name] = icon
+	}
+	return nil
 }
 
 // PrepareArtwork decodes an already validated package cover before rendering.
