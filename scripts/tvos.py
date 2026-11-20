@@ -97,6 +97,7 @@ def build():
         "CFBundleVersion": number, "CFBundleSupportedPlatforms": ["AppleTVOS"],
         "UIDeviceFamily": [3], "MinimumOSVersion": MINIMUM,
         "LSRequiresIPhoneOS": True, "UILaunchScreen": {},
+        "NSAppTransportSecurity": {"NSExceptionDomains": {"127.0.0.1": {"NSExceptionAllowsInsecureHTTPLoads": True}}},
     }
     (APP / "Info.plist").write_bytes(plistlib.dumps(info))
     (APP / "PkgInfo").write_bytes(b"APPL????")

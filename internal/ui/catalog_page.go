@@ -208,13 +208,18 @@ func (catalogPage) Render(c *ui.Context, p *PageContext) {
 	})
 }
 
-func firstCatalogItems(groups []provider.Collection) []provider.MediaItem {
+func firstCatalogGroup(groups []provider.Collection) (provider.Collection, bool) {
 	for _, group := range groups {
 		if len(group.Items) > 0 {
-			return group.Items
+			return group, true
 		}
 	}
-	return nil
+	return provider.Collection{}, false
+}
+
+func firstCatalogItems(groups []provider.Collection) []provider.MediaItem {
+	group, _ := firstCatalogGroup(groups)
+	return group.Items
 }
 
 func homeTabID(tab string) app.FocusID {
@@ -239,7 +244,7 @@ func catalogCardFocus(collection string, ref provider.MediaRef) app.FocusID {
 func (p *PageContext) homeShelves(sourceShelves []provider.Collection, picks []provider.MediaItem) []catalogShelf {
 	text := p.Assets.Text.Home
 	var history []provider.MediaItem
-	if activity := p.host.Activity; activity.HistorySync() {
+	if activity := p.host.Activity; activity != nil && activity.HistorySync() {
 		for _, row := range activity.Snapshot(homeHistory).Page.Rows {
 			if item := row.Item; item != nil && item.ProgressSeconds != nil && *item.ProgressSeconds > 0 &&
 				(item.DurationSeconds == nil || *item.ProgressSeconds < *item.DurationSeconds) {
@@ -247,10 +252,18 @@ func (p *PageContext) homeShelves(sourceShelves []provider.Collection, picks []p
 			}
 		}
 	}
+	followingTitle := p.sourceCreatorGroupTitle()
+	var followingItems []provider.MediaItem
+	if group, ok := firstCatalogGroup(sourceShelves); ok {
+		followingItems = group.Items
+		if title := strings.TrimSpace(group.Title); title != "" {
+			followingTitle = title
+		}
+	}
 	return []catalogShelf{
 		{id: "continue", title: text.Continue, note: text.ContinueNote, items: history},
 		{id: "picks", title: text.Picks, note: text.PicksNote, items: picks},
-		{id: "following", title: text.Following, note: text.FollowingNote, items: firstCatalogItems(sourceShelves)},
+		{id: "following", title: followingTitle, note: text.FollowingNote, items: followingItems},
 	}
 }
 

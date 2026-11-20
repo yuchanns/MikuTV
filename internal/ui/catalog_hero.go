@@ -142,8 +142,8 @@ func (p *PageContext) catalogHero(c *ui.Context, current app.CatalogSnapshot) {
 		}
 		p.catalogHeroCopy(c, item, home.selected)
 		p.catalogHeroActions(c, &item)
-		ui.Text(c, "A BIGGER SCREEN. A BIGGER WORLD.").Absolute().Right(83).Bottom(76).
-			FontSize(13).LetterSpacing(3).TextColor(paint(colors.Surface.Raised))
+		ui.Text(c, p.Assets.Text.Home.HeroCaption).Absolute().Right(83).Bottom(76).
+			FontSize(13).LetterSpacing(3).TextColor(withAlpha(colors.Text.Secondary, 0xb3))
 		p.catalogPager(c)
 	})
 }
@@ -155,8 +155,8 @@ func (p *PageContext) catalogHeroCopy(c *ui.Context, item provider.MediaItem, se
 		ui.Box(c.Key(item.Ref)).Absolute().Left(0).Top(0).Fill().Transition(transition).Children(func() {
 			ui.Row(c).Absolute().Top(76).Left(103).Height(19).Gap(15).AlignItems(ui.Center).Children(func() {
 				ui.Box(c).Size(24, 1).Background(paint(colors.Accent.Soft))
-				ui.Text(c, catalogEyebrow(c.Now(), selected)).FontSize(16).FontWeight(500).
-					LetterSpacing(5).TextColor(paint(colors.Accent.Soft))
+				ui.Text(c, catalogEyebrow(c.Now(), selected, p.Assets.Text.Home)).FontSize(16).FontWeight(500).
+					LetterSpacing(5).TextColor(paint(colors.Text.Secondary))
 			})
 			p.catalogHeadline(c, item.Title)
 			ui.Box(c).Absolute().Top(346).Left(103).Height(27).Children(func() {
@@ -164,7 +164,7 @@ func (p *PageContext) catalogHeroCopy(c *ui.Context, item provider.MediaItem, se
 			})
 			if item.Subtitle != "" {
 				ui.Text(c, item.Subtitle).Absolute().Top(389).Left(103).Width(min(690, p.Width-186)).
-					FontSize(21).LineHeight(1.8).MaxLines(2).TextColor(paint(colors.Surface.Raised))
+					FontSize(21).LineHeight(1.8).MaxLines(2).TextColor(paint(colors.Text.Secondary))
 			}
 		})
 	})
@@ -186,24 +186,24 @@ func (p *PageContext) catalogHeadline(c *ui.Context, title string) {
 		FontSize(84).FontWeight(650).LetterSpacing(4).LineHeight(1.17).MaxLines(2)
 }
 
-func catalogEyebrow(now time.Time, index int) string {
-	label := "AFTER HOURS"
+func catalogEyebrow(now time.Time, index int, labels homeLabels) string {
+	label := labels.EyebrowAfterHours
 	switch hour := now.Hour(); {
 	case hour >= 5 && hour < 11:
-		label = "MORNING'S PICK"
+		label = labels.EyebrowMorning
 	case hour >= 11 && hour < 14:
-		label = "MIDDAY'S PICK"
+		label = labels.EyebrowMidday
 	case hour >= 14 && hour < 18:
-		label = "AFTERNOON'S PICK"
+		label = labels.EyebrowAfternoon
 	case hour >= 18 && hour < 23:
-		label = "TONIGHT'S PICK"
+		label = labels.EyebrowTonight
 	}
 	return fmt.Sprintf("%s / %02d", label, index+1)
 }
 
 func (p *PageContext) catalogHeroMetadata(c *ui.Context, item provider.MediaItem) {
-	colors := p.Theme.Colors
-	secondary := paint(colors.Surface.Raised)
+	colors, d := p.Theme.Colors, p.uiColors()
+	secondary := d.secondaryText
 	ui.Row(c).Gap(16).AlignItems(ui.Center).Children(func() {
 		if item.Quality != "" {
 			ui.Text(c, item.Quality).Padding(3, 7).Radius(4).FontSize(13).
@@ -222,9 +222,14 @@ func (p *PageContext) catalogHeroMetadata(c *ui.Context, item provider.MediaItem
 }
 
 func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem) {
-	text, colors := p.Assets.Text.Home, p.Theme.Colors
+	text, colors, d := p.Assets.Text.Home, p.Theme.Colors, p.uiColors()
+	entry, _ := p.State.Current()
 	ui.Row(c).Absolute().Left(103).Top(498).Gap(16).AlignItems(ui.Center).Children(func() {
 		p.styledButton(c, text.Play, "play-filled", homePlayAction, homeHero, func() {
+			if item != nil && p.canPlay(item.Ref) {
+				p.openPlayback([]playbackItem{{item: *item}}, 0, false, nil)
+				return
+			}
 			p.openCatalogAction(text.Play, nil)
 		}, p.playButtonAppearance()).Width(179).Center()
 		if item != nil && p.canOpenVideoDetail(item.Ref) {
@@ -232,20 +237,43 @@ func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem
 				p.openVideoDetail(*item)
 			}, buttonAppearance{
 				height: 62, padding: 0, radius: 12, fontSize: 22, iconSize: 28, iconGap: 13, fontWeight: 550,
-				background: paint(colors.Surface.Raised), foreground: paint(colors.Text.Secondary),
-				border: paint(colors.Border.Subtle),
+				background: d.secondaryFill, foreground: d.secondaryText,
+				border: d.secondaryBorder,
 			}).Width(185).Center()
 		}
-		background, ink := withAlpha(colors.Playback.Foreground, 0x10), paint(colors.Text.Primary)
-		if p.State.Focus == homeLaterAction {
-			background, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+		if item != nil && entry.Capabilities.Has(provider.EditVideo) {
+			background, ink := d.secondaryFill, paint(colors.Text.Primary)
+			if p.State.Focus == homeLaterAction {
+				background, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+			}
+			featured := *item
+			button := ui.Button(c.Key(string(homeLaterAction)), "").Label(text.Later).Size(62, 62).Radius(12).
+				Border(1, d.secondaryBorder).Background(background).TextColor(ink).Center().
+				OnClick(func() { p.dispatch(func() { p.addCatalogWatchLater(featured) }) })
+			p.animateFocus(button, background, ink)
+			p.bind(button, homeLaterAction, homeHero)
+			button.Children(func() { ui.Icon(c, p.Assets.Icon("plus")).Size(28, 28) })
 		}
-		button := ui.Button(c.Key(string(homeLaterAction)), "").Label(text.Later).Size(62, 62).Radius(12).
-			Border(1, paint(colors.Border.Subtle)).Background(background).TextColor(ink).Center().
-			OnClick(func() { p.dispatch(func() { p.openCatalogAction(text.Later, nil) }) })
-		p.animateFocus(button, background, ink)
-		p.bind(button, homeLaterAction, homeHero)
-		button.Children(func() { ui.Icon(c, p.Assets.Icon("plus")).Size(28, 28) })
+	})
+}
+
+func (p *PageContext) addCatalogWatchLater(item provider.MediaItem) {
+	v := p.host
+	if v.Auth == nil || v.Auth.Accounts().CurrentID == "" {
+		v.openSignIn()
+		return
+	}
+	v.Catalog.EditVideo(provider.VideoEdit{
+		Ref: item.Ref, Interaction: provider.VideoWatchLater, Enabled: true,
+	}, func(_ provider.VideoEditResult, err error) {
+		if err != nil {
+			v.notice = p.videoOperationError(err, p.Assets.Text.Detail.UpdateFailed)
+			return
+		}
+		v.notice = p.Assets.Text.Detail.LaterAdded
+		if v.Activity != nil {
+			v.Activity.Refresh(provider.AccountQuery{Section: provider.AccountWatchLater})
+		}
 	})
 }
 
@@ -256,9 +284,9 @@ func (p *PageContext) catalogPager(c *ui.Context) {
 			FontSize(13).LetterSpacing(3).TextColor(paint(colors.Text.Secondary))
 		for idx := range home.featured {
 			id := homeFeatureID(idx)
-			length, fill := float32(34), paint(colors.Surface.Raised)
+			length, fill := float32(34), withAlpha(colors.Text.Muted, 0x66)
 			if idx == home.selected {
-				length, fill = 65, paint(colors.Surface.Raised)
+				length, fill = 65, paint(colors.Focus.Background)
 			}
 			button := ui.Button(c.Key(string(id)), "").Label(fmt.Sprintf(text.Feature, idx+1)).
 				Size(length, 24).Padding(0, 0).Radius(4).Border(0, ui.Transparent).Background(ui.Transparent).

@@ -7,14 +7,15 @@ import (
 )
 
 type Entry struct {
-	ID           string                    `json:"id"`
-	SourceID     string                    `json:"sourceId"`
-	Name         string                    `json:"name"`
-	Description  string                    `json:"description"`
-	Artwork      string                    `json:"artwork"`
-	Capabilities provider.Capabilities     `json:"capabilities,omitempty"`
-	Auth         provider.AuthPresentation `json:"auth,omitzero"`
-	Generation   uint64                    `json:"-"`
+	ID           string                      `json:"id"`
+	SourceID     string                      `json:"sourceId"`
+	Name         string                      `json:"name"`
+	Description  string                      `json:"description"`
+	Artwork      string                      `json:"artwork"`
+	Capabilities provider.Capabilities       `json:"capabilities,omitempty"`
+	Auth         provider.AuthPresentation   `json:"auth,omitzero"`
+	Presentation provider.SourcePresentation `json:"presentation,omitzero"`
+	Generation   uint64                      `json:"-"`
 }
 
 // Entries returns a snapshot of the registered entries.
@@ -33,7 +34,8 @@ func (s *State) UpdateEntries(entries []Entry) {
 		present[item.ID] = true
 		if old, ok := previous[item.ID]; ok && item.Generation == old.Generation {
 			if item.SourceID != old.SourceID || item.Name != old.Name || item.Description != old.Description ||
-				item.Artwork != old.Artwork || item.Auth != old.Auth || !slices.Equal(item.Capabilities, old.Capabilities) {
+				item.Artwork != old.Artwork || item.Auth != old.Auth || item.Presentation != old.Presentation ||
+				!slices.Equal(item.Capabilities, old.Capabilities) {
 				item.Generation = old.Generation + 1
 			}
 		}

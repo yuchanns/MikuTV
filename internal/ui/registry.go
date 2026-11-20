@@ -121,9 +121,28 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Transition: &videoDetailTransition, ScreenInsets: &[4]float32{},
 			Sync: syncVideoDetail, Back: (*View).backFromVideoDetail, Leave: func(v *View) {
 				switch v.State.Page {
-				case app.VideoConfirm, app.VideoCommentCompose, app.SignInQR:
+				case app.VideoConfirm, app.VideoCommentCompose, app.SignInQR, app.Player:
 				default:
 					v.videoDetail.close()
+				}
+			}},
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.Player},
+			Initial: focus(playerToggle), RequiresEntry: true, Capability: provider.ResolvePlayback, Transient: true},
+			Component: playbackPage{}, FullScreen: true, RawScreen: true, TransparentCanvas: true,
+			Sync: syncPlayback, Back: (*View).backFromPlayback, Leave: (*View).leavePlayback,
+			HandleKey: func(v *View, event ui.InputEvent, _ string) bool {
+				if event.Key == ui.KeySpace {
+					if !event.Repeat {
+						v.dispatch(v.togglePlayback)
+					}
+					return true
+				}
+				return false
+			},
+			BeforeMove: func(v *View) {
+				if v.player.visible {
+					v.player.controlFocus = ""
+					v.player.show(v)
 				}
 			}},
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.VideoConfirm}, Parent: app.Route{Page: app.VideoDetail},
@@ -175,6 +194,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				v.qrPayload, v.qrImage = "", nil
 				v.qrHasAction = false
 				v.videoDetail.signInAction = nil
+				v.player.content.afterLogin = nil
 			}},
 		Registration{Policy: authModal(app.SignOut, app.Account, app.CloseModal), Component: signOutDialog{}, ModalWidth: 700, ModalHeight: 290,
 			ModalInsets: [4]float32{50, 50, 50, 50}},

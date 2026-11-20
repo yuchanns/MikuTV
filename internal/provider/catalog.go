@@ -64,6 +64,19 @@ const (
 	VideoAccessRestricted VideoAccess = "restricted"
 )
 
+type SectionPresentation struct {
+	Tracking string `json:"tracking,omitempty"`
+	Courses  string `json:"courses,omitempty"`
+}
+
+type SourcePresentation struct {
+	CreatorMark       string              `json:"creatorMark,omitempty"`
+	CreatorGroupTitle string              `json:"creatorGroupTitle,omitempty"`
+	Membership        string              `json:"membership,omitempty"`
+	MobileApp         string              `json:"mobileApp,omitempty"`
+	Sections          SectionPresentation `json:"sections,omitzero"`
+}
+
 type VideoDetails struct {
 	PublishedAt int64            `json:"publishedAt,omitempty"`
 	Comments    *int64           `json:"comments,omitempty"`
@@ -73,6 +86,7 @@ type VideoDetails struct {
 	Discussion  []VideoComment   `json:"discussion,omitempty"`
 	Related     []MediaItem      `json:"related,omitempty"`
 	Engagement  VideoEngagement  `json:"engagement,omitempty"`
+	Actions     []ActionSpec     `json:"actions,omitempty"`
 }
 
 type VideoSegmentKind string

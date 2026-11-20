@@ -28,6 +28,12 @@ var operations = map[provider.Capability][]string{
 	provider.EditVideo:                         {"editVideo"},
 	provider.ReadVideoComments:                 {"videoComments"},
 	provider.WriteVideoComments:                {"editVideo"},
+	provider.ResolvePlayback:                   {"resolvePlayback"},
+	provider.ReportPlayback:                    {"reportPlayback"},
+	provider.ReadSubtitles:                     {"readSubtitles"},
+	provider.ReadDanmaku:                       {"readDanmaku"},
+	provider.WriteDanmaku:                      {"postDanmaku"},
+	provider.EditVideoFavorites:                {"videoFavoriteFolders", "editVideoFavoriteFolders"},
 	provider.SignIn:                            {beginSignIn, pollSignIn, restoreAccount, signOut},
 	provider.AccountHistory.Capability():       {"readAccount"},
 	provider.AccountWatchLater.Capability():    {"readAccount"},
@@ -59,6 +65,10 @@ func (s *Source) Capabilities() provider.Capabilities {
 
 func (s *Source) AuthPresentation() provider.AuthPresentation {
 	return s.manifest.Authentication.Presentation
+}
+
+func (s *Source) Presentation() provider.SourcePresentation {
+	return s.manifest.Presentation
 }
 
 // Open validates and compiles a package without executing its code.

@@ -19,6 +19,7 @@ type videoDetailFeedback struct {
 	text        string
 	start       time.Time
 	celebration bool
+	icons       []string
 }
 
 func (v *View) renderVideoDetailFeedback(c *ui.Context) {
@@ -88,10 +89,14 @@ func (v *View) videoCelebration(c *ui.Context, f videoDetailFeedback) {
 		})
 		layer.Scale(scale, scale)
 	}
+	icons := f.icons
+	if len(icons) == 0 {
+		icons = []string{"check"}
+	}
 	layer.Children(func() {
 		ui.Column(c).Gap(26).AlignItems(ui.Center).PassThrough().Children(func() {
 			ui.Row(c).Gap(35).PassThrough().Children(func() {
-				for _, icon := range []string{"like", "coin", "detail/star"} {
+				for _, icon := range icons {
 					ui.Box(c).Size(90, 90).PassThrough().Children(func() {
 						ui.Icon(c, v.Assets.Icon(icon)).Absolute().Top(0).Left(0).Fill().Cache().Blur(15).
 							TextColor(withAlpha(colors.Primary, 0x80)).PassThrough()

@@ -29,6 +29,7 @@ type Session struct {
 	entryID string
 	storage *Storage
 	client  *http.Client
+	cdn     *cdnTracker
 	context context.Context
 	cancel  context.CancelFunc
 
@@ -46,7 +47,7 @@ func (s *Source) NewSession(entryID string, storage *Storage) *Session {
 	scope, stop := context.WithCancel(ctx)
 	client := s.httpClient()
 	return &Session{
-		source: s, entryID: entryID, storage: storage, client: client,
+		source: s, entryID: entryID, storage: storage, client: client, cdn: newCDNTracker(),
 		context: ctx, cancel: cancel, active: client, scope: scope, stop: stop,
 	}
 }
@@ -176,13 +177,16 @@ func (s *Session) ownVideoSections(detail *provider.VideoDetails) error {
 			return &provider.Error{Code: provider.PluginFailed}
 		}
 		if segment.Ref != nil {
-			if segment.Ref.Kind != provider.Video || segment.Ref.ID == "" {
+			if !segment.Ref.Kind.Valid() || segment.Ref.ID == "" {
 				return &provider.Error{Code: provider.PluginFailed}
 			}
 			segment.Ref.EntryID = s.entryID
 		}
 	}
 	if err := ownVideoComments(detail.Discussion, true); err != nil {
+		return err
+	}
+	if err := ownVideoActions(detail.Actions); err != nil {
 		return err
 	}
 	for index := range detail.Related {
@@ -224,7 +228,7 @@ func (s *Session) ReadAccount(ctx context.Context, request provider.AccountReque
 			return provider.AccountPage{}, &provider.Error{Code: provider.PluginFailed}
 		}
 		if row.DurationSeconds != nil && *row.DurationSeconds < 0 || row.Views != nil && *row.Views < 0 ||
-			row.ProgressSeconds != nil && *row.ProgressSeconds < -1 {
+			row.ProgressSeconds != nil && *row.ProgressSeconds < 0 {
 			return provider.AccountPage{}, &provider.Error{Code: provider.PluginFailed}
 		}
 		if row.CreatorAvatarURL != "" && httpsURL(row.CreatorAvatarURL) == nil {
@@ -266,7 +270,7 @@ func (s *Session) EditFavoriteFolder(ctx context.Context, edit provider.Favorite
 
 func (s *Session) RemoveAccountItems(ctx context.Context, section provider.AccountSection, ids []string) error {
 	capability := section.RemoveCapability()
-	if capability == "" || len(ids) == 0 || len(ids) > 20 {
+	if capability == "" || len(ids) == 0 || len(ids) > 1000 {
 		return &provider.Error{Code: provider.Denied}
 	}
 	for _, id := range ids {
@@ -304,7 +308,8 @@ func (s *Session) invoke(ctx, scope context.Context, client *http.Client, op pro
 	if err != nil {
 		return &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
-	data, err := s.source.execute(ctx, client, s.storage, export, params, strings.HasPrefix(string(op), "account."))
+	secure := strings.HasPrefix(string(op), "account.") || op == provider.ReportPlayback
+	data, err := s.source.execute(ctx, client, s.storage, export, params, secure)
 	if scope.Err() != nil {
 		return context.Canceled
 	}
@@ -320,10 +325,12 @@ func (s *Session) invoke(ctx, scope context.Context, client *http.Client, op pro
 const invokeBody = `
 const fail = (error) => {
   let code = "";
+  let message = "";
   try {
     if (error && typeof error.code === "string") code = error.code;
+    if (error && typeof error.message === "string") message = error.message;
   } catch {}
-  reject(code);
+  reject(code, message);
 };
 try {
   Promise.resolve(fn(arg)).then(resolve, fail);
@@ -392,8 +399,12 @@ func (s *Source) execute(ctx context.Context, client *http.Client, store *Storag
 			loop.StopNoWait()
 			return moejs.Undefined(), nil
 		})
-		reject := rt.Function("reject", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-			callErr = &provider.Error{Code: errorCode(moejs.Arg(args, 0).String())}
+		reject := rt.Function("reject", 2, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+			message := strings.TrimSpace(moejs.Arg(args, 1).String())
+			if runes := []rune(message); len(runes) > 120 {
+				message = string(runes[:120])
+			}
+			callErr = &provider.Error{Code: errorCode(moejs.Arg(args, 0).String()), Message: message}
 			done = true
 			loop.StopNoWait()
 			return moejs.Undefined(), nil
@@ -443,11 +454,18 @@ func (s *Source) httpClient() *http.Client {
 	return &http.Client{
 		Jar: jar, Timeout: callTimeout, Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("redirect limit exceeded")
+			}
 			origin := via[0].URL
-			from := via[len(via)-1].URL
 			sameOrigin := strings.EqualFold(origin.Host, req.URL.Host) && origin.Scheme == req.URL.Scheme
-			samePrev := strings.EqualFold(from.Host, req.URL.Host) && from.Scheme == req.URL.Scheme
-			if !sameOrigin || !samePrev {
+			for _, hop := range via[1:] {
+				if !strings.EqualFold(origin.Host, hop.URL.Host) || origin.Scheme != hop.URL.Scheme {
+					sameOrigin = false
+					break
+				}
+			}
+			if !sameOrigin {
 				if req.Method != http.MethodGet && req.Method != http.MethodHead {
 					return errors.New("cross-origin redirect requires a read request")
 				}

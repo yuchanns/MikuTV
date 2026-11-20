@@ -16,11 +16,9 @@ import (
 const (
 	videoDetailPlay      app.FocusID = "video-detail/play"
 	videoDetailLater     app.FocusID = "video-detail/later"
-	videoDetailTriple    app.FocusID = "video-detail/triple"
 	videoDetailCreatorID app.FocusID = "video-detail/creator"
 	videoDetailFollow    app.FocusID = "video-detail/follow"
 	videoDetailLike      app.FocusID = "video-detail/like"
-	videoDetailCoin      app.FocusID = "video-detail/coin"
 	videoDetailFavorite  app.FocusID = "video-detail/favorite"
 	videoDetailRetry     app.FocusID = "video-detail/retry"
 	videoDetailControls              = "video-detail"
@@ -32,6 +30,10 @@ const (
 
 	videoDetailMetadataTop = 272
 )
+
+func videoDetailActionFocus(id string) app.FocusID {
+	return app.FocusID("video-detail/action/" + id)
+}
 
 const videoDetailTextStroke = 0.018
 
@@ -57,7 +59,7 @@ type videoDetailState struct {
 	loading       bool
 	revealSection bool
 	failure       provider.ErrorCode
-	confirm       provider.VideoInteraction
+	confirm       *provider.ActionSpec
 	discussion    *videoDiscussionState
 	relatedScroll *ui.ScrollState
 	segmentRows   *ui.ListState
@@ -80,6 +82,18 @@ type videoDetailLocation struct {
 	discussion    *videoDiscussionState
 	relatedScroll *ui.ScrollState
 	segmentRows   *ui.ListState
+}
+
+func (s *videoDetailState) actionSpec(id string) (provider.ActionSpec, bool) {
+	if s.item.VideoDetails == nil {
+		return provider.ActionSpec{}, false
+	}
+	for _, action := range s.item.VideoDetails.Actions {
+		if action.ID == id {
+			return action, true
+		}
+	}
+	return provider.ActionSpec{}, false
 }
 
 func (s *videoDetailState) close() {
@@ -272,6 +286,15 @@ func (videoDetailPage) Render(c *ui.Context, p *PageContext) {
 	}
 
 	p.region(videoDetailControls, nil)
+	entry, _ := p.State.Current()
+	if p.active && p.State.Focus == videoDetailPlay && !entry.Capabilities.Has(provider.ResolvePlayback) {
+		if entry.Capabilities.Has(provider.EditVideo) {
+			p.State.Focus = videoDetailLater
+		} else {
+			p.State.Focus = videoDetailOverview.focusID()
+		}
+		p.host.reveal = true
+	}
 	synopsis := videoDetailSynopsis{full: item.Subtitle}
 	if detail.tab == videoDetailOverview && !detail.loading && detail.failure == "" && !detail.expanded {
 		synopsis = detail.cachedSynopsis(item.Subtitle, videoSynopsisWidth(p.Width))
@@ -410,10 +433,13 @@ func (p *PageContext) videoDetailActions(c *ui.Context, item provider.MediaItem)
 		}
 	}
 	ui.Row(c).Absolute().Top(492 - videoDetailMetadataTop).Left(0).Gap(16).Children(func() {
-		if true {
+		if entry.Capabilities.Has(provider.ResolvePlayback) {
 			style := p.playButtonAppearance()
 			style.focusShadow = true
 			p.styledButton(c, play, icon, videoDetailPlay, videoDetailControls, func() {
+				if p.canPlay(item.Ref) {
+					p.startDetailPlayback(item, nil)
+				}
 			}, style).Width(179).Center()
 		}
 		if entry.Capabilities.Has(provider.EditVideo) {
@@ -422,7 +448,13 @@ func (p *PageContext) videoDetailActions(c *ui.Context, item provider.MediaItem)
 				laterIcon = "detail/check"
 			}
 			p.videoDetailButton(c, text.Home.Later, laterIcon, videoDetailLater, 185)
-			p.videoDetailButton(c, text.Detail.Triple, "like", videoDetailTriple, 185)
+			if item.VideoDetails != nil {
+				for _, action := range item.VideoDetails.Actions {
+					if action.Slot == provider.ActionSlotHero {
+						p.videoDetailActionButton(c, action, 185)
+					}
+				}
+			}
 		}
 	})
 }
@@ -437,14 +469,25 @@ func (p *PageContext) videoDetailButton(c *ui.Context, label, icon string, id ap
 			icon = "like-filled"
 		case id == videoDetailFavorite && state.Favorite:
 			icon = "star-filled"
-		case id == videoDetailCoin && state.Coins > 0:
-			icon = "coin-filled"
 		}
 	}
 	p.styledButton(c, label, icon, id, videoDetailControls, func() { p.runVideoDetailAction(id, label) }, buttonAppearance{
 		height: 62, radius: 12, fontSize: 22, fontWeight: 550, iconSize: 28, iconGap: 13, focusShadow: true,
 		background: d.secondaryFill, foreground: foreground, border: d.secondaryBorder,
 	}).Width(width).Center()
+}
+
+func (p *PageContext) videoDetailActionButton(c *ui.Context, action provider.ActionSpec, width float32) {
+	d := p.uiColors()
+	icon := action.Icon
+	if action.Active && action.ActiveIcon != "" {
+		icon = action.ActiveIcon
+	}
+	id := videoDetailActionFocus(action.ID)
+	p.styledButton(c, action.Label, icon, id, videoDetailControls, func() { p.runVideoCustomAction(action) }, buttonAppearance{
+		height: 62, minWidth: width, padding: 20, radius: 12, fontSize: 22, fontWeight: 550, iconSize: 28, iconGap: 13, focusShadow: true,
+		background: d.secondaryFill, foreground: d.secondaryText, border: d.secondaryBorder,
+	}).Center()
 }
 
 func (p *PageContext) videoDetailStats(c *ui.Context, item provider.MediaItem) {
@@ -489,5 +532,3 @@ func (p *PageContext) videoDetailFailure(code provider.ErrorCode) string {
 		return text.Detail.LoadFailed
 	}
 }
-
-func (v *View) discussionDetail() *videoDetailState { return &v.videoDetail }

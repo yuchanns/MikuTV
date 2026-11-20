@@ -50,7 +50,8 @@ type sourceManifest struct {
 	Permissions struct {
 		Network []string `json:"network,omitempty"`
 	} `json:"permissions,omitempty"`
-	Capabilities provider.Capabilities `json:"capabilities,omitempty"`
+	Presentation provider.SourcePresentation `json:"presentation,omitzero"`
+	Capabilities provider.Capabilities       `json:"capabilities,omitempty"`
 }
 
 var (
@@ -116,7 +117,9 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 	if manifest.Capabilities.Has(provider.SignIn) != (len(manifest.Authentication.Methods) != 0) {
 		return sourceManifest{}, fmt.Errorf("%w: sign-in capability and authentication method must be declared together", ErrIncompatible)
 	}
-	if (manifest.Capabilities.Has(provider.EditVideo) || manifest.Capabilities.Has(provider.WriteVideoComments)) &&
+	if (manifest.Capabilities.Has(provider.EditVideo) || manifest.Capabilities.Has(provider.WriteVideoComments) ||
+		manifest.Capabilities.Has(provider.WriteDanmaku) || manifest.Capabilities.Has(provider.EditVideoFavorites) ||
+		manifest.Capabilities.Has(provider.ReportPlayback)) &&
 		!manifest.Capabilities.Has(provider.SignIn) {
 		return sourceManifest{}, fmt.Errorf("%w: video interaction requires sign-in", ErrIncompatible)
 	}

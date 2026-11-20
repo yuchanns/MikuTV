@@ -151,11 +151,11 @@ func TestVideoFollowFeedbackUsesTheResultingState(t *testing.T) {
 	}
 	following := false
 	request := provider.VideoEdit{Interaction: provider.VideoFollow, Enabled: true}
-	if got := videoEditFeedback(assets.Text.Detail, request, provider.VideoEditResult{}).text; got != assets.Text.Detail.Followed {
+	if got := videoEditFeedback(assets.Text.Detail, request, provider.VideoEditResult{}, nil).text; got != assets.Text.Detail.Followed {
 		t.Fatalf("follow feedback = %q", got)
 	}
 	result := provider.VideoEditResult{Following: &following}
-	if got := videoEditFeedback(assets.Text.Detail, request, result).text; got == "" || got != assets.Text.Detail.Unfollowed {
+	if got := videoEditFeedback(assets.Text.Detail, request, result, nil).text; got == "" || got != assets.Text.Detail.Unfollowed {
 		t.Fatalf("unfollow feedback = %q", got)
 	}
 }
@@ -170,7 +170,7 @@ func TestVideoDetailReturnsToTheCallingCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := testEntries()
-	entries[0].Capabilities = append(entries[0].Capabilities, provider.GetCatalogItem, provider.EditVideo)
+	entries[0].Capabilities = append(entries[0].Capabilities, provider.GetCatalogItem, provider.ResolvePlayback, provider.EditVideo)
 	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
 	if err != nil {
 		t.Fatal(err)
@@ -310,6 +310,7 @@ func TestVideoDetailReturnsToTheCallingCard(t *testing.T) {
 	selected.VideoDetails = &provider.VideoDetails{
 		Access: provider.VideoAccessPreview, SegmentKind: provider.VideoParts,
 		Segments: []provider.VideoSegment{{Title: "First video part"}, {Title: "Second video part"}},
+		Actions:  []provider.ActionSpec{{ID: "boost", Slot: provider.ActionSlotHero, Label: "Boost", Icon: "like"}},
 	}
 	retry.reply <- videoDetailReply{item: selected}
 	(<-callbacks)()
@@ -327,8 +328,8 @@ func TestVideoDetailReturnsToTheCallingCard(t *testing.T) {
 	}
 	bounds(assets.Text.Detail.Collection)
 	if !tester.HasText(assets.Text.Detail.More) || tester.HasText(assets.Text.Detail.AccessPreview) ||
-		!tester.HasText(assets.Text.Detail.Preview) || !tester.HasText(assets.Text.Detail.Triple) {
-		t.Fatal("the detail screen lost source metadata or the prototype's action controls")
+		!tester.HasText(assets.Text.Detail.Preview) || !tester.HasText("Boost") {
+		t.Fatal("the detail screen lost source metadata or declared action controls")
 	}
 	tester.Key(0, ui.KeyDown)
 	if state.Focus != videoDetailMore {
@@ -389,7 +390,16 @@ func (s videoPaneSession) EditVideo(_ context.Context, request provider.VideoEdi
 	switch request.Interaction {
 	case provider.VideoWatchLater:
 		return provider.VideoEditResult{WatchLater: &request.Enabled}, nil
-	case provider.VideoTriple, provider.VideoReplyLike:
+	case provider.VideoAction:
+		if request.ActionID == "triple" {
+			return provider.VideoEditResult{
+				ActionStates: map[string]bool{"coin": true},
+				Message:      "Triple delivered",
+				Celebrate:    true,
+			}, nil
+		}
+		return provider.VideoEditResult{}, &provider.Error{Code: provider.Denied, Message: "Insufficient balance"}
+	case provider.VideoReplyLike:
 		return provider.VideoEditResult{}, nil
 	default:
 		return provider.VideoEditResult{}, &provider.Error{Code: provider.Denied, Message: "Insufficient balance"}
@@ -406,7 +416,7 @@ func TestVideoDetailSectionsAndConfirmations(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := testEntries()
-	entries[0].Capabilities = []provider.Capability{provider.GetCatalogItem, provider.ReadVideoComments, provider.WriteVideoComments, provider.EditVideo}
+	entries[0].Capabilities = []provider.Capability{provider.GetCatalogItem, provider.ResolvePlayback, provider.ReadVideoComments, provider.WriteVideoComments, provider.EditVideo}
 	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
 	if err != nil {
 		t.Fatal(err)
@@ -423,10 +433,23 @@ func TestVideoDetailSectionsAndConfirmations(t *testing.T) {
 	ref := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "video"}
 	count := int64(1)
 	secondDuration := int64(91)
+	coinAction := provider.ActionSpec{
+		ID: "coin", Slot: provider.ActionSlotOverview, Label: "Coin", Icon: "coin", ActiveIcon: "coin-filled",
+		Confirm:     &provider.ActionConfirm{Title: "Send a coin?", Body: "Cannot be undone.", Accept: "Send coin", Icon: "detail-primary/coin"},
+		DoneMessage: "Coin sent",
+	}
+	tripleAction := provider.ActionSpec{
+		ID: "triple", Slot: provider.ActionSlotHero, Label: "Triple", Icon: "like",
+		Confirm:        &provider.ActionConfirm{Title: "Send triple?", Body: "Like, coin and save.", Accept: "Send triple", Icon: "detail-primary/like"},
+		DoneMessage:    "Triple delivered",
+		Celebrate:      true,
+		CelebrateIcons: []string{"like", "coin", "detail/star"},
+	}
 	view.videoDetail.item = provider.MediaItem{
 		Ref: ref, Title: strings.Repeat("A full video title can extend across several lines. ", 4),
 		VideoDetails: &provider.VideoDetails{
 			Comments: &count, SegmentKind: provider.VideoParts,
+			Actions: []provider.ActionSpec{tripleAction, coinAction},
 			Segments: []provider.VideoSegment{
 				{Title: "Episode one"},
 				{Title: strings.Repeat("A longer title for the second episode. ", 4), DurationSeconds: &secondDuration},
@@ -617,9 +640,10 @@ func TestVideoDetailSectionsAndConfirmations(t *testing.T) {
 		t.Fatalf("the focused related card did not leave room below its metadata: %+v", card)
 	}
 
+	coinFocus := videoDetailActionFocus("coin")
 	page := &PageContext{State: state, Assets: assets, host: view}
-	state.RecordPosition(app.Position{Focus: videoDetailCoin})
-	page.showVideoConfirmation(provider.VideoCoin)
+	state.RecordPosition(app.Position{Focus: coinFocus})
+	page.showVideoActionConfirmation(coinAction)
 	tester.Frame()
 	tester.Advance(menuTransition.Duration)
 	expectFocus(videoConfirmAccept)
@@ -632,24 +656,24 @@ func TestVideoDetailSectionsAndConfirmations(t *testing.T) {
 	key(ui.KeyEnter)
 	(<-callbacks)()
 	tester.Frame()
-	if request := <-session.edits; request.Ref != ref || request.Interaction != provider.VideoCoin {
+	if request := <-session.edits; request.Ref != ref || request.Interaction != provider.VideoAction || request.ActionID != "coin" {
 		t.Fatalf("confirmed coin request = %+v", request)
 	}
 	if !tester.HasText("Insufficient balance") {
 		t.Fatal("plugin-provided rejection message did not render as feedback")
 	}
-	expectFocus(videoDetailCoin)
-	page.showVideoConfirmation(provider.VideoTriple)
+	expectFocus(coinFocus)
+	page.showVideoActionConfirmation(tripleAction)
 	tester.Frame()
-	if !tester.HasText(assets.Text.Detail.ConfirmCoin) || !tester.HasText(assets.Text.Detail.Triple) {
-		t.Fatal("the triple confirmation did not use its own action")
+	if !tester.HasText(tripleAction.Confirm.Title) || !tester.HasText(tripleAction.Confirm.Accept) {
+		t.Fatal("the triple confirmation did not use its own action spec")
 	}
 	key(ui.KeyRight)
 	expectFocus(app.CloseModal)
 	expectFocusFill(videoConfirmAccept, false)
 	expectFocusFill(app.CloseModal, true)
 	key(ui.KeyEscape)
-	expectFocus(videoDetailCoin)
+	expectFocus(coinFocus)
 	if !state.Push(app.Route{Page: app.VideoCommentCompose}) {
 		t.Fatal("could not open the comment composer")
 	}
@@ -683,7 +707,7 @@ func TestVideoDetailSectionsAndConfirmations(t *testing.T) {
 		t.Fatal("the confirmed draft lost Unicode text or exceeded the character limit")
 	}
 	key(ui.KeyEscape)
-	expectFocus(videoDetailCoin)
+	expectFocus(coinFocus)
 	if len(session.edits) != 0 {
 		t.Fatal("closing a confirmation queued a write")
 	}
@@ -701,15 +725,18 @@ func TestVideoDetailSectionsAndConfirmations(t *testing.T) {
 	if tester.HasText(assets.Text.Detail.LaterAdded) {
 		t.Fatal("the watch-later toast did not expire")
 	}
-	page.editVideo(provider.VideoEdit{Ref: ref, Interaction: provider.VideoTriple})
+	page.editVideo(provider.VideoEdit{Ref: ref, Interaction: provider.VideoAction, ActionID: "triple"})
 	(<-callbacks)()
 	<-session.edits
 	tester.Frame()
-	if !view.videoDetail.feedback.celebration || !tester.HasText(assets.Text.Detail.TripleSent) {
-		t.Fatal("a completed triple did not show its celebration")
+	if !view.videoDetail.feedback.celebration || !tester.HasText("Triple delivered") {
+		t.Fatal("a completed triple action did not show its celebration")
+	}
+	if updated, ok := view.videoDetail.actionSpec("coin"); !ok || !updated.Active {
+		t.Fatalf("actionStates did not mark coin active: %+v", updated)
 	}
 	tester.Advance(videoCelebrationDuration + time.Millisecond)
-	if tester.HasText(assets.Text.Detail.TripleSent) {
+	if tester.HasText("Triple delivered") {
 		t.Fatal("the triple celebration did not expire")
 	}
 	page.editVideo(provider.VideoEdit{Ref: ref, Interaction: provider.VideoReplyLike, ReplyID: "newest", Enabled: true})
@@ -793,19 +820,26 @@ func TestVideoDetailOffersSignInAgainWhenAFailedWriteNeedsIt(t *testing.T) {
 	if !state.Push(app.Route{Page: app.VideoDetail}) {
 		t.Fatal("could not open video detail")
 	}
+	coinFocus := videoDetailActionFocus("coin")
 	view.videoDetail.item = provider.MediaItem{
 		Ref: provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "video"}, Title: "Video",
+		VideoDetails: &provider.VideoDetails{
+			Actions: []provider.ActionSpec{{
+				ID: "coin", Slot: provider.ActionSlotOverview, Label: "Coin",
+				Confirm: &provider.ActionConfirm{Title: "Send coin?"},
+			}},
+		},
 	}
 	page := &PageContext{State: state, Assets: assets, host: view}
-	state.RecordPosition(app.Position{Focus: videoDetailCoin})
-	page.editVideo(provider.VideoEdit{Ref: view.videoDetail.item.Ref, Interaction: provider.VideoCoin})
+	state.RecordPosition(app.Position{Focus: coinFocus})
+	page.editVideo(provider.VideoEdit{Ref: view.videoDetail.item.Ref, Interaction: provider.VideoAction, ActionID: "coin"})
 	deliver()
 	if layers := state.Layers(); len(layers) != 2 || layers[0].Page != app.VideoDetail || state.Page != app.SignInQR {
 		t.Fatalf("account recovery was not shown above the video detail: %+v", layers)
 	}
 	tester.Key(0, ui.KeyEscape)
-	if state.Page != app.VideoDetail || state.Focus != videoDetailCoin {
-		t.Fatal("Back did not restore the coin button")
+	if state.Page != app.VideoDetail || state.Focus != coinFocus {
+		t.Fatal("Back did not restore the action button")
 	}
 
 	if !state.Push(app.Route{Page: app.VideoCommentCompose}) {
@@ -826,7 +860,7 @@ func TestVideoDetailOffersSignInAgainWhenAFailedWriteNeedsIt(t *testing.T) {
 		t.Fatal("Back did not restore the draft and its publish action")
 	}
 	coin, comment := <-source.writes, <-source.writes
-	if coin.Interaction != provider.VideoCoin || comment.Interaction != provider.VideoPostComment || comment.Body != body {
+	if coin.Interaction != provider.VideoAction || coin.ActionID != "coin" || comment.Interaction != provider.VideoPostComment || comment.Body != body {
 		t.Fatalf("unexpected original edits: %+v, %+v", coin, comment)
 	}
 }
@@ -897,11 +931,15 @@ func TestVideoDetailResumesPendingCoinConfirmationAfterSignIn(t *testing.T) {
 	if !state.Push(app.Route{Page: app.VideoDetail}) {
 		t.Fatal("could not open video detail")
 	}
+	coinAction := provider.ActionSpec{
+		ID: "coin", Slot: provider.ActionSlotOverview, Label: "Coin",
+		Confirm: &provider.ActionConfirm{Title: "Send coin?"},
+	}
 	ref := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "video"}
-	view.videoDetail.seed = provider.MediaItem{Ref: ref, Title: "Video"}
+	view.videoDetail.seed = provider.MediaItem{Ref: ref, Title: "Video", VideoDetails: &provider.VideoDetails{Actions: []provider.ActionSpec{coinAction}}}
 	view.videoDetail.item = view.videoDetail.seed
 	page := &PageContext{State: state, Assets: assets, host: view}
-	page.runVideoDetailAction(videoDetailCoin, assets.Text.Detail.Coin)
+	page.runVideoCustomAction(coinAction)
 	if state.Page != app.SignInQR || view.videoDetail.signInAction == nil {
 		t.Fatal("the coin action did not open sign-in and retain its intent")
 	}
@@ -909,13 +947,13 @@ func TestVideoDetailResumesPendingCoinConfirmationAfterSignIn(t *testing.T) {
 	if view.videoDetail.signInAction != nil {
 		t.Fatal("cancelling sign-in retained an action")
 	}
-	page.runVideoDetailAction(videoDetailCoin, assets.Text.Detail.Coin)
+	page.runVideoCustomAction(coinAction)
 	await(func() bool { return state.Page == app.VideoConfirm })
-	if got := <-source.reads; got != ref || view.videoDetail.confirm != provider.VideoCoin || view.videoDetail.item.Ref != ref {
+	if got := <-source.reads; got != ref || view.videoDetail.confirm == nil || view.videoDetail.confirm.ID != "coin" || view.videoDetail.item.Ref != ref {
 		t.Fatal("sign-in did not restore confirmation for the original video")
 	}
 	if len(source.writes) != 0 {
-		t.Fatal("sign-in sent coins before confirmation")
+		t.Fatal("sign-in sent custom action before confirmation")
 	}
 }
 

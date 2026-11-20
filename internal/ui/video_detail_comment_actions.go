@@ -76,6 +76,9 @@ func (p *PageContext) videoDiscussionComposer(c *ui.Context, d *videoDiscussionS
 		})
 		button.Children(func() {
 			gap := float32(10)
+			if p.Location.Page == app.Player {
+				gap = 16
+			}
 			ui.Row(c).FillWidth().Gap(gap).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, p.Assets.Icon("detail/comment")).Size(20, 20)
 				ui.Text(c, label).FontSize(17)

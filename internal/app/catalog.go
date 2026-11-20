@@ -42,6 +42,7 @@ type Catalog struct {
 	sessionGen uint64
 	session    provider.Session
 	canBrowse  bool
+	canReport  bool
 	collection string
 	filter     string
 	pending    context.CancelFunc
@@ -51,6 +52,7 @@ type Catalog struct {
 	artwork, backdrops *catalogArtwork
 }
 
+func (c *Catalog) CanReportPlayback() bool { return c.canReport }
 
 func NewCatalog(open func(string) provider.Session, post func(func()), changed func()) *Catalog {
 	return &Catalog{open: open, post: post, changed: changed}
@@ -134,13 +136,15 @@ func catalogResult[T any](c *Catalog, operation func(context.Context) (T, error)
 // allowing account restoration to attach credentials before the first fetch.
 func (c *Catalog) Open(entry Entry) bool {
 	canBrowse := entry.Capabilities.Has(provider.BrowseCatalog)
-	if c.entryID == entry.ID && c.entryGen == entry.Generation && c.canBrowse == canBrowse {
+	canReport := entry.Capabilities.Has(provider.ReportPlayback)
+	if c.entryID == entry.ID && c.entryGen == entry.Generation && c.canBrowse == canBrowse && c.canReport == canReport {
 		return false
 	}
 	c.Close()
 	c.entryID = entry.ID
 	c.entryGen = entry.Generation
 	c.canBrowse = canBrowse
+	c.canReport = canReport
 	if entry.ID != "" {
 		c.session = c.open(entry.ID)
 	}
@@ -314,6 +318,7 @@ func (c *Catalog) Close() {
 	c.entryID = ""
 	c.entryGen = 0
 	c.canBrowse = false
+	c.canReport = false
 	c.collection, c.filter = "", ""
 }
 

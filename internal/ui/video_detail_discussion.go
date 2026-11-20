@@ -225,7 +225,7 @@ func (p *PageContext) loadVideoDiscussion(d *videoDiscussionState, page int) {
 				if page != 0 && appended == 0 {
 					d.nextLatest = 0
 				}
-				if focusComment && (p.State.Page == app.VideoDetail) && p.State.Focus == videoDiscussionLatest &&
+				if focusComment && (p.State.Page == app.VideoDetail || p.State.Page == app.Player) && p.State.Focus == videoDiscussionLatest &&
 					d.root == nil && d.showLatest && len(d.latest) != 0 {
 					p.host.moveFocus(videoCommentFocus(d.latest[0].ID), app.Down, true)
 				}
@@ -571,7 +571,7 @@ func (p *PageContext) videoCommentRow(c *ui.Context, d *videoDiscussionState, co
 }
 
 func (p *PageContext) videoCommentContent(c *ui.Context, comment provider.VideoComment, preview bool, layout videoDiscussionLayout, actions func()) {
-	colors, text := p.Theme.Colors, p.Assets.Text.Detail
+	colors := p.Theme.Colors
 	name := p.videoCommentAuthor(comment)
 	ui.Row(c).FillWidth().Gap(layout.avatarGap).AlignItems(ui.Start).Children(func() {
 		p.videoCommentAvatar(c, name, comment.AvatarURL, layout.avatarSize, nil, false)
@@ -579,21 +579,21 @@ func (p *PageContext) videoCommentContent(c *ui.Context, comment provider.VideoC
 			ui.Row(c).FillWidth().Height(layout.headingHeight).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, name).FontSize(layout.authorSize).FontWeight(400).TextColor(paint(colors.Text.Secondary)).SingleLine()
 				if comment.IsCreator {
-					ui.Text(c, text.CreatorMark).Padding(0, 4).Radius(3).Border(1, withAlpha(colors.Accent.Primary, 0x88)).
+					ui.Text(c, p.sourceCreatorMark()).Padding(0, 4).Radius(3).Border(1, withAlpha(colors.Accent.Primary, 0x88)).
 						FontSize(11).TextColor(paint(colors.Accent.Soft))
 				}
 				if comment.Pinned && preview {
 					ui.Spacer(c).Grow(1)
 					ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
 						ui.Icon(c, p.Assets.Icon("detail/pin")).Size(12, 12).TextColor(paint(colors.Text.Muted))
-						ui.Text(c, text.Pinned).FontSize(11).TextColor(paint(colors.Text.Muted))
+						ui.Text(c, p.sourcePinnedLabel()).FontSize(11).TextColor(paint(colors.Text.Muted))
 					})
 				}
 			})
 			if meta := p.videoCommentMeta(comment); meta != "" {
 				ui.Text(c, meta).Margin(3, 0, 0, 0).FontSize(layout.metaSize).LineHeight(1.5).TextColor(paint(colors.Text.Muted))
 			}
-			inlineTimestamp := false
+			inlineTimestamp := !preview && p.videoCommentTimestamp(c, comment, layout.player)
 			if !inlineTimestamp {
 				body := p.videoCommentText(c, comment).FillWidth().FontSize(layout.bodySize).FontWeight(400).LineHeight(1.65).
 					Margin(11, 0, 9, 0).TextColor(paint(colors.Text.Primary))
@@ -602,6 +602,7 @@ func (p *PageContext) videoCommentContent(c *ui.Context, comment provider.VideoC
 				}
 			}
 			if layout.player && !preview && !inlineTimestamp {
+				p.playbackCommentLinks(c, comment)
 			}
 			actions()
 			if preview {
@@ -710,7 +711,7 @@ func (p *PageContext) videoReplyPreview(c *ui.Context, comment provider.VideoCom
 				ui.Text(c, p.videoCommentAuthor(reply)).FontSize(14).TextColor(paint(colors.Text.Secondary))
 				if reply.IsCreator {
 					accent := colors.Accent.Soft
-					ui.Text(c, text.CreatorMark).FontSize(10).Padding(0, 3).Radius(2).
+					ui.Text(c, p.sourceCreatorMark()).FontSize(10).Padding(0, 3).Radius(2).
 						Border(1, withAlpha(colors.Accent.Primary, 0x88)).TextColor(paint(accent))
 				}
 			})

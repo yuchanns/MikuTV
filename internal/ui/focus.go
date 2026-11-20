@@ -87,6 +87,10 @@ func (f *focusController) neighbor(current *focusItem, direction app.Direction) 
 }
 
 func (v *View) move(direction app.Direction) {
+	reg := v.Pages.components[v.State.Route]
+	if reg.BeforeMove != nil {
+		reg.BeforeMove(v)
+	}
 	current := v.focus.item(v.State.Focus)
 	if current == nil || (current.direction != nil && current.direction(direction)) {
 		return
@@ -96,24 +100,8 @@ func (v *View) move(direction app.Direction) {
 		return
 	}
 	v.moveFocus(next, direction, true)
-	if v.State.Page != app.Home || (direction != app.Left && direction != app.Right) {
-		return
-	}
-	switch current.group {
-	case homeHeader:
-		for _, tab := range homeTabs {
-			if next == homeTabID(tab) {
-				v.showHomeTab(tab, "")
-				break
-			}
-		}
-	case homeFilters:
-		for _, filter := range v.home.filters {
-			if next == homeFilterID(filter.ID) {
-				v.showHomeTab(v.home.tab, filter.ID)
-				break
-			}
-		}
+	if reg.AfterMove != nil {
+		reg.AfterMove(v, direction, current.group, next)
 	}
 }
 
@@ -144,7 +132,7 @@ func (v *View) bind(element ui.Element, id app.FocusID, group string, active boo
 		if event.Kind != ui.InputKeyDown {
 			return false
 		}
-		if event.Repeat && v.startCatalogHold(event.Key, group) {
+		if handle := v.Pages.components[v.State.Route].HandleKey; handle != nil && handle(v, event, group) {
 			return true
 		}
 		switch event.Key {

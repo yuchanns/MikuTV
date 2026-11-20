@@ -10,9 +10,10 @@ import (
 )
 
 var detailInteractions = map[app.FocusID]provider.VideoInteraction{
-	videoDetailLater: provider.VideoWatchLater, videoDetailFollow: provider.VideoFollow,
-	videoDetailLike: provider.VideoLike, videoDetailCoin: provider.VideoCoin,
-	videoDetailFavorite: provider.VideoFavorite, videoDetailTriple: provider.VideoTriple,
+	videoDetailLater:    provider.VideoWatchLater,
+	videoDetailFollow:   provider.VideoFollow,
+	videoDetailLike:     provider.VideoLike,
+	videoDetailFavorite: provider.VideoFavorite,
 }
 
 const videoConfirmAccept app.FocusID = "video-confirm/accept"
@@ -30,16 +31,43 @@ func (p *PageContext) runVideoDetailAction(id app.FocusID, label string) {
 		if p.host.videoDetail.operation != nil {
 			return
 		}
-		switch interaction {
-		case provider.VideoCoin, provider.VideoTriple:
-			p.showVideoConfirmation(interaction)
-		default:
-			p.performVideoInteraction(interaction)
+		p.performVideoInteraction(interaction)
+	})
+}
+
+func (p *PageContext) runVideoCustomAction(action provider.ActionSpec) {
+	actionID := action.ID
+	p.withVideoAccount(action.Label, func() {
+		if p.host.videoDetail.operation != nil {
+			return
 		}
+		current, ok := p.host.videoDetail.actionSpec(actionID)
+		if !ok {
+			current = action
+		}
+		if current.Confirm != nil {
+			p.showVideoActionConfirmation(current)
+			return
+		}
+		p.performVideoCustomAction(current)
+	})
+}
+
+func (p *PageContext) performVideoCustomAction(action provider.ActionSpec) {
+	item := p.host.videoDetail.item
+	p.editVideo(provider.VideoEdit{
+		Ref:         item.Ref,
+		Interaction: provider.VideoAction,
+		ActionID:    action.ID,
+		Enabled:     !action.Active,
 	})
 }
 
 func (p *PageContext) withVideoAccount(label string, action func()) {
+	if p.State.Page == app.Player {
+		p.withPlayerAccount(action)
+		return
+	}
 	entry, _ := p.State.Current()
 	if !entry.Capabilities.Has(provider.EditVideo) {
 		p.host.videoDetail.feedback = videoDetailFeedback{text: fmt.Sprintf(p.Assets.Text.Detail.ActionsUnavailable, label)}
@@ -103,22 +131,33 @@ func (p *PageContext) editVideo(request provider.VideoEdit) {
 		detail.operation = nil
 		if err != nil {
 			var resume func()
-			if request.Interaction == provider.VideoCoin || request.Interaction == provider.VideoTriple {
-				resume = func() { p.showVideoConfirmation(request.Interaction) }
+			if request.Interaction == provider.VideoAction {
+				if action, ok := detail.actionSpec(request.ActionID); ok && action.Confirm != nil {
+					resume = func() { p.showVideoActionConfirmation(action) }
+				}
 			}
 			if p.State.Page != app.VideoDetail || !p.reopenVideoSignIn(err, resume) {
 				detail.feedback = videoDetailFeedback{text: p.videoOperationError(err, text.UpdateFailed)}
 			}
 			return
 		}
+		var action *provider.ActionSpec
+		if request.Interaction == provider.VideoAction {
+			if spec, ok := detail.actionSpec(request.ActionID); ok {
+				action = &spec
+			}
+		}
 		detail.applyVideoEdit(request, result)
-		if feedback := videoEditFeedback(text, request, result); feedback.text != "" {
+		if detail == &p.host.player.discussion {
+			p.host.syncPlaybackEngagement(request, result)
+		}
+		if feedback := videoEditFeedback(text, request, result, action); feedback.text != "" {
 			detail.feedback = feedback
 		}
 	})
 }
 
-func videoEditFeedback(text detailLabels, request provider.VideoEdit, result provider.VideoEditResult) videoDetailFeedback {
+func videoEditFeedback(text detailLabels, request provider.VideoEdit, result provider.VideoEditResult, action *provider.ActionSpec) videoDetailFeedback {
 	if result.Partial {
 		return videoDetailFeedback{text: text.Partial}
 	}
@@ -143,10 +182,24 @@ func videoEditFeedback(text detailLabels, request provider.VideoEdit, result pro
 			return videoDetailFeedback{text: text.FavoriteRemoved}
 		}
 		return toggled(result.Favorite, text.FavoriteAdded, text.FavoriteRemoved)
-	case provider.VideoCoin:
-		return videoDetailFeedback{text: text.CoinSent}
-	case provider.VideoTriple:
-		return videoDetailFeedback{text: text.TripleSent, celebration: true}
+	case provider.VideoAction:
+		message := strings.TrimSpace(result.Message)
+		celebrate := result.Celebrate
+		var icons []string
+		if action != nil {
+			if message == "" {
+				message = strings.TrimSpace(action.DoneMessage)
+			}
+			celebrate = celebrate || action.Celebrate
+			icons = action.CelebrateIcons
+		}
+		if message == "" && celebrate {
+			message = text.ActionDone
+		}
+		if message == "" {
+			return videoDetailFeedback{}
+		}
+		return videoDetailFeedback{text: message, celebration: celebrate, icons: icons}
 	default:
 		return videoDetailFeedback{}
 	}
@@ -176,10 +229,12 @@ func (s *videoDetailState) applyVideoEdit(request provider.VideoEdit, result pro
 	if result.Following != nil && s.item.Creator != nil {
 		s.item.Creator.Following = *result.Following
 	}
-	if result.Coins != nil {
-		detail.Engagement.Coins = *result.Coins
-	} else if request.Interaction == provider.VideoCoin {
-		detail.Engagement.Coins++
+	if len(result.ActionStates) != 0 {
+		for index := range detail.Actions {
+			if active, ok := result.ActionStates[detail.Actions[index].ID]; ok {
+				detail.Actions[index].Active = active
+			}
+		}
 	}
 	if request.Interaction == provider.VideoReplyLike || request.Interaction == provider.VideoReplyDislike {
 		s.videoDiscussion().updateVote(detail.Discussion, request)
@@ -207,30 +262,50 @@ func (p *PageContext) videoOperationError(err error, fallback string) string {
 
 type videoConfirmPage struct{}
 
-func (p *PageContext) showVideoConfirmation(interaction provider.VideoInteraction) {
+func (p *PageContext) showVideoActionConfirmation(action provider.ActionSpec) {
+	if action.Confirm == nil {
+		p.performVideoCustomAction(action)
+		return
+	}
 	if p.State.Push(app.Route{Page: app.VideoConfirm}) {
-		p.host.videoDetail.confirm = interaction
+		copy := action
+		p.host.videoDetail.confirm = &copy
 	}
 }
 
 func (videoConfirmPage) Render(c *ui.Context, p *PageContext) {
 	const region = "video-confirm"
 	detail, text, colors := &p.host.videoDetail, p.Assets.Text, p.Theme.Colors
-	heading, note, action, icon := text.Detail.ConfirmCoin, text.Detail.CoinNote, text.Detail.Confirm, "detail-primary/coin"
-	closeLabel := text.Detail.Reconsider
-	interaction := detail.confirm
-	if interaction == provider.VideoTriple {
-		action, icon = text.Detail.Triple, "detail-primary/like"
+	action := detail.confirm
+	if action == nil || action.Confirm == nil {
+		return
 	}
+	confirm := action.Confirm
+	heading, note := confirm.Title, confirm.Body
+	acceptLabel := confirm.Accept
+	if acceptLabel == "" {
+		acceptLabel = text.Detail.Confirm
+	}
+	closeLabel := confirm.Cancel
+	if closeLabel == "" {
+		closeLabel = text.Detail.Reconsider
+	}
+	icon := confirm.Icon
+	if icon == "" {
+		icon = action.Icon
+	}
+	selected := *action
 	p.region(region, nil)
 	ui.Column(c).FillWidth().Children(func() {
 		ui.Text(c, heading).FontSize(36).FontWeight(500).LineHeight(1.3).Translate(0, 4).Role(ui.RoleHeading).Level(2)
-		ui.Text(c, note).FillWidth().Margin(18, 0, 0, 0).FontSize(21).LineHeight(1.8).Translate(0, 4).
-			TextColor(paint(colors.Text.Secondary))
+		if note != "" {
+			ui.Text(c, note).FillWidth().Margin(18, 0, 0, 0).FontSize(21).LineHeight(1.8).Translate(0, 4).
+				TextColor(paint(colors.Text.Secondary))
+		}
 		ui.Row(c).Gap(12).Margin(38, 0, 0, 0).Children(func() {
-			p.videoModalButton(c, action, icon, videoConfirmAccept, region, func() {
+			p.videoModalButton(c, acceptLabel, icon, videoConfirmAccept, region, func() {
 				p.State.Back()
-				p.performVideoInteraction(interaction)
+				p.performVideoCustomAction(selected)
 			})
 			p.videoModalButton(c, closeLabel, "", app.CloseModal, region, func() { p.State.Back() })
 		})

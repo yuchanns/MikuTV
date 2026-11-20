@@ -50,18 +50,18 @@ type playbackAccessLabels struct {
 	RegionTitle, RegionBody, SeeRelated, VIPTitle, VIPBody, VIPNoPreview, MembershipHelp, MembershipInstructions, Refresh, Return string
 	PurchaseTitle, PurchaseBody, TrialMinutes, TrialState, TrialLeft                                                              string
 	TrialEndedTitle, TrialEndedBody, PurchaseTrialEndedBody, QualityVIPTitle, QualityVIPBody                                      string
-	TrialSeconds                                                                                                                  string
+	TrialSeconds, MobileClient                                                                                                    string
 }
 
 type detailLabels struct {
 	Overview, Loading, Empty, CommentCount, Unavailable, Denied, SignIn, LoadFailed        string
 	AccessGranted, AccessPreview, AccessRestricted                                         string
 	Episodes, CurrentVideo, Collection, Comments, Related                                  string
-	Follow, Followed, Unfollowed, Triple, Like, Coin, Favorite, Preview, GetAccess         string
+	Follow, Followed, Unfollowed, Like, Favorite, Preview, GetAccess                       string
 	ActionsUnavailable, NoComments, NoRelated, NoSegments, UnknownAuthor                   string
 	UpdateFailed, Partial                                                                  string
-	Confirm, ConfirmCoin, CoinNote, Reconsider                                             string
-	CoinSent, TripleSent, LaterAdded, LaterRemoved, FavoriteAdded, FavoriteRemoved         string
+	Confirm, Reconsider, ActionDone                                                        string
+	LaterAdded, LaterRemoved, FavoriteAdded, FavoriteRemoved                               string
 	FavoriteAddedTo                                                                        string
 	WriteComment, Reply, Liked, More, Collapse                                             string
 	Hot, Latest, AllComments, RootComment, AllReplies, ReplyCount, MoreReplies             string

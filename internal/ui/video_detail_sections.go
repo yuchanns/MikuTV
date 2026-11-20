@@ -209,7 +209,13 @@ func (p *PageContext) videoDetailAbout(c *ui.Context, detail *videoDetailState, 
 			if entry.Capabilities.Has(provider.EditVideo) {
 				ui.Row(c).Gap(16).Children(func() {
 					p.videoDetailButton(c, text.Like, "like", videoDetailLike, 141)
-					p.videoDetailButton(c, text.Coin, "coin", videoDetailCoin, 141)
+					if detail.item.VideoDetails != nil {
+						for _, action := range detail.item.VideoDetails.Actions {
+							if action.Slot == provider.ActionSlotOverview {
+								p.videoDetailActionButton(c, action, 141)
+							}
+						}
+					}
 					p.videoDetailButton(c, text.Favorite, "detail/star", videoDetailFavorite, 141)
 				})
 			}

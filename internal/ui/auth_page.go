@@ -268,8 +268,10 @@ func (v *View) dismissAfter(page app.Page) func() {
 			return
 		}
 		var resume func()
+		var resumePlayer func()
 		if page == app.SignInQR {
 			resume = v.videoDetail.signInAction
+			resumePlayer = v.player.content.afterLogin
 		}
 		v.dispatch(func() {
 			v.State.Back()
@@ -279,6 +281,9 @@ func (v *View) dismissAfter(page app.Page) func() {
 		})
 		if resume != nil {
 			v.resumeVideoAfterSignIn(resume)
+		}
+		if resumePlayer != nil && v.State.Page == app.Player {
+			v.dispatch(resumePlayer)
 		}
 	}
 }

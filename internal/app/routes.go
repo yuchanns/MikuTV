@@ -13,6 +13,7 @@ const (
 	Home                Page = "home"
 	HomeAction          Page = "homeAction"
 	VideoDetail         Page = "videoDetail"
+	Player              Page = "player"
 	VideoConfirm        Page = "videoConfirm"
 	VideoCommentCompose Page = "videoCommentCompose"
 	Search              Page = "search"
@@ -150,31 +151,21 @@ func (r *Routes) Resolve(route Route) (RouteSpec, bool) {
 			return RouteSpec{}, false
 		}
 		if spec.Redirect.Page == "" {
-			var required []provider.Capability
-			addCap := func(cap provider.Capability) {
-				if cap == "" {
-					return
-				}
-				for _, existing := range required {
-					if existing == cap {
-						return
-					}
-				}
-				required = append(required, cap)
-			}
-			addCap(spec.Capability)
-			for _, cap := range spec.Capabilities {
-				addCap(cap)
+			var caps []provider.Capability
+			if spec.Capability != "" {
+				caps = append(caps, spec.Capability)
 			}
 			for parent := spec.Parent; parent.Page != ""; parent = r.specs[parent].Parent {
 				parentSpec := r.specs[parent]
 				spec.RequiresEntry = spec.RequiresEntry || parentSpec.RequiresEntry
-				addCap(parentSpec.Capability)
-				for _, cap := range parentSpec.Capabilities {
-					addCap(cap)
+				if parentSpec.Capability != "" {
+					if spec.Capability == "" {
+						spec.Capability = parentSpec.Capability
+					}
+					caps = append(caps, parentSpec.Capability)
 				}
 			}
-			spec.Capabilities = required
+			spec.Capabilities = caps
 			return spec, true
 		}
 		route = spec.Redirect

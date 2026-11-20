@@ -36,6 +36,12 @@ type scrollKey struct {
 	route app.Route
 }
 
+type navigationTrace struct {
+	entry string
+	route app.Route
+	focus app.FocusID
+}
+
 type Options struct {
 	State       *app.State
 	Catalog     *app.Catalog
@@ -53,12 +59,14 @@ type View struct {
 	Catalog         *app.Catalog
 	Auth            *app.Auth
 	Activity        *app.AccountActivity
+	Playback        *app.Playback
 	Pages           *Pages
 	Assets          *Assets
 	Preferences     app.PreferencesStore
 	Theme           theme.Theme
 	Version         string
 	Trace           bool
+	lastNavigation  navigationTrace
 	native          ui.Theme
 	focus           focusController
 	scrolls         map[scrollKey]*ui.ScrollState
@@ -76,25 +84,45 @@ type View struct {
 	profileGlow     ui.ImageSource
 	cardGlow        ui.ImageSource
 	home            catalogHome
+	homeStates      map[string]catalogHome
+	entryGeneration uint64
 	videoDetail     videoDetailState
-		favorites       favoritesUI
+	player          playbackView
+	favorites       favoritesUI
+
+	playbackSettings playbackSettings
 
 	accountDetailsPhone bool
 	openNotice          provider.AccountRow
 }
 
 func NewView(options Options) *View {
-	return &View{State: options.State, Catalog: options.Catalog, Auth: options.Auth, Activity: options.Activity, Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
-		Theme: options.Theme, Version: options.Version, native: nativeTheme(options.Theme), scrolls: make(map[scrollKey]*ui.ScrollState),
-		profileGlow: accountGlow(deriveColors(options.Theme).profileGlow, 0.15, 0.65),
-		cardGlow:    accountGlow(withAlpha(options.Theme.Colors.Accent.Primary, 0x29), 1, 0.75)}
+	v := &View{
+		State: options.State, Catalog: options.Catalog, Auth: options.Auth, Activity: options.Activity,
+		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
+		Version: options.Version, scrolls: make(map[scrollKey]*ui.ScrollState),
+	}
+	v.SetTheme(options.Theme)
+	if v.Auth != nil && v.Catalog != nil {
+		v.Auth.SetOnSettled(func() {
+			if v.home.tab != "" || v.home.filter != "" {
+				v.Catalog.Show(v.home.tab, v.home.filter)
+				return
+			}
+			v.Catalog.EnsureLoaded()
+		})
+	}
+	return v
 }
 
-func (v *View) SetTheme(palette theme.Theme) {
-	v.Theme = palette
-	v.native = nativeTheme(palette)
-	v.profileGlow = accountGlow(deriveColors(palette).profileGlow, 0.15, 0.65)
-	v.cardGlow = accountGlow(withAlpha(palette.Colors.Accent.Primary, 0x29), 1, 0.75)
+// SetTheme atomically replaces the active resolved theme without resetting routes,
+// focus, playback, or account sessions (§7.2).
+func (v *View) SetTheme(next theme.Theme) {
+	v.Theme = next
+	v.native = nativeTheme(next)
+	derived := deriveColors(next)
+	v.profileGlow = accountGlow(derived.profileGlow, 0.15, 0.65)
+	v.cardGlow = accountGlow(withAlpha(next.Colors.Accent.Primary, 0x29), 1, 0.75)
 }
 
 func (v *View) Render(c *ui.Context) {
@@ -106,10 +134,17 @@ func (v *View) Render(c *ui.Context) {
 	v.advanceCatalogHold(c, height, len(layers) == 1 && layers[0].Page == app.Home)
 	v.focus.begin(c)
 	v.activeScroll = nil
-	screen := ui.Box(c).Fill().Clip().Background(paint(v.Theme.Colors.Surface.Canvas))
-	fromVideo := layers[0].Page == app.VideoDetail
+	background := paint(v.Theme.Colors.Surface.Canvas)
+	rootReg := v.Pages.components[layers[0].Route]
+	if rootReg.TransparentCanvas {
+		background = ui.Transparent
+		c.Root().Background(ui.Transparent)
+	}
+	screen := ui.Box(c).Fill().Clip().Background(background)
+	fromVideo := rootReg.PreserveFocusUnderlay
 	top := layers[len(layers)-1]
-	if blur := v.modalBlur(top.Route, fromVideo); blur != 0 {
+	fromMedia := fromVideo || top.Page == app.SignInQR && rootReg.TransparentCanvas
+	if blur := v.modalBlur(top.Route, fromMedia); blur != 0 {
 		screen.Cache().Blur(blur)
 	}
 	screen.Children(func() {
@@ -128,7 +163,14 @@ func (v *View) Render(c *ui.Context) {
 		}
 	})
 	for index, location := range layers[1:] {
-		v.renderModal(c, v.context(location, index == len(layers)-2, width, height), fromVideo)
+		v.renderModal(c, v.context(location, index == len(layers)-2, width, height), fromMedia)
+	}
+	if v.Trace {
+		next := navigationTrace{entry: v.State.CurrentEntry, route: v.State.Route, focus: v.State.Focus}
+		if next != v.lastNavigation {
+			log.Printf("navigation: entry=%s page=%s section=%s focus=%s", next.entry, next.route.Page, next.route.Section, next.focus)
+			v.lastNavigation = next
+		}
 	}
 	v.drawnRevision = v.State.Revision
 	v.reveal = false
@@ -171,20 +213,25 @@ func (v *View) context(location app.Location, active bool, width, height float32
 
 func (v *View) renderScreen(c *ui.Context, page *PageContext) {
 	chain := v.Pages.Routes.Ancestors(page.Location.Route)
+	rootReg := v.Pages.components[chain[0]]
+	if rootReg.RawScreen && rootReg.FullScreen {
+		v.Pages.render(c, page)
+		return
+	}
 	scroll := page.scroll()
 	insets := [4]float32{148, 83, screenBottomInset, 103}
-	if override := v.Pages.components[chain[0]].ScreenInsets; override != nil {
+	if override := rootReg.ScreenInsets; override != nil {
 		insets = *override
 	}
 	insets[2] = max(insets[2], screenBottomInset)
 	screen := ui.Scroll(c.Key(page.Location.Route)).Fill().TrackScroll(scroll)
 	transition := menuTransition
-	if page.Location.Page == app.VideoDetail {
-		transition = videoDetailTransition
+	if rootReg.Transition != nil {
+		transition = *rootReg.Transition
 		screen.Absolute().Left(0).Top(0).ZIndex(1).Background(paint(v.Theme.Colors.Surface.Canvas))
 	}
 	screen.Transition(transition).Children(func() {
-		if page.Location.Page == app.Library {
+		if rootReg.RawScreen {
 			v.Pages.render(c, page)
 			return
 		}
@@ -193,14 +240,17 @@ func (v *View) renderScreen(c *ui.Context, page *PageContext) {
 	})
 }
 
-func (v *View) modalBlur(route app.Route, fromVideo bool) float32 {
-	if fromVideo && route.Page == app.SignInQR {
+func (v *View) modalBlur(route app.Route, fromMedia bool) float32 {
+	if fromMedia && route.Page == app.SignInQR {
+		return 28
+	}
+	if route.Page == favoriteFolderDialog && v.Playback != nil && v.Playback.Active() {
 		return 28
 	}
 	return v.Pages.components[route].ModalBlur
 }
 
-func (v *View) renderModal(c *ui.Context, page *PageContext, fromVideo bool) {
+func (v *View) renderModal(c *ui.Context, page *PageContext, fromMedia bool) {
 	page.left = focusDestination{}
 	registration := v.Pages.components[page.Location.Route]
 	page.Title, page.Node = registration.Title, registration.Policy.Route
@@ -215,7 +265,7 @@ func (v *View) renderModal(c *ui.Context, page *PageContext, fromVideo bool) {
 		height = 850
 	}
 	insets := registration.ModalInsets
-	if fromVideo && page.Location.Page == app.SignInQR {
+	if fromMedia && page.Location.Page == app.SignInQR {
 		height = 570
 		insets = [4]float32{52, 58, 48, 58}
 	}
@@ -223,11 +273,9 @@ func (v *View) renderModal(c *ui.Context, page *PageContext, fromVideo bool) {
 		insets = [4]float32{45, 45, 45, 45}
 	}
 	colors := v.Theme.Colors
+	derived := deriveColors(v.Theme)
 	scrim := paint(colors.Overlay.Scrim)
-	blurred := v.modalBlur(page.Location.Route, fromVideo) != 0
-	if blurred {
-		scrim = paint(colors.Overlay.Scrim)
-	}
+	blurred := v.modalBlur(page.Location.Route, fromMedia) != 0
 	panelWidth, panelHeight := min(width, page.Width-180), min(height, page.Height-150)
 	ui.Overlay(c, func() {
 		shadeKey := struct{ Shade app.Route }{page.Location.Route}
@@ -239,11 +287,11 @@ func (v *View) renderModal(c *ui.Context, page *PageContext, fromVideo bool) {
 			Padding(insets[0], insets[1], insets[2], insets[3]).Gap(28).
 			Background(paint(colors.Surface.Panel)).Radius(30)
 		if registration.ModalInsets != ([4]float32{}) {
-			border := colors.Border.Subtle
-			if fromVideo {
-				border = colors.Overlay.Scrim
+			border := derived.dialogBorder
+			if fromMedia {
+				border = derived.strongBorder
 			}
-			panel.Background(ui.Transparent).Gradient(paint(colors.Surface.Raised), paint(colors.Surface.Raised), 140).Border(1, paint(border))
+			panel.Background(ui.Transparent).Gradient(derived.dialogStart, derived.dialogEnd, 140).Border(1, border)
 		}
 		if blurred {
 			panel.Shadow(0, 50, 100, 0, paint(colors.Overlay.Shadow))
@@ -288,9 +336,6 @@ func (v *View) dispatch(action func()) {
 		}
 	}
 	v.SyncEntry()
-	if v.Trace {
-		log.Printf("navigation: entry=%s page=%s section=%s focus=%s", v.State.CurrentEntry, v.State.Page, v.State.Section, v.State.Focus)
-	}
 }
 
 func (v *View) goBack() bool {
@@ -309,17 +354,47 @@ func (v *View) goBack() bool {
 
 func (v *View) SyncEntry() {
 	entry, _ := v.State.Current()
-	if entry.ID != v.home.entry {
+	if entry.ID != v.home.entry || entry.Generation != v.entryGeneration {
+		if v.home.entry != "" && v.home.entry != entry.ID {
+			if v.homeStates == nil {
+				v.homeStates = make(map[string]catalogHome)
+			}
+			saved := v.home
+			saved.images, saved.imageClock = nil, 0
+			saved.hold = catalogHold{}
+			saved.featureInfo = catalogFeatureInfo{}
+			saved.rotateAt = time.Time{}
+			v.homeStates[v.home.entry] = saved
+		}
 		v.videoDetail.close()
+		if v.Playback != nil && v.Playback.Active() {
+			v.leavePlayback()
+		}
 		v.home.featureInfo.stop()
-		v.home = catalogHome{entry: entry.ID}
+		if prev, ok := v.homeStates[entry.ID]; ok && entry.ID != v.home.entry {
+			v.home = prev
+		} else {
+			v.home = catalogHome{entry: entry.ID}
+		}
+		v.entryGeneration = entry.Generation
 	}
 	var service provider.Authenticator
-	v.Catalog.Select(entry)
-	if entry.Capabilities.Has(provider.SignIn) {
-		service = v.Catalog.Authenticator()
+	if v.Catalog != nil {
+		v.Catalog.Open(entry)
+		if entry.Capabilities.Has(provider.SignIn) {
+			service = v.Catalog.Authenticator()
+		}
 	}
-	v.Auth.Bind(entry, service)
+	if v.Auth != nil {
+		v.Auth.Bind(entry, service)
+	}
+	if v.Catalog != nil && (v.Auth == nil || !entry.Capabilities.Has(provider.SignIn) || v.Auth.Accounts().Ready) {
+		if v.home.tab != "" || v.home.filter != "" {
+			v.Catalog.Show(v.home.tab, v.home.filter)
+		} else {
+			v.Catalog.EnsureLoaded()
+		}
+	}
 	v.SyncAccountActivity()
 }
 

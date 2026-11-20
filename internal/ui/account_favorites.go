@@ -102,12 +102,12 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 				p.libraryEmpty(c, "", text.CanceledTitle, "", text.Retry, "", emptyFocus, func() { activity.Retry(query) })
 			default:
 				t := text.Activity
-				empty := t.LibraryEmpty[query.Section]
+				emptyTitle, emptyNote := p.libraryEmptyText(query.Section)
 				icon := "library"
 				if query.Section == provider.AccountTracking {
 					icon = "series"
 				}
-				p.libraryEmpty(c, icon, empty.Title, empty.Note, t.DiscoverContent, "", emptyFocus, p.openLibraryHome)
+				p.libraryEmpty(c, icon, emptyTitle, emptyNote, t.DiscoverContent, "", emptyFocus, p.openLibraryHome)
 			}
 			return
 		}
@@ -144,7 +144,7 @@ func (p *PageContext) libraryEmpty(c *ui.Context, icon, title, note, action, act
 }
 
 func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSection) {
-	colors, text := p.Theme.Colors, p.Assets.Text.Activity
+	colors := p.Theme.Colors
 	entry, _ := p.State.Current()
 	ui.Box(c.Key("favorite-tabs")).FillWidth().Height(102).Children(func() {
 		ui.Row(c).Absolute().Top(45).Left(78).Height(61).Gap(18).Children(func() {
@@ -152,7 +152,7 @@ func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSe
 				if !entry.Capabilities.Has(section.Capability()) {
 					continue
 				}
-				title := text.libraryTab(section)
+				title := p.librarySectionLabel(section)
 				id := app.FocusID("library/tab/" + section)
 				selected := section == active
 				background, foreground, width := ui.Transparent, paint(colors.Text.Muted), float32(148)
@@ -214,7 +214,7 @@ func (p *PageContext) libraryHeading(c *ui.Context, folder provider.AccountRow, 
 
 func (p *PageContext) libraryCollectionMeta(c *ui.Context, query provider.AccountQuery, total int, top float32) {
 	text, colors := p.Assets.Text.Activity, p.Theme.Colors
-	label := text.libraryTab(query.Section)
+	label := p.librarySectionLabel(query.Section)
 	if query.Folder != "" {
 		label = text.FolderContents
 		top += 8
@@ -226,7 +226,8 @@ func (p *PageContext) libraryCollectionMeta(c *ui.Context, query provider.Accoun
 	if query.Section == provider.AccountWatchLater {
 		ui.Box(c).Absolute().Top(top + 7).Right(83).Children(func() {
 			p.libraryTextLink(c, text.PlayAll, "play", libraryPlayAll, libraryMeta, func() {
-				})
+				p.playWatchLater(p.host.Activity.Snapshot(query).Page.Rows)
+			})
 		})
 	}
 }
