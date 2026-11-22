@@ -207,7 +207,7 @@ func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item
 	pane := *p
 	pane.active = p.active && !playbackBlocking(state) && !s.content.overlay()
 	if s.panel == playerInfo || s.panel == playerComments {
-		pane.playbackDrawer(c, item)
+		pane.playbackDrawer(c, state, item)
 		return
 	}
 	var title, current string
@@ -346,7 +346,21 @@ func (p *PageContext) playbackOption(c *ui.Context, id app.FocusID, label, note 
 	return button
 }
 
-func (p *PageContext) playbackDrawer(c *ui.Context, current playbackItem) {
+func playbackUpcomingEpisodes(state app.PlaybackState, item provider.MediaItem) []provider.VideoSegment {
+	source := state.Resolution.Plan.Episodes
+	if len(source) == 0 && item.VideoDetails != nil {
+		source = item.VideoDetails.Segments
+	}
+	var upcoming []provider.VideoSegment
+	for _, seg := range source {
+		if seg.Unavailable {
+			upcoming = append(upcoming, seg)
+		}
+	}
+	return upcoming
+}
+
+func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, current playbackItem) {
 	v, s, colors, d := p.host, &p.host.player, p.Theme.Colors, p.uiColors()
 	text := p.Assets.Text.Playback
 	drawer := ui.Column(c.Key("player-drawer")).Absolute().Top(0).Bottom(0).Right(0).Width(playerDrawerWidth).
@@ -358,7 +372,8 @@ func (p *PageContext) playbackDrawer(c *ui.Context, current playbackItem) {
 		return
 	}
 	p.region(playerPanelGroup, focusEdges{})
-	hasEpisodes := !s.keepQueue && len(s.items) > 1
+	upcoming := playbackUpcomingEpisodes(state, current.item)
+	hasEpisodes := !s.keepQueue && (len(s.items) > 1 || len(upcoming) > 0)
 	if !hasEpisodes {
 		p.bind(drawer.Focusable().Label(text.Info), playerPanelExit, playerPanelGroup)
 	}
@@ -370,8 +385,11 @@ func (p *PageContext) playbackDrawer(c *ui.Context, current playbackItem) {
 					ui.Text(c, creator.Name).FontSize(16).Margin(5, 0, 0, 0).TextColor(paint(colors.Text.Secondary))
 				}
 				if current.item.Subtitle != "" {
-					ui.Text(c, current.item.Subtitle).FontSize(22).Margin(12, 0, 0, 0).LineHeight(1.8).
+					synopsis := ui.Text(c, current.item.Subtitle).FontSize(22).Margin(12, 0, 0, 0).LineHeight(1.7).
 						TextColor(paint(colors.Text.Secondary))
+					if hasEpisodes {
+						synopsis.MaxLines(4)
+					}
 				}
 				if hasEpisodes {
 					p.styledButton(c, text.Episodes, "following", playerPanelExit, playerPanelGroup,
@@ -381,12 +399,21 @@ func (p *PageContext) playbackDrawer(c *ui.Context, current playbackItem) {
 						}).Margin(8, 0, 0, 0)
 					ui.Row(c).FillWidth().Margin(30, 0, 4, 0).AlignItems(ui.Baseline).Justify(ui.SpaceBetween).Children(func() {
 						ui.Text(c, text.Episodes).FontSize(24).TextColor(paint(colors.Text.Secondary))
-						ui.Text(c, fmt.Sprintf("%d / %d", min(max(1, s.index+1), len(s.items)), len(s.items))).FontSize(17).
-							TextColor(paint(colors.Text.Muted))
+						total := len(s.items) + len(upcoming)
+						if len(upcoming) > 0 {
+							ui.Text(c, fmt.Sprintf("%d / %d", len(s.items), total)).FontSize(17).
+								TextColor(paint(colors.Text.Muted))
+						} else {
+							ui.Text(c, fmt.Sprintf("%d / %d", min(max(1, s.index+1), len(s.items)), len(s.items))).FontSize(17).
+								TextColor(paint(colors.Text.Muted))
+						}
 					})
 					ui.Column(c).FillWidth().Gap(16).Children(func() {
 						for i, row := range s.items {
 							p.playbackEpisodeRow(c, row, i)
+						}
+						for i, seg := range upcoming {
+							p.playbackUpcomingRow(c, seg, len(s.items)+i)
 						}
 					})
 				}
@@ -412,8 +439,8 @@ func (p *PageContext) playbackEpisodeRow(c *ui.Context, row playbackItem, index 
 	if focused {
 		fill, ink, meta = paint(colors.Focus.Background), paint(colors.Focus.Foreground), d.focusSubtext
 	}
-	button := ui.Button(c.Key(string(id)), "").Label(number+" "+title).FillWidth().Height(80).Radius(13).
-		Padding(0, 20).Background(fill).Border(1, d.subtleBorder).
+	button := ui.Button(c.Key(string(id)), "").Label(number+" "+title).FillWidth().MinHeight(80).Radius(13).
+		Padding(14, 20).Background(fill).Border(1, d.subtleBorder).
 		AccessSelected(selected).OnClick(func() {
 		p.dispatch(func() {
 			if !selected {
@@ -426,9 +453,34 @@ func (p *PageContext) playbackEpisodeRow(c *ui.Context, row playbackItem, index 
 	button.Children(func() {
 		ui.Row(c).FillWidth().Gap(17).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, number).FontSize(25).FontWeight(450).TextColor(meta)
-			ui.Text(c, title).Grow(1).Shrink(1).FontSize(20).MaxLines(1).TextColor(ink)
+			ui.Column(c).Grow(1).Shrink(1).Gap(4).Children(func() {
+				ui.Text(c, title).FillWidth().FontSize(20).MaxLines(1).TextColor(ink)
+				if row.status != "" {
+					ui.Text(c, row.status).FillWidth().FontSize(14).MaxLines(1).TextColor(meta)
+				}
+			})
 			ui.Icon(c, p.Assets.Icon(icon)).Size(21, 21).TextColor(meta)
 		})
+	})
+}
+
+func (p *PageContext) playbackUpcomingRow(c *ui.Context, segment provider.VideoSegment, index int) {
+	colors, d := p.Theme.Colors, p.uiColors()
+	number := fmt.Sprintf("%02d", index+1)
+	status := segment.Status
+	if status == "" {
+		status = p.Assets.Text.Detail.EpisodeUpcoming
+	}
+	muted := withAlpha(colors.Text.Muted, 0xaa)
+	ui.Row(c.Key(fmt.Sprintf("player/upcoming/%d", index))).FillWidth().MinHeight(80).Radius(13).
+		Padding(14, 20).Gap(17).AlignItems(ui.Center).
+		Background(withAlpha(colors.Surface.Raised, 0x55)).Border(1, d.subtleBorder).IgnoreInput(true).Children(func() {
+		ui.Text(c, number).FontSize(25).FontWeight(450).TextColor(muted)
+		ui.Column(c).Grow(1).Shrink(1).Gap(4).Children(func() {
+			ui.Text(c, segment.Title).FillWidth().FontSize(20).MaxLines(1).TextColor(muted)
+			ui.Text(c, status).FillWidth().FontSize(14).MaxLines(1).TextColor(muted)
+		})
+		ui.Icon(c, p.Assets.Icon("lock")).Size(21, 21).TextColor(muted)
 	})
 }
 

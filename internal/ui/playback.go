@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +43,7 @@ type playbackItem struct {
 	item   provider.MediaItem
 	partID string
 	label  string
+	status string
 }
 
 type playbackView struct {
@@ -103,7 +105,18 @@ func (p *PageContext) canPlay(ref provider.MediaRef) bool {
 }
 
 func (p *PageContext) startDetailPlayback(item provider.MediaItem, start *float64) {
-	items, selected := playbackEpisodes(item, nil, "", p.host.videoDetail.part)
+	partID := ""
+	fallback := 0
+	if p.host.videoDetail.item.Ref == item.Ref {
+		fallback = p.host.videoDetail.part
+		if idx := p.host.videoDetail.episodeIndex(); idx >= 0 {
+			episodes := videoEpisodes(item.VideoDetails)
+			if idx < len(episodes) && !episodes[idx].Unavailable {
+				partID = episodes[idx].PartID
+			}
+		}
+	}
+	items, selected := playbackEpisodes(item, nil, partID, fallback)
 	p.openPlayback(items, selected, false, start)
 }
 
@@ -117,10 +130,10 @@ func playbackEpisodes(item provider.MediaItem, segments []provider.VideoSegment,
 	items := make([]playbackItem, 0, len(segments))
 	selected := -1
 	for _, segment := range segments {
-		if segment.Ref == nil && segment.PartID == "" {
+		if segment.Unavailable || segment.Ref == nil && segment.PartID == "" {
 			continue
 		}
-		row := playbackItem{item: item, partID: segment.PartID, label: segment.Title}
+		row := playbackItem{item: item, partID: segment.PartID, label: segment.Title, status: segment.Status}
 		if segment.Ref != nil && *segment.Ref != item.Ref {
 			row.item = provider.MediaItem{Ref: *segment.Ref, Title: segment.Title, DurationSeconds: segment.DurationSeconds}
 		}
@@ -183,9 +196,17 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 	s.resetNetworkSpeed()
 	item, part := s.items[index].item, s.items[index].partID
 	if !s.keepQueue && v.videoDetail.item.Ref == item.Ref &&
-		v.videoDetail.item.VideoDetails != nil && v.videoDetail.item.VideoDetails.SegmentKind == provider.VideoParts &&
-		index < len(videoEpisodes(v.videoDetail.item.VideoDetails)) {
-		v.videoDetail.part = index
+		v.videoDetail.item.VideoDetails != nil && v.videoDetail.item.VideoDetails.SegmentKind == provider.VideoParts {
+		episodes := videoEpisodes(v.videoDetail.item.VideoDetails)
+		if part != "" {
+			if idx := slices.IndexFunc(episodes, func(seg provider.VideoSegment) bool {
+				return !seg.Unavailable && seg.PartID == part
+			}); idx >= 0 {
+				v.videoDetail.part = idx
+			}
+		} else if index < len(episodes) && !episodes[index].Unavailable {
+			v.videoDetail.part = index
+		}
 	}
 	s.discussion.seed, s.discussion.item = item, item
 	owner := v.Auth.Accounts().CurrentID
@@ -204,7 +225,12 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 		}
 		s.metadata = nil
 		if err == nil {
-			s.items[s.index].item, s.discussion.item = metadata, metadata
+			for i := range s.items {
+				if s.items[i].item.Ref == metadata.Ref {
+					s.items[i].item = metadata
+				}
+			}
+			s.discussion.item = metadata
 		}
 	})
 }

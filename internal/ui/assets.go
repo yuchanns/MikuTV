@@ -61,7 +61,7 @@ type seriesLabels struct {
 	Reset, Results, WorksCount, RatingSuffix                    string
 	NoFilterResults, NoFilterNote                               string
 	Today, MonthSuffix, Scheduled, NoUpdates, NoUpdatesNote     string
-	Track, Tracked, TrackPending, PlayPending                   string
+	Track, Tracked, TrackPending                                string
 	Loading, LoadFailed, MoreFailed                             string
 	Weekdays                                                    []string
 }
@@ -119,7 +119,8 @@ type detailLabels struct {
 	Hot, Latest, AllComments, RootComment, AllReplies, ReplyCount, MoreReplies             string
 	CommentPlaceholder, ReplyTo, CreatorMark, Pinned, Dislike, EditComment                 string
 	PostComment, CommentInput, CommentPosted, CommentLoadFailed, Done, KeyboardPlaceholder string
-	MinutesAgo, HoursAgo, DaysAgo, JustNow, Kicker                                         string
+	MinutesAgo, HoursAgo, DaysAgo, JustNow, Kicker, SeriesKicker                           string
+	SeriesUnit, EpisodeUpcoming, EpisodeUpcomingNotice                                     string
 }
 
 type homeLabels struct {

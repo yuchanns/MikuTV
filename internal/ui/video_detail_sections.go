@@ -225,6 +225,9 @@ func (p *PageContext) videoDetailAbout(c *ui.Context, detail *videoDetailState, 
 			segment := provider.VideoSegment{Title: item.Title, DurationSeconds: item.DurationSeconds}
 			if index := detail.episodeIndex(); index >= 0 {
 				label, segment = text.Collection, videoEpisodes(item.VideoDetails)[index]
+				if item.Ref.Kind == provider.Series {
+					label = text.SeriesUnit
+				}
 			}
 			ui.Text(c, label).FontSize(13).LetterSpacing(3).LineHeight(1.8).TextColor(paint(colors.Text.Muted))
 			p.videoDetailText(c, segment.Title).MaxLines(1)
@@ -243,6 +246,25 @@ func videoEpisodes(info *provider.VideoDetails) []provider.VideoSegment {
 	return nil
 }
 
+func firstPlayableEpisode(episodes []provider.VideoSegment) int {
+	for i, ep := range episodes {
+		if !ep.Unavailable {
+			return i
+		}
+	}
+	return 0
+}
+
+func playableEpisodeCount(episodes []provider.VideoSegment) int {
+	n := 0
+	for _, ep := range episodes {
+		if !ep.Unavailable {
+			n++
+		}
+	}
+	return n
+}
+
 func (d *videoDetailState) episodeIndex() int {
 	info := d.item.VideoDetails
 	episodes := videoEpisodes(info)
@@ -250,7 +272,11 @@ func (d *videoDetailState) episodeIndex() int {
 		return -1
 	}
 	if info.SegmentKind == provider.VideoParts {
-		return min(d.part, len(episodes)-1)
+		idx := min(max(0, d.part), len(episodes)-1)
+		if episodes[idx].Unavailable {
+			return firstPlayableEpisode(episodes)
+		}
+		return idx
 	}
 	return slices.IndexFunc(episodes, func(episode provider.VideoSegment) bool {
 		return episode.Ref != nil && *episode.Ref == d.item.Ref
@@ -277,8 +303,13 @@ func (p *PageContext) videoDetailSegments(c *ui.Context, detail *videoDetailStat
 	ui.Row(c).FillWidth().AlignItems(ui.Baseline).Margin(25, 0).Children(func() {
 		ui.Text(c, text.Collection).FontSize(24).TextColor(paint(colors.Text.Secondary))
 		ui.Spacer(c).Grow(1)
-		count := len(episodes)
-		ui.Text(c, fmt.Sprintf("%d / %d", min(max(1, current+1), count), count)).FontSize(17).TextColor(paint(colors.Text.Muted))
+		total := len(episodes)
+		playable := playableEpisodeCount(episodes)
+		if playable < total {
+			ui.Text(c, fmt.Sprintf("%d / %d", playable, total)).FontSize(17).TextColor(paint(colors.Text.Muted))
+		} else {
+			ui.Text(c, fmt.Sprintf("%d / %d", min(max(1, current+1), total), total)).FontSize(17).TextColor(paint(colors.Text.Muted))
+		}
 	})
 	const columns = 4
 	width := (p.Width - 2*videoDetailInset - 48) / columns
@@ -308,28 +339,50 @@ func videoSegmentFocus(index int) app.FocusID {
 }
 
 func (p *PageContext) videoEpisode(c *ui.Context, detail *videoDetailState, segment provider.VideoSegment, index int, selected bool, width float32) {
-	colors, d := p.Theme.Colors, p.uiColors()
+	colors, d, text := p.Theme.Colors, p.uiColors(), p.Assets.Text.Detail
 	id := videoSegmentFocus(index)
 	focused := p.State.Focus == id
+	unavailable := segment.Unavailable
 	background, foreground := d.subtleFill, paint(colors.Text.Secondary)
-	number, icon := paint(colors.Text.Muted), paint(colors.Text.Muted)
+	number, icon, subInk := paint(colors.Text.Muted), paint(colors.Text.Muted), paint(colors.Text.Muted)
 	glyph := "detail/play"
-	if selected {
+	status := segment.Status
+	if unavailable {
+		selected = false
+		glyph = "lock"
+		background = withAlpha(colors.Surface.Raised, 0x55)
+		foreground = paint(colors.Text.Muted)
+		number = withAlpha(colors.Text.Muted, 0x99)
+		icon = withAlpha(colors.Text.Muted, 0x99)
+		subInk = withAlpha(colors.Text.Muted, 0x99)
+		if status == "" {
+			status = text.EpisodeUpcoming
+		}
+	} else if selected {
 		glyph, icon = "check", paint(colors.Accent.Soft)
 	}
 	if focused {
 		background, foreground = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
-		number, icon = d.focusSubtext, d.focusSubtext
+		number, icon, subInk = d.focusSubtext, d.focusSubtext, d.focusSubtext
 	}
 	ordinal := fmt.Sprintf("%02d", index+1)
 	e := ui.Button(c.Key(string(id)), "").Label(ordinal+" "+segment.Title).
-		Width(width).MinHeight(77).Padding(22).Center().Radius(13).Border(1, d.subtleBorder).AccessSelected(selected).
+		Width(width).MinHeight(82).Padding(18, 22).Center().Radius(13).Border(1, d.subtleBorder).AccessSelected(selected).
 		OnClick(func() {
+			if unavailable {
+				p.dispatch(func() {
+					detail.feedback = videoDetailFeedback{text: text.EpisodeUpcomingNotice}
+				})
+				return
+			}
 			if detail.item.VideoDetails.SegmentKind == provider.VideoParts {
 				p.dispatch(func() {
 					detail.part = index
 					if p.host.Trace {
 						log.Printf("video detail part: selected=%d", index+1)
+					}
+					if detail.item.Ref.Kind == provider.Series && p.canPlay(detail.item.Ref) {
+						p.startDetailPlayback(detail.item, nil)
 					}
 				})
 			} else if segment.Ref != nil && *segment.Ref != detail.item.Ref {
@@ -344,8 +397,13 @@ func (p *PageContext) videoEpisode(c *ui.Context, detail *videoDetailState, segm
 	e.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(17).Children(func() {
 			ui.Text(c, ordinal).FontSize(25).FontWeight(450).Shrink(0).TextColor(number)
-			ui.Text(c, segment.Title).Grow(1).Shrink(1).FontSize(22).FontWeight(400).Margin(5, 0, 0, 0).
-				TextColor(foreground)
+			ui.Column(c).Grow(1).Shrink(1).Gap(4).Children(func() {
+				ui.Text(c, segment.Title).FillWidth().FontSize(21).FontWeight(400).MaxLines(1).
+					TextColor(foreground)
+				if status != "" {
+					ui.Text(c, status).FillWidth().FontSize(14).MaxLines(1).TextColor(subInk)
+				}
+			})
 			ui.Icon(c, p.Assets.Icon(glyph)).Size(21, 21).Shrink(0).TextColor(icon)
 		})
 	})

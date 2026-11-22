@@ -179,7 +179,7 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 		}
 	}
 	for _, segment := range plan.Episodes {
-		if segment.Ref == nil && segment.PartID == "" || len(segment.PartID) > 512 {
+		if !segment.Unavailable && segment.Ref == nil && segment.PartID == "" || len(segment.PartID) > 512 {
 			return false
 		}
 	}

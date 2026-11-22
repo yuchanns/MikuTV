@@ -116,6 +116,8 @@ type VideoSegment struct {
 	Ref             *MediaRef `json:"ref,omitempty"`
 	PartID          string    `json:"partID,omitempty"`
 	StartSeconds    int64     `json:"startSeconds,omitempty"`
+	Unavailable     bool      `json:"unavailable,omitempty"`
+	Status          string    `json:"status,omitempty"`
 }
 
 type VideoComment struct {

@@ -487,7 +487,11 @@ func (p *PageContext) seriesHero(c *ui.Context, hero provider.SeriesEntry) {
 					background: d.secondaryFill, foreground: d.secondaryText, border: d.secondaryBorder,
 				}
 				p.styledButton(c, text.Home.Play, "play", seriesHeroPlayFocus, seriesHeroRegion, func() {
-					p.host.notice = text.Series.PlayPending
+					if p.canPlay(hero.Item.Ref) {
+						p.startDetailPlayback(hero.Item, nil)
+					} else {
+						p.openVideoDetail(hero.Item)
+					}
 				}, primaryStyle)
 				p.styledButton(c, text.Home.Details, "info", seriesHeroDetailFocus, seriesHeroRegion, func() {
 					p.openVideoDetail(hero.Item)

@@ -172,7 +172,7 @@ func (s *Session) ownVideoSections(detail *provider.VideoDetails) error {
 		return &provider.Error{Code: provider.PluginFailed}
 	}
 	for _, segment := range detail.Segments {
-		if strings.TrimSpace(segment.Title) == "" || segment.StartSeconds < 0 ||
+		if strings.TrimSpace(segment.Title) == "" || segment.StartSeconds < 0 || len(segment.Status) > 128 ||
 			segment.DurationSeconds != nil && *segment.DurationSeconds < 0 {
 			return &provider.Error{Code: provider.PluginFailed}
 		}

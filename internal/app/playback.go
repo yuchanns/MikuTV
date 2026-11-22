@@ -397,6 +397,9 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 		return
 	}
 	if plan.Access == provider.VideoAccessRestricted {
+		if plan.PartID != "" {
+			p.state.Target.PartID = plan.PartID
+		}
 		p.state.Resolution = result
 		p.state.Revision++
 		if p.state.Limit == "" {

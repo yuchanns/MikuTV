@@ -2,22 +2,27 @@ package tvui
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/player"
 	"github.com/yuchanns/MikuTV/internal/provider"
 	"github.com/yuchanns/MikuTV/internal/theme"
 )
 
 type uiSeriesSession struct {
-	mu       sync.Mutex
-	calls    []provider.SeriesRequest
-	detail   map[string]provider.MediaItem
-	hub      provider.SeriesPage
-	index    provider.SeriesPage
-	calendar provider.SeriesPage
+	mu          sync.Mutex
+	calls       []provider.SeriesRequest
+	playCalls   []provider.PlaybackRequest
+	detail      map[string]provider.MediaItem
+	plans       map[string]provider.PlaybackPlan
+	hub         provider.SeriesPage
+	index       provider.SeriesPage
+	calendar    provider.SeriesPage
 }
 
 func (s *uiSeriesSession) Browse(context.Context, provider.BrowseRequest) (provider.CollectionPage, error) {
@@ -49,6 +54,30 @@ func (s *uiSeriesSession) ReadSeries(_ context.Context, req provider.SeriesReque
 	default:
 		return s.hub, nil
 	}
+}
+
+func (s *uiSeriesSession) ResolvePlayback(_ context.Context, req provider.PlaybackRequest) (provider.Playback, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.playCalls = append(s.playCalls, req)
+	key := req.Ref.ID + ":" + req.PartID
+	plan, ok := s.plans[key]
+	if !ok {
+		plan, ok = s.plans[req.Ref.ID]
+	}
+	if !ok {
+		return provider.Playback{}, &provider.Error{Code: provider.Expired}
+	}
+	return provider.Playback{
+		Plan:      plan,
+		Transport: fakeMediaTransport{},
+	}, nil
+}
+
+type fakeMediaTransport struct{}
+
+func (fakeMediaTransport) OpenResource(_ context.Context, _ provider.PlaybackResource, _, _ string) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
 }
 
 func (s *uiSeriesSession) Close() {}
@@ -237,5 +266,203 @@ func TestSeriesHubIndexFilterModalCalendarAndDetailNavigation(t *testing.T) {
 	tester.Frame()
 	if state.Page != app.SeriesCalendar || state.Focus != showFocus {
 		t.Fatalf("expected Back from calendar detail to restore row focus, got page=%s focus=%q", state.Page, state.Focus)
+	}
+}
+
+func TestSeriesPlaybackHeroEpisodesUpcomingAndAccessStates(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := app.Entry{
+		ID: "sample-source", SourceID: "sample-source", Name: "SampleSource",
+		Capabilities: provider.Capabilities{
+			provider.BrowseCatalog, provider.GetCatalogItem, provider.BrowseSeries, provider.ResolvePlayback,
+		},
+	}
+	state, err := app.NewState([]app.Entry{entry}, entry.ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := provider.MediaRef{EntryID: entry.ID, Kind: provider.Series, ID: "ss47836"}
+	dur1, dur2 := int64(1440), int64(1450)
+	segments := []provider.VideoSegment{
+		{Title: "Opening", PartID: "cid-1", DurationSeconds: &dur1},
+		{Title: "Training", PartID: "cid-2", DurationSeconds: &dur2, Status: "VIP"},
+		{Title: "EP 3", Unavailable: true, Status: "Upcoming"},
+	}
+	directStream := provider.PlaybackStream{
+		Format: provider.PlaybackDirect,
+		Video:  provider.PlaybackTrack{Resource: provider.PlaybackResource{URLs: []string{"https://example.test/ep.mp4"}}, ContentType: "video/mp4"},
+	}
+	hero := provider.SeriesEntry{
+		Item: provider.MediaItem{Ref: ref, Title: "Demon Blade Arc", Category: "Anime"},
+		Badge: "2 / 3", Score: "9.7", Status: "Updated to EP 2",
+	}
+	sess := &uiSeriesSession{
+		hub: provider.SeriesPage{
+			Genres:           []provider.SeriesFilterOption{{Value: "", Label: "All"}},
+			Hero:             &hero,
+			Items:            []provider.SeriesEntry{hero},
+			SupportsIndex:    true,
+			SupportsCalendar: true,
+		},
+		detail: map[string]provider.MediaItem{
+			"ss47836": {
+				Ref: ref, Title: "Demon Blade Arc", Subtitle: "Full synopsis.", Category: "Anime",
+				DurationSeconds: &dur1,
+				VideoDetails: &provider.VideoDetails{
+					Access:      provider.VideoAccessGranted,
+					SegmentKind: provider.VideoParts,
+					Segments:    segments,
+				},
+			},
+		},
+		plans: map[string]provider.PlaybackPlan{
+			"ss47836:": {
+				ItemID: "aid-1", PartID: "cid-1", Duration: 1440,
+				Access: provider.VideoAccessGranted, Streams: []provider.PlaybackStream{directStream},
+				Episodes: segments,
+			},
+			"ss47836:cid-1": {
+				ItemID: "aid-1", PartID: "cid-1", Duration: 1440,
+				Access: provider.VideoAccessGranted, Streams: []provider.PlaybackStream{directStream},
+				Episodes: segments,
+			},
+			"ss47836:cid-2": {
+				ItemID: "aid-2", PartID: "cid-2", Duration: 180,
+				Access: provider.VideoAccessPreview, PreviewRestriction: provider.PlaybackMembership,
+				Streams: []provider.PlaybackStream{directStream},
+				Episodes: segments,
+			},
+		},
+	}
+
+	queue := make(chan func(), 64)
+	post := func(fn func()) { queue <- fn }
+	drainOne := func() {
+		select {
+		case fn := <-queue:
+			fn()
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for async delivery")
+		}
+	}
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+
+	catalog := app.NewCatalog(func(string) provider.Session { return sess }, post, func() {})
+	t.Cleanup(catalog.Close)
+	series := app.NewSeriesCatalog(post, func() {})
+	t.Cleanup(series.Close)
+
+	clock := player.Status{HasFrame: true, Duration: 1440}
+	playback := app.NewPlayback(catalog, player.Engine{
+		Open:     func(string, float64) bool { return true },
+		Snapshot: func() player.Status { return clock },
+	}, nil, post, func() {})
+	t.Cleanup(playback.Close)
+
+	view := newTestView(t, Options{
+		State: state, Catalog: catalog, Series: series,
+		Pages: pages, Assets: assets, Theme: theme.Default(),
+	})
+	view.Playback = playback
+	view.SyncEntry()
+	drain()
+
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	if !state.Navigate(app.Route{Page: app.Series}) {
+		t.Fatal("failed to navigate to Series")
+	}
+	view.SyncEntry()
+	for !series.Hub().Loaded {
+		drainOne()
+	}
+	drain()
+	tester.Frame()
+
+	// 1. Direct play from Series Hub Hero opens Player and hydrates playable episodes (skipping upcoming EP 3).
+	state.Focus = seriesHeroPlayFocus
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	for playback.State().Loading {
+		drainOne()
+	}
+	drain()
+	tester.Frame()
+	if state.Page != app.Player || len(view.player.items) != 2 || view.player.index != 0 || playback.State().Target.PartID != "cid-1" {
+		t.Fatalf("expected Player at ep 1 with 2 playable episodes, got page=%s items=%d idx=%d part=%q",
+			state.Page, len(view.player.items), view.player.index, playback.State().Target.PartID)
+	}
+
+	// 2. Next switches ep 1 -> ep 2 (VIP preview -> frameless PreviewPending overlay).
+	view.startPlaybackItem(1, nil)
+	for playback.State().Loading {
+		drainOne()
+	}
+	drain()
+	tester.Frame()
+	if view.player.index != 1 || !playback.State().PreviewPending || !view.player.accessVisible {
+		t.Fatalf("expected ep 2 VIP preview overlay, got idx=%d pending=%t accessVisible=%t",
+			view.player.index, playback.State().PreviewPending, view.player.accessVisible)
+	}
+
+	// 3. Back from PreviewPending returns cleanly to Series Hero focus.
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if state.Page != app.Series || state.Focus != seriesHeroPlayFocus {
+		t.Fatalf("expected Back from preview to restore Series Hero play focus, got page=%s focus=%q", state.Page, state.Focus)
+	}
+
+	// 4. Open Series Detail -> Episodes tab: clicking upcoming EP 3 shows notice; clicking EP 2 plays directly.
+	state.Focus = seriesHeroDetailFocus
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	for view.videoDetail.loading {
+		drainOne()
+	}
+	drain()
+	tester.Frame()
+	if state.Page != app.VideoDetail || view.videoDetail.item.Ref != ref {
+		t.Fatalf("expected VideoDetail for ss47836, got page=%s ref=%+v", state.Page, view.videoDetail.item.Ref)
+	}
+	view.videoDetail.tab = videoDetailEpisodes
+	tester.Frame()
+
+	// Click upcoming EP 3 -> stays on VideoDetail with EpisodeUpcomingNotice feedback toast.
+	state.Focus = videoSegmentFocus(2)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.VideoDetail || view.videoDetail.feedback.text != assets.Text.Detail.EpisodeUpcomingNotice {
+		t.Fatalf("expected upcoming episode click to show feedback without opening player, got page=%s feedback=%q", state.Page, view.videoDetail.feedback.text)
+	}
+
+	// Click playable EP 2 -> sets detail.part=1 and opens Player at cid-2.
+	state.Focus = videoSegmentFocus(1)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	for playback.State().Loading {
+		drainOne()
+	}
+	drain()
+	tester.Frame()
+	if state.Page != app.Player || view.videoDetail.part != 1 || playback.State().Target.PartID != "cid-2" || !playback.State().PreviewPending {
+		t.Fatalf("expected clicking ep 2 on Series detail to play cid-2 preview, got page=%s part=%d targetPart=%q pending=%t",
+			state.Page, view.videoDetail.part, playback.State().Target.PartID, playback.State().PreviewPending)
 	}
 }
