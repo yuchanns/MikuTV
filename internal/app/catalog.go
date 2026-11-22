@@ -81,6 +81,11 @@ func (c *Catalog) SearchSuggester() provider.CatalogSearchSuggester {
 	return suggester
 }
 
+func (c *Catalog) FollowingReader() provider.FollowingReader {
+	reader, _ := c.session.(provider.FollowingReader)
+	return reader
+}
+
 func (c *Catalog) ReadItem(ref provider.MediaRef, accept func(provider.MediaItem, error)) context.CancelFunc {
 	if c.session == nil {
 		accept(provider.MediaItem{}, &provider.Error{Code: provider.Unsupported})

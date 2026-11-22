@@ -31,9 +31,20 @@ type labels struct {
 	Activity                                                              accountActivityLabels
 	Home                                                                  homeLabels
 	Search                                                                searchLabels
+	Following                                                             followingLabels
 	Creator                                                               creatorLabels
 	Detail                                                                detailLabels
 	Playback                                                              playbackLabels
+}
+
+type followingLabels struct {
+	Eyebrow, Title, Subtitle                        string
+	TabAll, TabLive                                 string
+	UpdatesTitle, LiveTitle, LiveNote, LiveBadge    string
+	GuestTitle, GuestNote                           string
+	EmptyCreatorsTitle, EmptyCreatorsNote           string
+	EmptyUpdates, EmptyLive                         string
+	Loading, LoadFailed, MoreFailed                 string
 }
 
 type creatorLabels struct {

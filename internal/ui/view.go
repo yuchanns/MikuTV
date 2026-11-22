@@ -46,6 +46,7 @@ type Options struct {
 	State       *app.State
 	Catalog     *app.Catalog
 	Search      *app.CatalogSearch
+	Following   *app.FollowingFeed
 	Auth        *app.Auth
 	Activity    *app.AccountActivity
 	Pages       *Pages
@@ -59,6 +60,7 @@ type View struct {
 	State           *app.State
 	Catalog         *app.Catalog
 	Search          *app.CatalogSearch
+	Following       *app.FollowingFeed
 	Auth            *app.Auth
 	Activity        *app.AccountActivity
 	Playback        *app.Playback
@@ -89,6 +91,7 @@ type View struct {
 	homeStates      map[string]catalogHome
 	entryGeneration uint64
 	search           searchViewState
+	following        followingViewState
 	videoDetail      videoDetailState
 	videoDetailStack []videoDetailState
 	creator          *creatorState
@@ -104,7 +107,7 @@ type View struct {
 
 func NewView(options Options) *View {
 	v := &View{
-		State: options.State, Catalog: options.Catalog, Search: options.Search, Auth: options.Auth, Activity: options.Activity,
+		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Auth: options.Auth, Activity: options.Activity,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Version: options.Version, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}
@@ -436,6 +439,15 @@ func (v *View) SyncAccountActivity() {
 		}
 		if v.Search.Bind(entry, owner, searcher, suggester) {
 			v.search = searchViewState{}
+		}
+	}
+	if v.Following != nil {
+		var reader provider.FollowingReader
+		if v.Catalog != nil {
+			reader = v.Catalog.FollowingReader()
+		}
+		if v.Following.Bind(entry, owner, reader) {
+			v.following = followingViewState{}
 		}
 	}
 	if sync := v.Pages.components[v.State.Route].Sync; sync != nil {

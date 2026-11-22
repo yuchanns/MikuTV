@@ -127,6 +127,9 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 	if manifest.Capabilities.Has(provider.BrowseLibrary) && !manifest.Capabilities.Has(provider.SignIn) {
 		return sourceManifest{}, fmt.Errorf("%w: %s requires sign-in", ErrIncompatible, provider.BrowseLibrary)
 	}
+	if manifest.Capabilities.Has(provider.BrowseFollowing) && !manifest.Capabilities.Has(provider.SignIn) {
+		return sourceManifest{}, fmt.Errorf("%w: %s requires sign-in", ErrIncompatible, provider.BrowseFollowing)
+	}
 	for _, section := range []provider.AccountSection{provider.AccountHistory, provider.AccountWatchLater, provider.AccountFavorites, provider.AccountTracking, provider.AccountCourses, provider.AccountNotifications} {
 		if manifest.Capabilities.Has(section.Capability()) && !manifest.Capabilities.Has(provider.SignIn) {
 			return sourceManifest{}, fmt.Errorf("%w: %s requires sign-in", ErrIncompatible, section.Capability())

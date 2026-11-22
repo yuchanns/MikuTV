@@ -112,6 +112,21 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	search.Leave = func(v *View) {
 		v.search.editing = false
 	}
+	following := content(app.Following, provider.BrowseFollowing)
+	following.Component, following.Sync = followingPage{}, syncFollowing
+	following.RawScreen = true
+	following.Policy.ExitFocus = app.RailFocus(app.Following)
+	following.Back = (*View).backFromFollowing
+	following.AfterMove = func(v *View, direction app.Direction, group string, next app.FocusID) {
+		if (direction == app.Left || direction == app.Right) && group == followingHeaderRegion {
+			switch next {
+			case followingTabAll:
+				v.showFollowingTab(followingViewAll)
+			case followingTabLive:
+				v.showFollowingTab(followingViewLive)
+			}
+		}
+	}
 	registrations := []Registration{
 		home,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.HomeAction}, Parent: app.Route{Page: app.Home},
@@ -162,7 +177,16 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Initial: focus(searchFilterSortFocus(provider.SearchSortDefault)), RequiresEntry: true, Capability: provider.SearchCatalog, Modal: true},
 			Component: searchFiltersPage{}, ModalWidth: 840, ModalHeight: 498,
 			ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
-		content(app.Following, provider.BrowseFollowing),
+		following,
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.FollowingAll}, Parent: app.Route{Page: app.Following},
+			Initial: focus(app.CloseModal), RequiresEntry: true, Capability: provider.BrowseFollowing, Modal: true},
+			Component: followingAllPage{}, ModalWidth: 990, ModalHeight: 680,
+			Leave: func(v *View) {
+				if v.State.Page != app.VideoDetail {
+					v.following.allSection = ""
+					v.following.allList = ui.ListState{}
+				}
+			}},
 		content(app.Series, provider.BrowseSeries),
 		content(app.Live, provider.BrowseLive),
 		library,

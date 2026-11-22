@@ -62,6 +62,10 @@ func newTestView(t *testing.T, options Options) *View {
 		options.Search = app.NewCatalogSearch(nil, post, changed)
 		t.Cleanup(options.Search.Close)
 	}
+	if options.Following == nil {
+		options.Following = app.NewFollowingFeed(post, changed)
+		t.Cleanup(options.Following.Close)
+	}
 	return NewView(options)
 }
 

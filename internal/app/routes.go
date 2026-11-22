@@ -20,6 +20,7 @@ const (
 	Search              Page = "search"
 	SearchFilters       Page = "searchFilters"
 	Following           Page = "following"
+	FollowingAll        Page = "followingAll"
 	Series              Page = "series"
 	Live                Page = "live"
 	Library             Page = "library"

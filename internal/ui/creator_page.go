@@ -528,7 +528,7 @@ func (p *PageContext) performCreatorFollow(state *creatorState, enabled bool) {
 			state.feedback = videoDetailFeedback{text: p.videoOperationError(err, text.UpdateFailed)}
 			return
 		}
-		p.host.syncCreatorFollowing(state.seed.ID, result.Following)
+		p.host.syncCreatorFollowing(state.profile.Creator, result.Following)
 		if result.Following {
 			state.feedback = videoDetailFeedback{text: text.Followed}
 		} else {
@@ -537,7 +537,8 @@ func (p *PageContext) performCreatorFollow(state *creatorState, enabled bool) {
 	})
 }
 
-func (v *View) syncCreatorFollowing(creatorID string, following bool) {
+func (v *View) syncCreatorFollowing(creator provider.Creator, following bool) {
+	creatorID := creator.ID
 	if creatorID == "" {
 		return
 	}
@@ -570,6 +571,9 @@ func (v *View) syncCreatorFollowing(creatorID string, following bool) {
 	updateDetail(&v.videoDetail)
 	for i := range v.videoDetailStack {
 		updateDetail(&v.videoDetailStack[i])
+	}
+	if v.Following != nil {
+		v.Following.SyncFollow(creator, following)
 	}
 }
 
