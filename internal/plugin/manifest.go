@@ -144,6 +144,17 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 	if manifest.Capabilities.Has(provider.EditNotifications) && !manifest.Capabilities.Has(provider.AccountNotifications.Capability()) {
 		return sourceManifest{}, fmt.Errorf("%w: %s requires %s", ErrIncompatible, provider.EditNotifications, provider.AccountNotifications.Capability())
 	}
+	if manifest.Capabilities.Has(provider.ReadPrivateMessages) && !manifest.Capabilities.Has(provider.SignIn) {
+		return sourceManifest{}, fmt.Errorf("%w: %s requires sign-in", ErrIncompatible, provider.ReadPrivateMessages)
+	}
+	if manifest.Capabilities.Has(provider.WritePrivateMessages) {
+		if !manifest.Capabilities.Has(provider.ReadPrivateMessages) {
+			return sourceManifest{}, fmt.Errorf("%w: %s requires %s", ErrIncompatible, provider.WritePrivateMessages, provider.ReadPrivateMessages)
+		}
+		if !manifest.Capabilities.Has(provider.SignIn) {
+			return sourceManifest{}, fmt.Errorf("%w: %s requires sign-in", ErrIncompatible, provider.WritePrivateMessages)
+		}
+	}
 	if manifest.Capabilities.Has(provider.SearchSuggest) && !manifest.Capabilities.Has(provider.SearchCatalog) {
 		return sourceManifest{}, fmt.Errorf("%w: %s requires %s", ErrIncompatible, provider.SearchSuggest, provider.SearchCatalog)
 	}

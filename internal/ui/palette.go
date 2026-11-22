@@ -74,9 +74,12 @@ type uiColors struct {
 	avatarStart     ui.Color
 	avatarEnd       ui.Color
 	avatarBorder    ui.Color
-	accountCardFrom ui.Color
-	accountCardTo   ui.Color
-	profileGlow     ui.Color
+	accountCardFrom     ui.Color
+	accountCardTo       ui.Color
+	profileGlow         ui.Color
+	privateOwnBubble    ui.Color
+	privateOwnBorder    ui.Color
+	privateSelectedFill ui.Color
 }
 
 func deriveColors(t theme.Theme) uiColors {
@@ -141,9 +144,12 @@ func deriveColors(t theme.Theme) uiColors {
 		avatarStart:     paint(theme.Blend(c.Surface.Raised, c.Text.Secondary, 0.32)),
 		avatarEnd:       paint(theme.Blend(c.Surface.Panel, c.Surface.Raised, 0.65)),
 		avatarBorder:    withAlpha(c.Text.Secondary, 0x45),
-		accountCardFrom: paint(theme.Blend(c.Decoration.CardStart, c.Surface.Raised, 0.22)),
-		accountCardTo:   paint(theme.Blend(c.Decoration.CardEnd, c.Surface.Panel, 0.35)),
-		profileGlow:     withAlpha(c.Decoration.Ambient, 0x28),
+		accountCardFrom:     paint(theme.Blend(c.Decoration.CardStart, c.Surface.Raised, 0.22)),
+		accountCardTo:       paint(theme.Blend(c.Decoration.CardEnd, c.Surface.Panel, 0.35)),
+		profileGlow:         withAlpha(c.Decoration.Ambient, 0x28),
+		privateOwnBubble:    paint(theme.Blend(c.Surface.Panel, c.Accent.Primary, 0.22)),
+		privateOwnBorder:    withAlpha(c.Accent.Primary, 0x38),
+		privateSelectedFill: withAlpha(c.Accent.Primary, 0x14),
 	}
 }
 

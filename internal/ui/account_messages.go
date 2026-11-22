@@ -10,6 +10,7 @@ import (
 
 const (
 	noticeTab         app.FocusID = "messages/tab/notifications"
+	privateTab        app.FocusID = "messages/tab/private"
 	noticeReadAll     app.FocusID = "messages/read-all"
 	noticeStatus      app.FocusID = "messages/status"
 	noticeOpenTarget  app.FocusID = "messages/open-target"
@@ -35,28 +36,74 @@ type accountMessagesPage struct{}
 
 func (accountMessagesPage) Render(c *ui.Context, p *PageContext) {
 	text, colors, d := p.Assets.Text.Activity, p.Theme.Colors, p.uiColors()
-	if !p.host.Activity.Available(provider.AccountNotifications) {
+	hasNotifications := p.host.Activity != nil && p.host.Activity.Available(provider.AccountNotifications)
+	hasPrivate := p.host.PrivateMessages != nil && p.host.PrivateMessages.Available()
+	if !hasNotifications && !hasPrivate {
 		p.region(noticeFooter, nil)
 		p.libraryEmpty(c, "comment", text.SignInNeeded, "", text.SignInAction, "user", noticeStatus,
 			func() { p.State.Back() })
 		return
 	}
+	if p.host.messagesTab == messagesTabPrivate && !hasPrivate {
+		p.host.messagesTab = messagesTabNotifications
+	}
+	if p.host.messagesTab == messagesTabNotifications && !hasNotifications {
+		p.host.messagesTab = messagesTabPrivate
+	}
+	showingPrivate := p.host.messagesTab == messagesTabPrivate
+	activeTabFocus := noticeTab
+	if showingPrivate {
+		activeTabFocus = privateTab
+	}
+	if p.active {
+		if p.State.Focus == noticeTab && !hasNotifications {
+			p.State.Focus = privateTab
+			p.host.reveal = true
+		} else if p.State.Focus == privateTab && !hasPrivate {
+			p.State.Focus = noticeTab
+			p.host.reveal = true
+		}
+	}
+
 	p.left = focusDestination{Focus: app.RailFocus(app.Account)}
 	query := messagesQuery(p.host)
-	snapshot := p.host.Activity.Snapshot(query)
-	canMarkRead := p.host.Activity.CanMarkNotificationsRead()
+	var snapshot app.AccountSnapshot
+	if !showingPrivate {
+		snapshot = p.host.Activity.Snapshot(query)
+	}
+	canMarkRead := false
+	markingRead := false
+	if showingPrivate {
+		canMarkRead = p.host.PrivateMessages.CanMarkRead()
+		markingRead = p.host.PrivateMessages.MarkingRead()
+	} else {
+		canMarkRead = p.host.Activity.CanMarkNotificationsRead()
+		markingRead = p.host.Activity.MarkingNotificationsRead()
+	}
 	activeFilter := app.FocusID("account/messages/" + query.Filter)
-	tabEdges := focusEdges{app.Down: {Focus: activeFilter}}
-	filterEdges := focusEdges{app.Up: {Focus: noticeTab}, app.Down: {Region: noticeRows}}
+	var tabEdges focusEdges
+	if showingPrivate {
+		tabEdges = focusEdges{app.Down: {Region: privateContactsRegion}}
+		if convs := p.host.PrivateMessages.Conversations(); len(convs.Conversations) == 0 && convs.Phase == app.CatalogFailed {
+			tabEdges[app.Down] = focusDestination{Focus: privateRetryContacts}
+		}
+	} else {
+		tabEdges = focusEdges{app.Down: {Focus: activeFilter}}
+	}
+	filterEdges := focusEdges{app.Up: {Focus: activeTabFocus}, app.Down: {Region: noticeRows}}
 	if canMarkRead {
 		tabEdges[app.Right] = focusDestination{Focus: noticeReadAll, Region: noticeActions}
 		filterEdges[app.Right] = focusDestination{Focus: noticeReadAll, Region: noticeActions}
+		actionDown := focusDestination{Focus: activeFilter, Region: noticeFiltersArea}
+		if showingPrivate {
+			actionDown = p.privateReadAllDownTarget()
+		}
 		p.region(noticeActions, focusEdges{
-			app.Left: {Focus: noticeTab, Region: noticeTabs},
-			app.Down: {Focus: activeFilter, Region: noticeFiltersArea},
+			app.Left: {Focus: activeTabFocus, Region: noticeTabs},
+			app.Down: actionDown,
 		})
 	} else if p.active && p.State.Focus == noticeReadAll {
-		p.State.Focus = noticeTab
+		p.State.Focus = activeTabFocus
 		p.host.reveal = true
 	}
 	p.region(noticeTabs, tabEdges)
@@ -65,23 +112,31 @@ func (accountMessagesPage) Render(c *ui.Context, p *PageContext) {
 	p.region(noticeFooter, focusEdges{app.Up: {Focus: activeFilter}})
 	ui.Column(c.Key("messages")).FillWidth().Padding(0, 83, 60, 103).Lang(accountLanguage).Font(accountFontFamily).Children(func() {
 		ui.Box(c).FillWidth().Height(303).Children(func() {
-			p.notificationTabs(c)
+			p.messagesHeaderTabs(c, hasNotifications, hasPrivate, showingPrivate)
 			ui.Text(c, text.Messages).Absolute().Top(144).Left(0).FontSize(51).FontWeight(550).LetterSpacing(1)
 			ui.Text(c, text.MessagesNote).Absolute().Top(230).Left(0).FontSize(22).
 				LineHeight(1.7).TextColor(paint(colors.Text.Muted))
 			if canMarkRead {
 				label := text.ReadAllNotices
-				if p.host.Activity.MarkingNotificationsRead() {
+				if markingRead {
 					label = text.MarkingRead
 				}
 				p.styledButton(c, label, "check", noticeReadAll, noticeActions, func() {
-					p.markAllNotificationsRead(query)
+					if showingPrivate {
+						p.markAllPrivateMessagesRead()
+					} else {
+						p.markAllNotificationsRead(query)
+					}
 				}, buttonAppearance{
 					height: 56, padding: 20, radius: 12, fontSize: 20, fontWeight: 550, iconSize: 28, iconGap: 13,
 					background: d.secondaryFill, foreground: d.secondaryText, border: d.secondaryBorder,
 				}).Absolute().Top(212).Right(0)
 			}
 		})
+		if showingPrivate {
+			p.renderPrivateMessages(c)
+			return
+		}
 		p.notificationFilters(c, query)
 		ui.Box(c).Height(25)
 		ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
@@ -174,21 +229,35 @@ func (p *PageContext) openNotification(row provider.AccountRow) {
 	p.State.Push(app.Route{Page: noticePage})
 }
 
-func (p *PageContext) notificationTabs(c *ui.Context) {
+func (p *PageContext) messagesHeaderTabs(c *ui.Context, hasNotifications, hasPrivate, showingPrivate bool) {
 	text, colors := p.Assets.Text.Activity, p.Theme.Colors
-	ui.Row(c).Absolute().Left(-25).Top(45).Height(61).Gap(18).Children(func() {
-		background := withAlpha(colors.Text.Primary, 0x13)
-		if p.paintFocus() == noticeTab {
-			background = withAlpha(colors.Focus.Background, 0x20)
+	renderTab := func(id app.FocusID, label string, selected bool, kind messagesTabKind) {
+		background, ink := ui.Transparent, paint(colors.Text.Muted)
+		if selected {
+			background, ink = withAlpha(colors.Text.Primary, 0x13), paint(colors.Text.Primary)
 		}
-		tab := ui.Button(c.Key(string(noticeTab)), "").Label(text.NotificationTab).Role(ui.RoleTab).AccessSelected(true).
-			Size(98, 61).Center().Radius(30).Border(0, ui.Transparent).Background(background)
-		p.animateFocus(tab, background, paint(colors.Text.Primary))
-		p.bind(tab, noticeTab, noticeTabs)
+		if p.paintFocus() == id {
+			background, ink = withAlpha(colors.Focus.Background, 0x20), paint(colors.Text.Primary)
+		}
+		tab := ui.Button(c.Key(string(id)), "").Label(label).Role(ui.RoleTab).AccessSelected(selected).
+			Size(98, 61).Center().Radius(30).Border(0, ui.Transparent).Background(background).
+			OnClick(func() { p.dispatch(func() { p.host.selectMessagesTab(kind) }) })
+		p.animateFocus(tab, background, ink)
+		p.bind(tab, id, noticeTabs)
 		tab.Children(func() {
-			ui.Text(c, text.NotificationTab).FontSize(24).LetterSpacing(1)
-			ui.Box(c).Absolute().Left(41.5).Bottom(2).Size(15, 3).Radius(2).Background(paint(colors.Accent.Primary))
+			ui.Text(c, label).FontSize(24).LetterSpacing(1)
+			if selected {
+				ui.Box(c).Absolute().Left(41.5).Bottom(2).Size(15, 3).Radius(2).Background(paint(colors.Accent.Primary))
+			}
 		})
+	}
+	ui.Row(c).Absolute().Left(-25).Top(45).Height(61).Gap(18).Children(func() {
+		if hasNotifications {
+			renderTab(noticeTab, text.NotificationTab, !showingPrivate, messagesTabNotifications)
+		}
+		if hasPrivate {
+			renderTab(privateTab, text.PrivateTab, showingPrivate, messagesTabPrivate)
+		}
 	})
 }
 

@@ -72,6 +72,9 @@ func syncAccountOverview(v *View) {
 		v.Activity.Ensure(provider.AccountQuery{Section: section})
 	}
 	v.Activity.Ensure(provider.AccountQuery{Section: provider.AccountNotifications, Summary: true})
+	if v.PrivateMessages != nil && v.PrivateMessages.Available() {
+		v.PrivateMessages.EnsureSummary()
+	}
 }
 
 func libraryQuery(v *View) provider.AccountQuery {
@@ -117,8 +120,19 @@ func messagesQuery(v *View) provider.AccountQuery {
 }
 
 func syncAccountMessages(v *View) {
-	v.Activity.Ensure(messagesQuery(v))
-	v.Activity.Ensure(provider.AccountQuery{Section: provider.AccountNotifications, Summary: true})
+	hasNotifications := v.Activity != nil && v.Activity.Available(provider.AccountNotifications)
+	hasPrivate := v.PrivateMessages != nil && v.PrivateMessages.Available()
+	if hasNotifications {
+		v.Activity.Ensure(messagesQuery(v))
+		v.Activity.Ensure(provider.AccountQuery{Section: provider.AccountNotifications, Summary: true})
+	}
+	if hasPrivate {
+		v.PrivateMessages.EnsureSummary()
+		if v.messagesTab == messagesTabPrivate || !hasNotifications {
+			v.messagesTab = messagesTabPrivate
+			v.PrivateMessages.EnsureConversations()
+		}
+	}
 }
 
 type libraryPage struct{}

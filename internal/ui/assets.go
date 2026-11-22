@@ -149,8 +149,13 @@ type homeLabels struct {
 
 type accountActivityLabels struct {
 	History, Favorites, WatchLater, Messages, MessagesNote, MessagesUnread  string
-	NotificationTab, ReadAllNotices, MarkingRead, MarkedAllRead             string
+	NotificationTab, PrivateTab, ReadAllNotices, MarkingRead, MarkedAllRead string
 	OpenNoticeTarget, OpenNoticeCreator                                     string
+	PrivateConversation, WritePrivateMessage, PrivateDraftPlaceholder       string
+	EditMessage, SendMessage, SendingMessage, MessageSent                   string
+	NewConversation, LoadOlderMessages, LoadMoreConversations               string
+	EmptyConversations, PrivateLoadFailed, PrivateSendFailed                string
+	PrivateRateLimited, PrivatePermissionDenied, PrivateScrollMessages      string
 	RefreshingRights, RefreshedRights                                       string
 	All, Replies, Likes, System                                             string
 	SyncOn, SyncOff, SyncNote, SyncAction                                   string

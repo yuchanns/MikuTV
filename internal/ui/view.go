@@ -50,9 +50,10 @@ type Options struct {
 	Series      *app.SeriesCatalog
 	Live        *app.LiveCatalog
 	LiveChat    *app.LiveChat
-	Auth        *app.Auth
-	Activity    *app.AccountActivity
-	Pages       *Pages
+	Auth            *app.Auth
+	Activity        *app.AccountActivity
+	PrivateMessages *app.PrivateMessages
+	Pages           *Pages
 	Assets      *Assets
 	Preferences app.PreferencesStore
 	Theme       theme.Theme
@@ -69,6 +70,7 @@ type View struct {
 	LiveChat        *app.LiveChat
 	Auth            *app.Auth
 	Activity        *app.AccountActivity
+	PrivateMessages *app.PrivateMessages
 	Playback        *app.Playback
 	Pages           *Pages
 	Assets          *Assets
@@ -112,11 +114,13 @@ type View struct {
 	accountDetailsPhone bool
 	openNotice          provider.AccountRow
 	noticeFeedback      videoDetailFeedback
+	messagesTab         messagesTabKind
+	privateUI           privateMessagesUI
 }
 
 func NewView(options Options) *View {
 	v := &View{
-		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity,
+		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Version: options.Version, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}
@@ -403,6 +407,20 @@ func (v *View) SyncAccountActivity() {
 	}
 	if v.Activity.Bind(entry, owner, v.Catalog.AccountReader()) {
 		v.favorites = favoritesUI{}
+	}
+	if v.PrivateMessages != nil {
+		var reader provider.PrivateMessageReader
+		var writer provider.PrivateMessageWriter
+		if v.Catalog != nil {
+			reader = v.Catalog.PrivateMessageReader()
+			writer = v.Catalog.PrivateMessageWriter()
+		}
+		if v.PrivateMessages.Bind(entry, owner, reader, writer) {
+			v.privateUI = privateMessagesUI{}
+			if v.State.Page == app.PrivateMessageCompose {
+				v.State.Back()
+			}
+		}
 	}
 	if v.Search != nil {
 		var searcher provider.CatalogSearcher

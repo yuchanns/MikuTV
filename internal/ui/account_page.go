@@ -192,18 +192,34 @@ func (p *PageContext) accountProfile(c *ui.Context, account provider.Account) {
 
 func (p *PageContext) accountInbox(c *ui.Context) {
 	activity := p.host.Activity
-	if !activity.Available(provider.AccountNotifications) {
+	hasNotifications := activity != nil && activity.Available(provider.AccountNotifications)
+	hasPrivate := p.host.PrivateMessages != nil && p.host.PrivateMessages.Available()
+	if !hasNotifications && !hasPrivate {
 		return
 	}
 	labels, d := p.Assets.Text.Activity, p.uiColors()
 	label, accessible := labels.Messages, labels.Messages
-	snapshot := activity.Snapshot(provider.AccountQuery{Section: provider.AccountNotifications, Summary: true})
-	if unread := snapshot.Page.Unread; unread != nil && *unread > 0 {
-		label += " \u00b7 " + strconv.Itoa(*unread)
-		accessible = fmt.Sprintf(labels.MessagesUnread, *unread)
+	totalUnread := 0
+	if hasNotifications {
+		snapshot := activity.Snapshot(provider.AccountQuery{Section: provider.AccountNotifications, Summary: true})
+		if unread := snapshot.Page.Unread; unread != nil && *unread > 0 {
+			totalUnread += *unread
+		}
+	}
+	if hasPrivate {
+		totalUnread += p.host.PrivateMessages.UnreadCount()
+	}
+	if totalUnread > 0 {
+		label += " \u00b7 " + strconv.Itoa(totalUnread)
+		accessible = fmt.Sprintf(labels.MessagesUnread, totalUnread)
 	}
 	p.accountButton(c, label, "comment", app.AccountInbox, accountHeader, func() {
-		activity.SetFilter(provider.NoticeAll)
+		if hasNotifications {
+			p.host.messagesTab = messagesTabNotifications
+			activity.SetFilter(provider.NoticeAll)
+		} else {
+			p.host.messagesTab = messagesTabPrivate
+		}
 		p.State.Push(app.Route{Page: app.AccountMessages})
 	}, buttonAppearance{
 		height: 53, padding: 23, radius: 12, fontSize: 20, fontWeight: 550, iconSize: 28, iconGap: 13,

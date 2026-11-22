@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	creatorFollowFocus app.FocusID = "creator/follow"
-	creatorRetryFocus  app.FocusID = "creator/retry"
-	creatorMoreRetry   app.FocusID = "creator/more-retry"
+	creatorFollowFocus  app.FocusID = "creator/follow"
+	creatorPrivateFocus app.FocusID = "creator/private"
+	creatorRetryFocus   app.FocusID = "creator/retry"
+	creatorMoreRetry    app.FocusID = "creator/more-retry"
 
 	creatorHeaderRegion  = "creator/header"
 	creatorTabsRegion    = "creator/tabs"
@@ -181,7 +182,11 @@ func (p *PageContext) openCreator(creator provider.Creator) {
 	view.creator = state
 	entry, _ := p.State.Current()
 	if !entry.Capabilities.Has(provider.FollowCreator) {
-		view.State.Focus = creatorTabFocus(provider.CreatorTabVideos)
+		if entry.Capabilities.Has(provider.ReadPrivateMessages) && view.PrivateMessages != nil {
+			view.State.Focus = creatorPrivateFocus
+		} else {
+			view.State.Focus = creatorTabFocus(provider.CreatorTabVideos)
+		}
 	}
 	view.reveal = true
 	view.loadCreatorInitial(state)
@@ -594,25 +599,36 @@ func (creatorPage) Render(c *ui.Context, p *PageContext) {
 	}
 	entry, _ := p.State.Current()
 	canFollow := entry.Capabilities.Has(provider.FollowCreator)
+	canPrivate := entry.Capabilities.Has(provider.ReadPrivateMessages) && p.host.PrivateMessages != nil
+	headerFocus := app.FocusID("")
+	if canFollow {
+		headerFocus = creatorFollowFocus
+	} else if canPrivate {
+		headerFocus = creatorPrivateFocus
+	}
 	tabs := state.visibleTabs()
 	if !slices.Contains(tabs, state.tab) && len(tabs) != 0 {
 		state.tab = tabs[0]
 	}
-	if p.active && p.State.Focus == creatorFollowFocus && !canFollow && len(tabs) != 0 {
-		p.State.Focus = creatorTabFocus(state.tab)
+	if p.active && ((p.State.Focus == creatorFollowFocus && !canFollow) || (p.State.Focus == creatorPrivateFocus && !canPrivate)) {
+		if headerFocus != "" {
+			p.State.Focus = headerFocus
+		} else if len(tabs) != 0 {
+			p.State.Focus = creatorTabFocus(state.tab)
+		}
 		p.host.reveal = true
 	}
 
 	p.prepareCreatorArtwork(state)
 	p.region(creatorHeaderRegion, focusEdges{app.Down: {Focus: creatorTabFocus(state.tab)}})
-	p.region(creatorTabsRegion, focusEdges{app.Up: {Focus: creatorFollowFocus}})
+	p.region(creatorTabsRegion, focusEdges{app.Up: {Focus: headerFocus}})
 	p.region(creatorContentRegion, focusEdges{app.Up: {Focus: creatorTabFocus(state.tab)}})
 
 	ui.Box(c.Key("creator-page")).FillWidth().Lang("zh-CN").Font(videoDetailFont).Children(func() {
 		p.creatorArtwork(c, state)
 		ui.Column(c).FillWidth().ZIndex(1).Children(func() {
-			p.creatorOverview(c, state, canFollow)
-			p.creatorTabs(c, state, tabs, canFollow)
+			p.creatorOverview(c, state, canFollow, canPrivate)
+			p.creatorTabs(c, state, tabs, headerFocus)
 			ui.Column(c).FillWidth().Margin(35, 0, 0, 0).Children(func() {
 				p.creatorSection(c, state)
 			})
@@ -693,7 +709,20 @@ func (p *PageContext) creatorArtwork(c *ui.Context, state *creatorState) {
 	})
 }
 
-func (p *PageContext) creatorOverview(c *ui.Context, state *creatorState, canFollow bool) {
+func (p *PageContext) openCreatorPrivateMessage(creator provider.Creator) {
+	if p.host.PrivateMessages == nil || strings.TrimSpace(creator.ID) == "" {
+		return
+	}
+	if p.host.Auth == nil || p.host.Auth.Accounts().CurrentID == "" {
+		p.openCreatorSignIn(func() {
+			p.host.openCreatorPrivateMessages(creator)
+		})
+		return
+	}
+	p.host.openCreatorPrivateMessages(creator)
+}
+
+func (p *PageContext) creatorOverview(c *ui.Context, state *creatorState, canFollow, canPrivate bool) {
 	profile := state.profile
 	colors, d, text := p.Theme.Colors, p.uiColors(), p.Assets.Text
 	ui.Row(c.Key("creator-overview")).FillWidth().MinHeight(creatorOverviewMin).
@@ -738,18 +767,26 @@ func (p *PageContext) creatorOverview(c *ui.Context, state *creatorState, canFol
 			}
 		})
 
-		if canFollow {
-			label, icon := text.Detail.Follow, "detail/plus"
-			if profile.Creator.Following {
-				label, icon = text.Detail.Followed, "detail/check"
-			}
+		if canFollow || canPrivate {
 			ui.Row(c.Key("creator-actions")).Gap(14).AlignItems(ui.Center).Shrink(0).Children(func() {
-				p.styledButton(c, label, icon, creatorFollowFocus, creatorHeaderRegion, func() {
-					p.dispatch(p.toggleCreatorFollow)
-				}, buttonAppearance{
+				actionStyle := buttonAppearance{
 					height: 57, padding: 27, radius: 12, fontSize: 21, fontWeight: 550, iconSize: 24, iconGap: 13,
 					focusShadow: true, background: d.secondaryFill, foreground: d.secondaryText, border: d.secondaryBorder,
-				}).Center()
+				}
+				if canFollow {
+					label, icon := text.Detail.Follow, "detail/plus"
+					if profile.Creator.Following {
+						label, icon = text.Detail.Followed, "detail/check"
+					}
+					p.styledButton(c, label, icon, creatorFollowFocus, creatorHeaderRegion, func() {
+						p.dispatch(p.toggleCreatorFollow)
+					}, actionStyle).Center()
+				}
+				if canPrivate {
+					p.styledButton(c, text.Activity.PrivateTab, "detail/comment", creatorPrivateFocus, creatorHeaderRegion, func() {
+						p.dispatch(func() { p.openCreatorPrivateMessage(profile.Creator) })
+					}, actionStyle).Center()
+				}
 			})
 		}
 	})
@@ -771,7 +808,7 @@ func (p *PageContext) creatorTabLabel(tab provider.CreatorTab) string {
 	}
 }
 
-func (p *PageContext) creatorTabs(c *ui.Context, state *creatorState, tabs []provider.CreatorTab, canFollow bool) {
+func (p *PageContext) creatorTabs(c *ui.Context, state *creatorState, tabs []provider.CreatorTab, headerFocus app.FocusID) {
 	colors, d := p.Theme.Colors, p.uiColors()
 	ui.Column(c.Key("creator-tabs-wrap")).FillWidth().Padding(0, creatorInset, 0, creatorInset).Children(func() {
 		ui.Row(c.Key("creator-tabs")).FillWidth().Gap(18).Padding(0, 0, 15, 0).Children(func() {
@@ -805,8 +842,8 @@ func (p *PageContext) creatorTabs(c *ui.Context, state *creatorState, tabs []pro
 						}
 						return true
 					case app.Up:
-						if canFollow {
-							p.host.moveFocus(creatorFollowFocus, app.Up, true)
+						if headerFocus != "" {
+							p.host.moveFocus(headerFocus, app.Up, true)
 							return true
 						}
 						return true

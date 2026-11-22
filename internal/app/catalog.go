@@ -71,6 +71,16 @@ func (c *Catalog) AccountReader() provider.AccountReader {
 	return reader
 }
 
+func (c *Catalog) PrivateMessageReader() provider.PrivateMessageReader {
+	reader, _ := c.session.(provider.PrivateMessageReader)
+	return reader
+}
+
+func (c *Catalog) PrivateMessageWriter() provider.PrivateMessageWriter {
+	writer, _ := c.session.(provider.PrivateMessageWriter)
+	return writer
+}
+
 func (c *Catalog) Searcher() provider.CatalogSearcher {
 	searcher, _ := c.session.(provider.CatalogSearcher)
 	return searcher

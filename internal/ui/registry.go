@@ -270,8 +270,23 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	registrations = append(registrations,
 		account,
 		Registration{Policy: app.RouteSpec{Route: app.Route{Page: app.AccountMessages}, Initial: focus(noticeTab), ContentFocus: noticeTab,
-			RequiresEntry: true, Capability: provider.AccountNotifications.Capability()}, Component: accountMessagesPage{}, Sync: syncAccountMessages,
-			ScreenInsets: &[4]float32{}},
+			RequiresEntry: true, Capability: provider.SignIn}, Component: accountMessagesPage{}, Sync: syncAccountMessages,
+			ScreenInsets: &[4]float32{},
+			AfterMove: func(v *View, direction app.Direction, group string, next app.FocusID) {
+				if (direction == app.Left || direction == app.Right) && group == noticeTabs {
+					switch next {
+					case noticeTab:
+						v.selectMessagesTab(messagesTabNotifications)
+					case privateTab:
+						v.selectMessagesTab(messagesTabPrivate)
+					}
+				}
+			}},
+		Registration{Policy: app.RouteSpec{Route: app.Route{Page: app.PrivateMessageCompose}, Parent: app.Route{Page: app.AccountMessages},
+			Initial: focus(privateComposeEdit), Modal: true, RequiresEntry: true, Capability: provider.WritePrivateMessages},
+			Component: privateComposePage{}, ModalPresentation: modalFrameless, ModalWidth: 820,
+			Back:  func(v *View) bool { return v.PrivateMessages != nil && v.PrivateMessages.Sending() },
+			Leave: func(v *View) { v.privateUI.draft.editing = false }},
 		Registration{Policy: authModal(noticePage, app.AccountMessages, app.CloseModal), Component: accountNoticeDialog{},
 			ModalPresentation: modalFrameless, ModalWidth: 820,
 			Leave: func(v *View) { v.openNotice = provider.AccountRow{} }},

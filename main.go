@@ -92,6 +92,7 @@ func main() {
 			return src.NewSession(entryID, stores[entryID])
 		}, mygo.RunOnMain, invalidate)
 		activity := app.NewAccountActivity(preferences, mygo.RunOnMain, invalidate)
+		privateMessages := app.NewPrivateMessages(mygo.RunOnMain, invalidate)
 		search := app.NewCatalogSearch(preferences, mygo.RunOnMain, invalidate)
 		following := app.NewFollowingFeed(mygo.RunOnMain, invalidate)
 		series := app.NewSeriesCatalog(mygo.RunOnMain, invalidate)
@@ -101,12 +102,13 @@ func main() {
 		auth := app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
 			catalog.Reload()
 			activity.Close()
+			privateMessages.Close()
 			if view != nil {
 				view.SyncAccountActivity()
 			}
 		}, func() { view.PromptSignIn() })
 		auth.SetCleaner(preferences)
-		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, Pages: pages, Assets: assets,
+		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, PrivateMessages: privateMessages, Pages: pages, Assets: assets,
 			Preferences: preferences, Theme: theme.Default(), Version: appVersion})
 		view.Trace = os.Getenv("MIKUTV_NAV_TRACE") == "1"
 		if view.Trace {
@@ -143,6 +145,7 @@ func main() {
 			series.Close()
 			following.Close()
 			search.Close()
+			privateMessages.Close()
 			activity.Close()
 			auth.Close()
 			catalog.Close()
