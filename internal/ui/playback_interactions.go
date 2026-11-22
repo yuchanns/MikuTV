@@ -93,6 +93,45 @@ func (p *PageContext) togglePlayerLike() {
 	})
 }
 
+func (p *PageContext) toggleLiveFollow() {
+	p.withPlayerAccount(func() {
+		v, s := p.host, &p.host.player
+		if s.followPending != nil {
+			return
+		}
+		item := s.current().item
+		if item.Creator == nil || item.Creator.ID == "" {
+			return
+		}
+		creator := *item.Creator
+		want := !creator.Following
+		text := p.Assets.Text.Detail
+		s.followPending = v.Catalog.FollowCreator(provider.CreatorFollowRequest{
+			CreatorID: creator.ID,
+			Enabled:   want,
+		}, func(result provider.CreatorFollowResult, err error) {
+			s.followPending = nil
+			if err != nil {
+				if provider.CodeOf(err) == provider.NeedsSignIn {
+					v.openSignIn()
+					if v.State.Page == app.SignInQR {
+						s.content.afterLogin = p.toggleLiveFollow
+					}
+					return
+				}
+				s.content.notice(text.UpdateFailed)
+				return
+			}
+			v.syncCreatorFollowing(creator, result.Following)
+			if result.Following {
+				s.content.notice(text.Followed)
+			} else {
+				s.content.notice(text.Unfollowed)
+			}
+		})
+	})
+}
+
 func (v *View) syncPlaybackEngagement(request provider.VideoEdit, result provider.VideoEditResult) {
 	s := &v.player
 	item := s.discussion.item

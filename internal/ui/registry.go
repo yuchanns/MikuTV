@@ -142,6 +142,21 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			}
 		}
 	}
+	live := content(app.Live, provider.BrowseLive)
+	live.Component, live.Sync = livePage{}, syncLive
+	live.RawScreen = true
+	live.Policy.ExitFocus = app.RailFocus(app.Live)
+	live.Back = (*View).backFromLive
+	live.AfterMove = func(v *View, direction app.Direction, group string, next app.FocusID) {
+		if (direction == app.Left || direction == app.Right) && group == liveHeaderRegion && v.Live != nil {
+			for _, area := range v.Live.Snapshot().Areas {
+				if next == liveAreaFocus(area.ID) {
+					v.selectLiveArea(area.ID)
+					break
+				}
+			}
+		}
+	}
 	registrations := []Registration{
 		home,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.HomeAction}, Parent: app.Route{Page: app.Home},
@@ -230,7 +245,16 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 					}
 				}
 			}},
-		content(app.Live, provider.BrowseLive),
+		live,
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.LiveAll}, Parent: app.Route{Page: app.Live},
+			Initial: focus(app.CloseModal), RequiresEntry: true, Capability: provider.BrowseLive, Modal: true},
+			Component: liveAllPage{}, ModalPresentation: modalDrawer, ModalWidth: 680,
+			Leave: func(v *View) {
+				if v.State.Page != app.Player {
+					v.live.allSection = ""
+					v.live.allList = ui.ListState{}
+				}
+			}},
 		library,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.Entries}, Transient: true, ResolveFocus: func(s *app.State) app.FocusID { return s.PickerFocus() }},
 			Component: entriesPage{}, Navigation: &NavigationLink{Title: assets.Text.Nav[app.Entries], Icon: "switch", Placement: utilityNavigation}},

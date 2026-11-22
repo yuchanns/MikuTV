@@ -81,7 +81,19 @@
     "PickFavoriteFolders": "\u6dfb\u52a0\u5230\u6536\u85cf\u5939",
     "FavoriteSaved": "\u6536\u85cf\u5df2\u66f4\u65b0",
     "ChapterHere": "\u5f53\u524d\u7ae0\u8282",
-    "SeekTo": "\u8df3\u8f6c\u5230 %s"
+    "SeekTo": "\u8df3\u8f6c\u5230 %s",
+    "RoomInfo": "\u76f4\u64ad\u95f4\u4ecb\u7ecd",
+    "RoomNumber": "\u76f4\u64ad\u95f4 %s",
+    "RoomEmptyDesc": "\u6b22\u8fce\u6765\u5230\u76f4\u64ad\u95f4\uff0c\u548c\u5927\u5bb6\u4e00\u8d77\u4eab\u53d7\u6b64\u523b\u3002",
+    "LiveQuality": "\u76f4\u64ad\u753b\u8d28",
+    "Line": "\u7ebf\u8def",
+    "LineAuto": "\u81ea\u52a8\u9009\u62e9",
+    "LineChanged": "\u7ebf\u8def\u5df2\u5207\u6362",
+    "LiveDisconnected": "\u76f4\u64ad\u8fde\u63a5\u5df2\u65ad\u5f00",
+    "LiveDisconnectedBody": "\u53ef\u4ee5\u91cd\u65b0\u8fde\u63a5\uff0c\u6216\u5207\u6362\u4e00\u6761\u7ebf\u8def\u3002",
+    "LiveEnded": "\u4e3b\u64ad\u6682\u65f6\u79bb\u5f00\u4e86",
+    "LiveEndedBody": "\u5173\u6ce8\u76f4\u64ad\u95f4\uff0c\u4e0b\u6b21\u5f00\u64ad\u518d\u89c1\u3002",
+    "MoreLive": "\u770b\u770b\u5176\u4ed6\u76f4\u64ad"
   },
   "Modal": {
     "CurrentPrefix": "\u5f53\u524d \u00b7 %s",
@@ -179,6 +191,21 @@
     "LoadFailed": "\u65e0\u6cd5\u52a0\u8f7d\u5f71\u89c6\u5185\u5bb9\u3002",
     "MoreFailed": "\u52a0\u8f7d\u66f4\u591a\u4f5c\u54c1\u5931\u8d25",
     "Weekdays": ["\u5468\u65e5", "\u5468\u4e00", "\u5468\u4e8c", "\u5468\u4e09", "\u5468\u56db", "\u5468\u4e94", "\u5468\u516d"]
+  },
+  "Live": {
+    "Eyebrow": "LIVE, IN THE MOMENT",
+    "LiveNow": "\u6b63\u5728\u76f4\u64ad",
+    "Viewers": "\u4eba\u5728\u770b",
+    "EnterRoom": "\u8fdb\u5165\u76f4\u64ad\u95f4",
+    "RecommendedTitle": "\u63a8\u8350\u76f4\u64ad\u95f4",
+    "RecommendedNote": "LIVE NOW",
+    "FollowingTitle": "\u5173\u6ce8\u7684\u76f4\u64ad\u95f4",
+    "FollowingNote": "YOUR CREATORS, LIVE",
+    "EmptyArea": "\u5f53\u524d\u5206\u533a\u6682\u65f6\u6ca1\u6709\u5f00\u64ad\u7684\u76f4\u64ad\u95f4",
+    "EmptyAreaNote": "\u8bd5\u8bd5\u5207\u6362\u5176\u4ed6\u5206\u533a\uff0c\u6216\u7a0d\u540e\u518d\u6765\u770b\u770b\u3002",
+    "Loading": "\u6b63\u5728\u8bfb\u53d6\u76f4\u64ad\u5185\u5bb9\u2026",
+    "LoadFailed": "\u65e0\u6cd5\u52a0\u8f7d\u76f4\u64ad\u5185\u5bb9\u3002",
+    "MoreFailed": "\u52a0\u8f7d\u66f4\u591a\u76f4\u64ad\u95f4\u5931\u8d25"
   },
   "Creator": {
     "Eyebrow": "CREATOR SPOTLIGHT",

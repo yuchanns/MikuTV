@@ -45,9 +45,11 @@ type PlaybackState struct {
 	Position       float64
 	Duration       float64
 	Selected       string
+	SelectedLine   string
 	Fallback       string
 	Limit          provider.PlaybackLimit
 	Failure        provider.ErrorCode
+	LiveEnded      bool
 	Playing        bool
 	Loading        bool
 	Switching      bool
@@ -78,8 +80,10 @@ type Playback struct {
 	positionAt       time.Time
 	startedAt        time.Time
 	bufferedAt       time.Time
+	pausedAt         time.Time
 	loaded           bool
 	didEnd           bool
+	liveEndChecked   bool
 	previewConfirmed bool
 	hdrBlocked       bool
 	reporting        bool
@@ -114,6 +118,9 @@ func (p *Playback) State() PlaybackState { return p.state }
 func (p *Playback) Active() bool         { return p.active }
 func (p *Playback) Rate() float64        { return p.rate }
 func (p *Playback) Owner() string        { return p.owner }
+func (p *Playback) isLive() bool {
+	return p.state.Target.Ref.Kind == provider.Live || p.state.Resolution.Plan.Live
+}
 
 func (p *Playback) SetViewport(widthFraction float64) {
 	if p.engine.Viewport != nil {
@@ -148,19 +155,21 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 	}
 	p.state = PlaybackState{Target: target, Playing: true, Position: position, Revision: revision}
 	p.loaded, p.didEnd, p.refreshed = false, false, false
+	p.liveEndChecked, p.pausedAt = false, time.Time{}
 	p.previewConfirmed, p.hdrBlocked = false, false
 	p.lastSaved, p.savedAsEnd = -1, false
 	p.resetAutoQuality(true)
-	if p.rate == 0 {
+	if p.rate == 0 || target.Ref.Kind == provider.Live {
 		p.rate = 1
 	}
 	if hit != nil {
 		hit.media.Promote()
-		p.accept(hit.result, hit.media, nil, "", false, start == nil)
+		p.accept(hit.result, hit.media, nil, "", "", false, start == nil)
 		p.changed()
 		return
 	}
-	p.resolveMode("", "", false, start == nil)
+	useResume := start == nil && target.Ref.Kind != provider.Live
+	p.resolveMode("", "", "", false, useResume)
 }
 
 func (p *Playback) Close() {
@@ -214,7 +223,7 @@ func (p *Playback) clearPreload() {
 // PreloadNext resolves and warms up the next episode in the background so
 // sequential auto-advance can start immediately without a metadata round-trip.
 func (p *Playback) PreloadNext(target provider.PlaybackTarget, owner string) {
-	if !p.active || target.Ref.ID == "" || p.state.Loading || p.state.Switching ||
+	if !p.active || p.isLive() || target.Ref.ID == "" || target.Ref.Kind == provider.Live || p.state.Loading || p.state.Switching ||
 		p.state.Resolution.Plan.Access == provider.VideoAccessPreview || p.post == nil {
 		return
 	}
@@ -301,10 +310,10 @@ func (p *Playback) effectiveQuality() string {
 }
 
 func (p *Playback) resolve(quality string, preserve, useResume bool) {
-	p.resolveMode(quality, quality, preserve, useResume)
+	p.resolveMode(quality, quality, p.state.SelectedLine, preserve, useResume)
 }
 
-func (p *Playback) resolveMode(selected, requestQuality string, preserve, useResume bool) {
+func (p *Playback) resolveMode(selected, requestQuality, selectedLine string, preserve, useResume bool) {
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -314,6 +323,7 @@ func (p *Playback) resolveMode(selected, requestQuality string, preserve, useRes
 	request := p.request
 	p.state.Loading, p.state.Switching = !preserve, preserve
 	p.state.Failure, p.state.Limit, p.state.Fallback = "", "", ""
+	p.state.LiveEnded = false
 	var caps player.Capabilities
 	if p.engine.Capabilities != nil {
 		caps = p.engine.Capabilities()
@@ -323,7 +333,7 @@ func (p *Playback) resolveMode(selected, requestQuality string, preserve, useRes
 	}
 	resolver, _ := p.catalog.session.(provider.PlaybackReader)
 	input := provider.PlaybackRequest{
-		PlaybackTarget: p.state.Target, Quality: requestQuality, HDR: caps.HDR, HEVC: caps.HEVC,
+		PlaybackTarget: p.state.Target, Quality: requestQuality, Line: selectedLine, HDR: caps.HDR, HEVC: caps.HEVC,
 	}
 	go func() {
 		var result provider.Playback
@@ -334,7 +344,7 @@ func (p *Playback) resolveMode(selected, requestQuality string, preserve, useRes
 		} else {
 			result, err = resolver.ResolvePlayback(ctx, input)
 		}
-		if err == nil && result.Plan.Access != provider.VideoAccessRestricted && (!preserve || result.Plan.Restriction == "") {
+		if err == nil && result.Plan.Access != provider.VideoAccessRestricted && !result.Plan.LiveEnded && (!preserve || result.Plan.Restriction == "") {
 			timeout, stop := context.WithTimeout(ctx, 15*time.Second)
 			media, err = player.OpenMedia(timeout, result)
 			stop()
@@ -348,20 +358,25 @@ func (p *Playback) resolveMode(selected, requestQuality string, preserve, useRes
 			}
 			cancel()
 			p.cancel = nil
-			p.accept(result, media, err, selected, preserve, useResume)
+			p.accept(result, media, err, selected, selectedLine, preserve, useResume)
 			p.changed()
 		})
 	}()
 	p.changed()
 }
 
-func (p *Playback) accept(result provider.Playback, media *player.Media, err error, quality string, preserve, useResume bool) {
+func (p *Playback) accept(result provider.Playback, media *player.Media, err error, quality, selectedLine string, preserve, useResume bool) {
 	p.state.Loading, p.state.Switching = false, false
 	if err != nil {
+		if result.Plan.Live && len(result.Plan.Lines) > 0 {
+			p.state.Resolution.Plan.Live = true
+			p.state.Resolution.Plan.Lines = result.Plan.Lines
+			p.state.Resolution.Plan.Line = result.Plan.Line
+		}
 		p.state.Failure = provider.CodeOf(err)
 		if p.state.Failure == provider.Expired && !p.refreshed && !preserve {
 			p.refreshed = true
-			p.resolveMode(quality, p.effectiveQuality(), false, useResume)
+			p.resolveMode(quality, p.effectiveQuality(), selectedLine, false, useResume)
 			return
 		}
 		if p.state.Failure == provider.NeedsSignIn {
@@ -378,6 +393,20 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 		return
 	}
 	plan := result.Plan
+	if plan.Live && plan.LiveEnded {
+		if media != nil {
+			media.Close()
+		}
+		p.clearStream()
+		p.state.Resolution = result
+		p.state.Selected, p.state.SelectedLine = quality, selectedLine
+		p.state.LiveEnded = true
+		p.state.Playing = false
+		p.state.Failure, p.state.Limit, p.state.Fallback = "", "", ""
+		p.didEnd = true
+		p.state.Revision++
+		return
+	}
 	endedPreview := p.didEnd && p.state.Resolution.Plan.Access == provider.VideoAccessPreview
 	p.state.Limit = plan.Restriction
 	if preserve && plan.Restriction != "" {
@@ -410,7 +439,10 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	target := p.state.Target
 	target.PartID = plan.PartID
 	position := p.state.Position
-	if useResume {
+	if plan.Live {
+		position = 0
+		p.rate = 1
+	} else if useResume {
 		if p.syncSource && position == 0 {
 			position = plan.ResumeSeconds
 		}
@@ -425,7 +457,7 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 		// An exhausted trial can be saved as the preceding whole second.
 		end = math.Floor(end)
 	}
-	if plan.Duration > 0 && position >= end {
+	if !plan.Live && plan.Duration > 0 && position >= end {
 		position = plan.Duration
 		if useResume {
 			position = 0
@@ -442,6 +474,8 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 		p.media.Close()
 	}
 	p.media = media
+	p.liveEndChecked = false
+	p.state.LiveEnded = false
 	if endedPreview || p.state.PreviewPending && plan.Access != provider.VideoAccessPreview {
 		p.didEnd, p.state.Playing = false, true
 	}
@@ -450,7 +484,8 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	} else if plan.Access != provider.VideoAccessPreview {
 		p.state.PreviewPending = false
 	}
-	p.state.Target, p.state.Resolution, p.state.Selected = target, result, quality
+	p.state.Target, p.state.Resolution = target, result
+	p.state.Selected, p.state.SelectedLine = quality, selectedLine
 	p.state.Position, p.state.Duration, p.state.VideoRange = position, plan.Duration, media.VideoRange
 	p.state.Clock = player.Status{Position: position, Buffering: true}
 	p.startedAt = time.Now()
@@ -480,9 +515,19 @@ func (p *Playback) Tick(now time.Time) {
 	}
 	p.state.Clock = clock
 	p.loaded = p.loaded || clock.HasFrame
+	live := p.isLive()
 	if clock.Ended && !p.didEnd {
+		if live && !p.liveEndChecked {
+			p.liveEndChecked = true
+			p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
+			return
+		}
 		p.didEnd, p.state.Playing = true, false
-		p.save()
+		if live {
+			p.state.LiveEnded = true
+		} else {
+			p.save()
+		}
 	}
 	if p.state.Loading || p.state.Switching || p.state.PreviewPending || p.state.Failure != "" || p.didEnd {
 		return
@@ -492,12 +537,12 @@ func (p *Playback) Tick(now time.Time) {
 	expired := code == provider.Expired || plan.ExpiresAt > 0 && now.Unix() >= plan.ExpiresAt
 	if !p.refreshed && expired && (clock.Failed || clock.Buffering) {
 		p.refreshed = true
-		p.resolveMode(p.state.Selected, p.effectiveQuality(), false, false)
+		p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
 		return
 	}
 	if clock.Failed && clock.DisplayIncompatible && !p.hdrBlocked && (p.state.VideoRange == "PQ" || p.state.VideoRange == "HLG") {
 		p.hdrBlocked = true
-		p.resolveMode(p.state.Selected, p.effectiveQuality(), false, false)
+		p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
 		return
 	}
 	if clock.Buffering {
@@ -507,7 +552,7 @@ func (p *Playback) Tick(now time.Time) {
 	} else {
 		p.bufferedAt = time.Time{}
 	}
-	if p.stepAutoQuality(now, clock) {
+	if !live && p.stepAutoQuality(now, clock) {
 		return
 	}
 	timedOut := !clock.HasFrame && now.Sub(p.startedAt) > playbackStallTimeout ||
@@ -523,6 +568,9 @@ func (p *Playback) Tick(now time.Time) {
 		if p.engine.SetRate != nil {
 			p.engine.SetRate(0)
 		}
+		return
+	}
+	if live {
 		return
 	}
 	if p.positionAt.IsZero() {
@@ -622,7 +670,7 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 			p.autoStallCount = 0
 			p.autoStallSince = time.Time{}
 			p.autoHealthyAt = time.Time{}
-			p.resolveMode("", next.ID, true, false)
+			p.resolveMode("", next.ID, p.state.SelectedLine, true, false)
 			return true
 		}
 	}
@@ -658,7 +706,7 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 			p.autoQuality = nextAuto
 			p.autoLastSwitch = now
 			p.autoHealthyAt = time.Time{}
-			p.resolveMode("", higher.ID, true, false)
+			p.resolveMode("", higher.ID, p.state.SelectedLine, true, false)
 			return true
 		}
 	}
@@ -666,7 +714,7 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 }
 
 func (p *Playback) Toggle() {
-	if !p.active || p.state.Loading || p.state.PreviewPending {
+	if !p.active || p.state.Loading || p.state.PreviewPending || p.state.LiveEnded {
 		return
 	}
 	if p.didEnd || p.state.Failure != "" {
@@ -675,13 +723,24 @@ func (p *Playback) Toggle() {
 	}
 	p.state.Playing = !p.state.Playing
 	if !p.state.Playing {
-		p.save()
+		if p.isLive() {
+			p.pausedAt = time.Now()
+		} else {
+			p.save()
+		}
+	} else if p.isLive() && !p.pausedAt.IsZero() && time.Since(p.pausedAt) >= 4*time.Second {
+		p.pausedAt = time.Time{}
+		p.Retry()
+		return
 	}
 	p.applyRate()
 	p.changed()
 }
 
 func (p *Playback) SetRate(rate float64) {
+	if p.isLive() {
+		rate = 1
+	}
 	p.rate = rate
 	p.applyRate()
 	p.changed()
@@ -694,12 +753,15 @@ func (p *Playback) applyRate() {
 	rate := float64(0)
 	if p.state.Playing {
 		rate = p.rate
+		if p.isLive() {
+			rate = 1
+		}
 	}
 	p.engine.SetRate(rate)
 }
 
 func (p *Playback) Seek(seconds float64) {
-	if p.media == nil {
+	if p.media == nil || p.isLive() {
 		return
 	}
 	p.didEnd, p.state.Clock.Ended = false, false
@@ -714,7 +776,7 @@ func (p *Playback) Seek(seconds float64) {
 	p.autoStallActive = false
 	if expires := p.state.Resolution.Plan.ExpiresAt; expires > 0 && time.Now().Unix() >= expires {
 		p.refreshed = false
-		p.resolveMode(p.state.Selected, p.effectiveQuality(), false, false)
+		p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
 		return
 	}
 	p.engine.Seek(p.state.Position)
@@ -726,12 +788,25 @@ func (p *Playback) ChooseQuality(quality string) {
 	if !p.active || p.state.Loading || p.state.Switching {
 		return
 	}
-	if quality == p.state.Selected && (quality != "" || p.autoQuality == "") && p.media != nil {
+	if quality == p.state.Selected && (quality != "" || p.autoQuality == "") && p.media != nil && p.state.Failure == "" {
 		return
 	}
 	p.refreshed = false
 	p.resetAutoQuality(quality == "")
-	p.resolveMode(quality, quality, p.media != nil, false)
+	p.resolveMode(quality, quality, p.state.SelectedLine, p.media != nil && p.state.Failure == "", false)
+}
+
+func (p *Playback) ChooseLine(line string) {
+	if !p.active || p.state.Loading || p.state.Switching {
+		return
+	}
+	if line == p.state.SelectedLine && p.media != nil && p.state.Failure == "" && !p.state.LiveEnded {
+		return
+	}
+	p.state.Playing = true
+	p.state.Limit = ""
+	p.loaded, p.didEnd, p.refreshed, p.liveEndChecked = false, false, false, false
+	p.resolveMode(p.state.Selected, p.effectiveQuality(), line, false, false)
 }
 
 func (p *Playback) DismissLimit() {
@@ -754,7 +829,7 @@ func (p *Playback) RefreshAccess() {
 		return
 	}
 	p.refreshed = false
-	p.resolveMode(p.state.Selected, p.effectiveQuality(), false, false)
+	p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
 }
 
 func (p *Playback) Retry() {
@@ -763,15 +838,16 @@ func (p *Playback) Retry() {
 	}
 	p.state.Playing = true
 	p.state.Limit = ""
-	if p.didEnd && p.media != nil && p.state.Resolution.Plan.Access != provider.VideoAccessPreview {
+	p.state.LiveEnded = false
+	if !p.isLive() && p.didEnd && p.media != nil && p.state.Resolution.Plan.Access != provider.VideoAccessPreview {
 		p.Seek(0)
 		return
 	}
 	if p.didEnd {
 		p.state.Position = 0
 	}
-	p.loaded, p.didEnd, p.refreshed = false, false, false
-	p.resolveMode(p.state.Selected, p.effectiveQuality(), false, false)
+	p.loaded, p.didEnd, p.refreshed, p.liveEndChecked = false, false, false, false
+	p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
 }
 
 func (p *Playback) Suspend() {
@@ -782,7 +858,7 @@ func (p *Playback) Suspend() {
 }
 
 func (p *Playback) save() {
-	if !p.loaded || p.state.PreviewPending || p.state.Target.Ref.ID == "" {
+	if !p.loaded || p.isLive() || p.state.PreviewPending || p.state.Target.Ref.ID == "" {
 		return
 	}
 	target := p.state.Target

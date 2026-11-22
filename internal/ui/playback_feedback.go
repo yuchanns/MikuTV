@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
 const (
@@ -16,7 +17,7 @@ const (
 )
 
 func playbackShowNetworkSpeed(state app.PlaybackState, s *playbackView) bool {
-	if s.content.overlay() || playbackHasAccessDialog(state) || state.Failure != "" || state.Clock.Ended {
+	if s.content.overlay() || playbackHasAccessDialog(state) || state.Failure != "" || state.Clock.Ended || state.LiveEnded {
 		return false
 	}
 	return state.Loading || state.Switching || (state.Clock.Buffering && state.Playing && !s.scrubbing && !s.selectingChapter)
@@ -89,6 +90,9 @@ func (s *playbackView) feedbackFor(c *ui.Context, state app.PlaybackState) playb
 	if s.content.overlay() || playbackHasAccessDialog(state) {
 		return playbackFeedbackNone
 	}
+	if state.LiveEnded {
+		return playbackFeedbackEnded
+	}
 	if state.Failure != "" {
 		return playbackFeedbackFailed
 	}
@@ -114,19 +118,21 @@ func (s *playbackView) feedbackFor(c *ui.Context, state app.PlaybackState) playb
 
 func (p *PageContext) playbackFeedbackScreen(c *ui.Context, kind playbackFeedback, state app.PlaybackState, cover string) {
 	v, s := p.host, &p.host.player
+	liveMode := isLivePlayback(state, s.current())
+	linePickerOpen := liveMode && kind == playbackFeedbackFailed && s.panel == playerLine
 	if kind == playbackFeedbackBuffering && p.active && v.State.Focus != playerBuffer {
 		s.feedbackFocus = v.State.Focus
 		v.State.Focus, v.reveal = playerBuffer, true
-	} else if kind != playbackFeedbackBuffering && p.active {
+	} else if kind != playbackFeedbackBuffering && p.active && !linePickerOpen {
 		s.panel, s.controlFocus = "", ""
 		s.scrubbing, s.selectingChapter = false, false
-		if v.State.Focus != playerStatus {
+		if v.State.Focus != playerStatus && v.State.Focus != playerStatusLine {
 			v.State.Focus, v.reveal = playerStatus, true
 		}
 	}
 	v.Playback.SetViewport(1)
 	hasFrame := v.Playback.SetBackdropBlur(16)
-	colors := p.Theme.Colors
+	colors, d := p.Theme.Colors, p.uiColors()
 	root := ui.Box(c.Key("player-feedback")).Absolute().Top(0).Left(0).Fill().Clip().Lang("zh-CN").Font(videoDetailFont)
 	if kind == playbackFeedbackBuffering {
 		p.region(playerPanelGroup, focusEdges{})
@@ -148,25 +154,66 @@ func (p *PageContext) playbackFeedbackScreen(c *ui.Context, kind playbackFeedbac
 			return
 		}
 		title, note, icon, action, glyph := text.Failed, text.FailedNote, "playback-offline", text.Reconnect, "refresh"
-		if kind == playbackFeedbackEnded {
+		primaryRun := func() {
+			v.Playback.Retry()
+			s.show(v)
+			v.State.Focus, v.reveal = playerToggle, true
+		}
+		primaryWidth := float32(184)
+		showLineButton := false
+		if liveMode && kind == playbackFeedbackFailed {
+			title, note = text.LiveDisconnected, text.LiveDisconnectedBody
+			showLineButton = len(state.Resolution.Plan.Lines) > 0
+		} else if liveMode && kind == playbackFeedbackEnded {
+			title, note, icon, action, glyph = text.LiveEnded, text.LiveEndedBody, "live", text.MoreLive, ""
+			primaryWidth = 220
+			primaryRun = func() {
+				p.leaveLiveToBrowse()
+			}
+		} else if kind == playbackFeedbackEnded {
 			title, note, icon, action, glyph = text.Ended, text.EndedNote, "playback-complete", text.Replay, "play-filled"
 		}
 		ui.Icon(c.Key("status-icon"), p.Assets.Icon(icon)).Absolute().Left(p.Width/2-32.5).Top(p.Height/2-155).
 			Size(65, 65).TextColor(paint(colors.Accent.Soft))
 		p.playbackStatusLine(c, title, -57, 41, 450, paint(colors.Playback.Foreground)).Role(ui.RoleStatus)
 		p.playbackStatusLine(c, note, 22, 24, 400, paint(colors.Playback.Secondary)).Translate(-5, 0)
-		p.region(playerPanelGroup, focusEdges{})
-		ui.Column(c.Key("status-action")).Absolute().Left(0).Top(p.Height/2 + 95).FillWidth().AlignItems(ui.Center).Children(func() {
-			p.styledButton(c, action, glyph, playerStatus, playerPanelGroup, func() {
-				v.Playback.Retry()
-				s.show(v)
-				v.State.Focus, v.reveal = playerToggle, true
-			}, buttonAppearance{
-				height: 60, radius: 12, fontSize: 23, fontWeight: 550, iconSize: 24, iconGap: 12,
+		actions := *p
+		actions.active = p.active && !linePickerOpen
+		actions.region(playerPanelGroup, focusEdges{})
+		ui.Column(c.Key("status-action")).Absolute().Left(0).Top(p.Height/2 + 95).FillWidth().Gap(18).AlignItems(ui.Center).Children(func() {
+			primaryStyle := buttonAppearance{
+				height: 61, radius: 12, fontSize: 23, fontWeight: 550, iconSize: 24, iconGap: 12,
 				background: paint(colors.Focus.Background), foreground: paint(colors.Focus.Foreground),
-			}).Width(184).AlignSelf(ui.Center)
+			}
+			if showLineButton {
+				primaryStyle.background = d.secondaryFill
+				primaryStyle.foreground = d.secondaryText
+				primaryStyle.border = d.secondaryBorder
+			}
+			actions.styledButton(c, action, glyph, playerStatus, playerPanelGroup, primaryRun, primaryStyle).Width(primaryWidth).AlignSelf(ui.Center)
+			if showLineButton {
+				actions.styledButton(c, text.Line, "refresh", playerStatusLine, playerPanelGroup, func() {
+					s.openPanel(v, playerLine)
+				}, buttonAppearance{
+					height: 56, padding: 28, radius: 12, fontSize: 21, fontWeight: 500, iconSize: 21, iconGap: 11,
+					background: d.secondaryFill, foreground: d.secondaryText, border: d.secondaryBorder,
+				}).AlignSelf(ui.Center)
+			}
 		})
+		if linePickerOpen {
+			p.playbackPanel(c, state, s.current())
+		}
 	})
+}
+
+func (p *PageContext) leaveLiveToBrowse() {
+	v := p.host
+	entry, _ := p.State.Current()
+	if entry.Capabilities.Has(provider.BrowseLive) {
+		p.State.Navigate(app.Route{Page: app.Live})
+		return
+	}
+	v.goBack()
 }
 
 func (p *PageContext) playbackStatusLine(c *ui.Context, label string, offset, size float32, weight int, color ui.Color) ui.Element {

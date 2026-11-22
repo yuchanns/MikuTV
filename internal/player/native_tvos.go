@@ -1284,6 +1284,12 @@ func (p *tvosPlayer) applyForwardBuffer(item objc.ID) {
 	if item == 0 {
 		return
 	}
+	// Live HLS streams have an indefinite duration; let AVPlayer pick its
+	// native low-latency live window instead of forcing a 30s VOD buffer.
+	if !cmTimeIsNumeric(tvosNative.getCMTime(item, tvosNative.selDuration)) {
+		tvosNative.setFloat64(item, tvosNative.selSetPrefForwardBuffer, 0)
+		return
+	}
 	seconds := 30.0
 	if p.hdrVideo {
 		seconds = 45.0

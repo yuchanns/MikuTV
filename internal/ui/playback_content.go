@@ -174,7 +174,8 @@ func (s *playbackContent) hasActiveDanmaku(pos, lookahead float64, density int, 
 func (s *playbackContent) needsAnimationFrame(v *View, state app.PlaybackState, now time.Time, viewportWidth float32) bool {
 	v.playbackSettings.defaults()
 	entry, _ := v.State.Current()
-	if !v.playbackSettings.show || !entry.Capabilities.Has(provider.ReadDanmaku) ||
+	if state.Resolution.Plan.Live || state.Target.Ref.Kind == provider.Live ||
+		!v.playbackSettings.show || !entry.Capabilities.Has(provider.ReadDanmaku) ||
 		state.Target.PartID == "" || !state.Clock.HasFrame || state.Clock.Ended || state.Failure != "" {
 		return false
 	}
@@ -192,7 +193,8 @@ func (s *playbackContent) needsAnimationFrame(v *View, state app.PlaybackState, 
 func (s *playbackContent) refresh(v *View, state app.PlaybackState) time.Duration {
 	v.playbackSettings.defaults()
 	entry, _ := v.State.Current()
-	if v.playbackSettings.show && entry.Capabilities.Has(provider.ReadDanmaku) &&
+	live := state.Resolution.Plan.Live || state.Target.Ref.Kind == provider.Live
+	if !live && v.playbackSettings.show && entry.Capabilities.Has(provider.ReadDanmaku) &&
 		state.Target.PartID != "" && state.Clock.HasFrame && !state.Clock.Ended {
 		s.loadDanmaku(v, state)
 	}

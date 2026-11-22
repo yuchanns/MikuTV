@@ -660,7 +660,15 @@ func (p *PageContext) followingLiveCard(c *ui.Context, id app.FocusID, region st
 	colors, d, text := p.Theme.Colors, p.uiColors(), p.Assets.Text
 	card := ui.Button(c.Key(string(id)), "").Size(size.width, size.height).Shrink(0).Padding(0, 0).
 		Border(0, ui.Transparent).Background(ui.Transparent).Label(item.Title).
-		OnClick(func() { p.dispatch(func() { p.host.notice = text.Search.DetailPending }) })
+		OnClick(func() {
+			p.dispatch(func() {
+				if p.canPlay(item.Ref) {
+					p.openLivePlayback(item, false)
+					return
+				}
+				p.host.notice = text.Search.DetailPending
+			})
+		})
 	p.bind(card, id, region)
 	card.Children(func() {
 		ui.Column(c).Fill().Children(func() {
@@ -863,7 +871,9 @@ func (followingAllPage) Render(c *ui.Context, p *PageContext) {
 				if item.Creator != nil {
 					sub = item.Creator.Name
 				}
-				if kind != followingAllLive && p.canOpenVideoDetail(item.Ref) {
+				if kind == followingAllLive && p.canPlay(item.Ref) {
+					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.openLivePlayback(item, false) })
+				} else if kind != followingAllLive && p.canOpenVideoDetail(item.Ref) {
 					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.openVideoDetail(item) })
 				} else {
 					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.host.notice = text.Search.DetailPending })

@@ -575,6 +575,16 @@ func (v *View) syncCreatorFollowing(creator provider.Creator, following bool) {
 	if v.Following != nil {
 		v.Following.SyncFollow(creator, following)
 	}
+	if v.Live != nil {
+		v.Live.SyncFollow(creatorID, following)
+	}
+	for i := range v.player.items {
+		if c := v.player.items[i].item.Creator; c != nil && c.ID == creatorID {
+			copied := *c
+			copied.Following = following
+			v.player.items[i].item.Creator = &copied
+		}
+	}
 }
 
 func (creatorPage) Render(c *ui.Context, p *PageContext) {

@@ -27,6 +27,7 @@ const (
 	SeriesCalendar      Page = "seriesCalendar"
 	SeriesAll           Page = "seriesAll"
 	Live                Page = "live"
+	LiveAll             Page = "liveAll"
 	Library             Page = "library"
 	Settings            Page = "settings"
 	Account             Page = "account"

@@ -27,7 +27,14 @@ const (
 	speedBucketWidth = 100 * time.Millisecond
 	speedBucketCount = 15
 	speedMinWindow   = 250 * time.Millisecond
+	hlsMaxChildren   = 512
 )
+
+type hlsChildEntry struct {
+	resource provider.PlaybackResource
+	playlist bool
+	usedAt   uint64
+}
 
 type speedBucket struct {
 	slot  int64
@@ -149,10 +156,14 @@ type Media struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
-	mu           sync.Mutex
-	closed       bool
-	children     map[string]struct{}
-	cache        *segmentCache
+	mu               sync.Mutex
+	closed           bool
+	hlsChildren      map[string]hlsChildEntry
+	hlsSeq           uint64
+	hlsPrefetchBody  string
+	hlsPrefetchUntil time.Time
+	hlsLive          bool
+	cache            *segmentCache
 	tracks       []*dashTrack
 	bandwidthBps float64
 	primaryURLs  []string
@@ -173,11 +184,20 @@ func OpenMedia(ctx context.Context, playback provider.Playback) (*Media, error) 
 	m := &Media{
 		transport: playback.Transport, prefix: "/" + rand.Text() + "/",
 		mux: http.NewServeMux(), ctx: mctx, cancel: mcancel,
-		children: make(map[string]struct{}),
-		speed:    speedMeter{origin: time.Now()},
+		hlsChildren: make(map[string]hlsChildEntry),
+		speed:       speedMeter{origin: time.Now()},
 	}
+	m.mux.HandleFunc(m.prefix+"c/", m.serveHLSChild)
 	for _, stream := range playback.Plan.Streams {
-		name, err := m.prepareStream(ctx, stream)
+		streamCtx := ctx
+		var streamStop context.CancelFunc
+		if len(playback.Plan.Streams) > 1 && stream.Format == provider.PlaybackHLS {
+			streamCtx, streamStop = context.WithTimeout(ctx, 4*time.Second)
+		}
+		name, err := m.prepareStream(streamCtx, stream)
+		if streamStop != nil {
+			streamStop()
+		}
 		if err != nil {
 			if ctx.Err() != nil {
 				mcancel()
@@ -303,8 +323,17 @@ func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStrea
 		m.registerResource("video.mp4", stream.Video.Resource, stream.Video.ContentType, false)
 		return "video.mp4", nil
 	case provider.PlaybackHLS:
+		body, err := m.fetchPlaylist(ctx, stream.Video.Resource)
+		if err != nil {
+			return "", err
+		}
 		m.primaryURLs = stream.Video.Resource.URLs
 		m.bandwidthBps = float64(max(stream.Video.Bandwidth, 0)) / 8.0
+		m.mu.Lock()
+		m.hlsLive = stream.Live
+		m.hlsPrefetchBody = body
+		m.hlsPrefetchUntil = time.Now().Add(750 * time.Millisecond)
+		m.mu.Unlock()
 		m.registerResource("stream.m3u8", stream.Video.Resource, stream.Video.ContentType, true)
 		return "stream.m3u8", nil
 	case provider.PlaybackDASH:
@@ -533,14 +562,16 @@ func (m *Media) serveDirectResource(w http.ResponseWriter, request *http.Request
 
 var playlistURI = regexp.MustCompile("URI=\"([^\"]+)\"")
 
-func (m *Media) servePlaylist(w http.ResponseWriter, r *http.Request, resource provider.PlaybackResource) {
-	res, err := m.transport.OpenResource(r.Context(), resource, http.MethodGet, "")
+func (m *Media) fetchPlaylist(ctx context.Context, resource provider.PlaybackResource) (string, error) {
+	res, err := m.transport.OpenResource(ctx, resource, http.MethodGet, "")
 	if err != nil {
-		m.recordFailure(err)
-		http.Error(w, "Playlist unavailable", http.StatusBadGateway)
-		return
+		return "", err
 	}
 	defer res.Body.Close()
+	if res.Request != nil && res.Request.URL != nil {
+		u := res.Request.URL.String()
+		m.lastURL.Store(&u)
+	}
 	var body strings.Builder
 	scanner := bufio.NewScanner(&countingReader{r: res.Body, meter: &m.speed})
 	scanner.Buffer(make([]byte, 4096), 1<<20)
@@ -559,15 +590,64 @@ func (m *Media) servePlaylist(w http.ResponseWriter, r *http.Request, resource p
 		body.WriteByte('\n')
 	}
 	if err := scanner.Err(); err != nil || !strings.HasPrefix(body.String(), "#EXTM3U\n") {
-		m.recordFailure(errors.New("invalid HLS playlist"))
-		http.Error(w, "Invalid playlist", http.StatusBadGateway)
-		return
+		return "", errors.New("invalid HLS playlist")
+	}
+	return body.String(), nil
+}
+
+func (m *Media) servePlaylist(w http.ResponseWriter, r *http.Request, resource provider.PlaybackResource) {
+	var body string
+	isRoot := r.URL.Path == m.prefix+"stream.m3u8"
+	if isRoot {
+		m.mu.Lock()
+		if m.hlsPrefetchBody != "" && time.Now().Before(m.hlsPrefetchUntil) {
+			body = m.hlsPrefetchBody
+		}
+		m.hlsPrefetchBody = ""
+		m.hlsPrefetchUntil = time.Time{}
+		m.mu.Unlock()
+	}
+	if body == "" {
+		var err error
+		body, err = m.fetchPlaylist(r.Context(), resource)
+		if err != nil {
+			m.recordFailure(err)
+			http.Error(w, "Playlist unavailable", http.StatusBadGateway)
+			return
+		}
+	}
+	m.mu.Lock()
+	live := m.hlsLive
+	m.mu.Unlock()
+	if live {
+		w.Header().Set("Cache-Control", "no-store")
 	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-	w.Header().Set("Content-Length", strconv.Itoa(body.Len()))
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	if r.Method == http.MethodGet {
-		io.WriteString(w, body.String())
+		io.WriteString(w, body)
 	}
+}
+
+func (m *Media) serveHLSChild(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, m.prefix+"c/")
+	m.mu.Lock()
+	entry, ok := m.hlsChildren[name]
+	if ok {
+		m.hlsSeq++
+		entry.usedAt = m.hlsSeq
+		m.hlsChildren[name] = entry
+	}
+	m.mu.Unlock()
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if entry.playlist {
+		m.servePlaylist(w, r, entry.resource)
+		return
+	}
+	m.serveDirectResource(w, r, entry.resource, "")
 }
 
 func (m *Media) playlistChild(base *url.URL, value string, headers map[string]string) string {
@@ -597,9 +677,28 @@ func (m *Media) playlistChild(base *url.URL, value string, headers map[string]st
 	name := fmt.Sprintf("%x%s", sum[:16], ext)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.children[name]; !ok {
-		m.registerResource(name, provider.PlaybackResource{URLs: []string{ref.String()}, Headers: headers}, "", ext == ".m3u8")
-		m.children[name] = struct{}{}
+	m.hlsSeq++
+	if existing, ok := m.hlsChildren[name]; ok {
+		existing.usedAt = m.hlsSeq
+		m.hlsChildren[name] = existing
+		return m.prefix + "c/" + name
 	}
-	return name
+	if len(m.hlsChildren) >= hlsMaxChildren {
+		var oldestKey string
+		var oldestSeq uint64
+		for key, item := range m.hlsChildren {
+			if oldestKey == "" || item.usedAt < oldestSeq {
+				oldestKey, oldestSeq = key, item.usedAt
+			}
+		}
+		if oldestKey != "" {
+			delete(m.hlsChildren, oldestKey)
+		}
+	}
+	m.hlsChildren[name] = hlsChildEntry{
+		resource: provider.PlaybackResource{URLs: []string{ref.String()}, Headers: headers},
+		playlist: ext == ".m3u8",
+		usedAt:   m.hlsSeq,
+	}
+	return m.prefix + "c/" + name
 }

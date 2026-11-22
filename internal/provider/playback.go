@@ -22,6 +22,7 @@ type PlaybackTarget struct {
 type PlaybackRequest struct {
 	PlaybackTarget
 	Quality string `json:"quality,omitempty"`
+	Line    string `json:"line,omitempty"`
 	HDR     bool   `json:"hdr,omitempty"`
 	HEVC    bool   `json:"hevc,omitempty"`
 }
@@ -55,11 +56,14 @@ type PlaybackPlan struct {
 	ExpiresAt             int64               `json:"expiresAt,omitempty"`
 	DanmakuSegmentSeconds int                 `json:"danmakuSegmentSeconds,omitempty"`
 	Live                  bool                `json:"live,omitempty"`
+	LiveEnded             bool                `json:"liveEnded,omitempty"`
 	Access                VideoAccess         `json:"access,omitempty"`
 	PreviewRestriction    PlaybackLimit       `json:"previewRestriction,omitempty"`
 	Restriction           PlaybackLimit       `json:"restriction,omitempty"`
 	Quality               string              `json:"quality,omitempty"`
 	Qualities             []PlaybackQuality   `json:"qualities,omitempty"`
+	Line                  string              `json:"line,omitempty"`
+	Lines                 []PlaybackLine      `json:"lines,omitempty"`
 	Streams               []PlaybackStream    `json:"streams,omitempty"`
 	Chapters              []PlaybackChapter   `json:"chapters,omitempty"`
 	Subtitles             []PlaybackTrack     `json:"subtitles,omitempty"`
@@ -85,6 +89,11 @@ type PlaybackQuality struct {
 	HDR       bool          `json:"hdr,omitempty"`
 	Badge     string        `json:"badge,omitempty"`
 	Bandwidth int           `json:"bandwidth,omitempty"`
+}
+
+type PlaybackLine struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
 }
 
 type PlaybackFormat string

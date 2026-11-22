@@ -95,6 +95,7 @@ func main() {
 		search := app.NewCatalogSearch(preferences, mygo.RunOnMain, invalidate)
 		following := app.NewFollowingFeed(mygo.RunOnMain, invalidate)
 		series := app.NewSeriesCatalog(mygo.RunOnMain, invalidate)
+		live := app.NewLiveCatalog(mygo.RunOnMain, invalidate)
 		var view *tvui.View
 		auth := app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
 			catalog.Reload()
@@ -104,7 +105,7 @@ func main() {
 			}
 		}, func() { view.PromptSignIn() })
 		auth.SetCleaner(preferences)
-		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Auth: auth, Activity: activity, Pages: pages, Assets: assets,
+		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, Auth: auth, Activity: activity, Pages: pages, Assets: assets,
 			Preferences: preferences, Theme: theme.Default(), Version: appVersion})
 		view.Trace = os.Getenv("MIKUTV_NAV_TRACE") == "1"
 		if view.Trace {
@@ -136,6 +137,7 @@ func main() {
 				view.Playback.Close()
 				disposePlayer()
 			}
+			live.Close()
 			series.Close()
 			following.Close()
 			search.Close()

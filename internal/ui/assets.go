@@ -33,6 +33,7 @@ type labels struct {
 	Search                                                                searchLabels
 	Following                                                             followingLabels
 	Series                                                                seriesLabels
+	Live                                                                  liveLabels
 	Creator                                                               creatorLabels
 	Detail                                                                detailLabels
 	Playback                                                              playbackLabels
@@ -66,6 +67,14 @@ type seriesLabels struct {
 	Weekdays                                                    []string
 }
 
+type liveLabels struct {
+	Eyebrow, LiveNow, Viewers, EnterRoom                 string
+	RecommendedTitle, RecommendedNote                    string
+	FollowingTitle, FollowingNote                        string
+	EmptyArea, EmptyAreaNote                             string
+	Loading, LoadFailed, MoreFailed                      string
+}
+
 type creatorLabels struct {
 	Eyebrow, Videos, Posts, Collections, About         string
 	Followers, Works, CollectionWorks                  string
@@ -95,6 +104,8 @@ type playbackLabels struct {
 	Density, Opacity, SendDanmaku, DanmakuPlaceholder, Send, DanmakuSent, ScrollMode, TopMode, BottomMode string
 	SubtitleFailed, PickFavoriteFolders, FavoriteSaved, ChapterHere, SeekTo, MoreComments                 string
 	QualityGuest, QualitySignedIn, QualityMember                                                          string
+	RoomInfo, RoomNumber, RoomEmptyDesc, LiveQuality, Line, LineAuto, LineChanged                         string
+	LiveDisconnected, LiveDisconnectedBody, LiveEnded, LiveEndedBody, MoreLive                            string
 }
 
 type playbackAccessLabels struct {

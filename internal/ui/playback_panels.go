@@ -2,6 +2,7 @@ package tvui
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -12,11 +13,29 @@ import (
 var playbackRates = [...]float64{0.5, 0.75, 1, 1.25, 1.5, 2}
 
 func (s *playbackView) openPanel(v *View, panel app.FocusID) {
-	s.panel, s.returnFocus, s.panelScroll = panel, panel, ui.ScrollState{}
+	returnFocus := panel
+	if panel == playerLine && v.Playback != nil && v.Playback.State().Failure != "" {
+		returnFocus = playerStatusLine
+	}
+	s.panel, s.returnFocus, s.panelScroll = panel, returnFocus, ui.ScrollState{}
 	s.controlFocus = ""
+	state := app.PlaybackState{}
+	if v.Playback != nil {
+		state = v.Playback.State()
+	}
+	liveMode := isLivePlayback(state, s.current())
 	switch panel {
 	case playerInfo:
-		v.State.Focus = playerPanelExit
+		if liveMode {
+			entry, _ := v.State.Current()
+			if entry.Capabilities.Has(provider.FollowCreator) && s.current().item.Creator != nil {
+				v.State.Focus = playerRoomFollow
+			} else {
+				v.State.Focus = playerPanelExit
+			}
+		} else {
+			v.State.Focus = playerPanelExit
+		}
 	case playerComments:
 		detail := v.discussionDetail()
 		d := detail.videoDiscussion()
@@ -31,12 +50,13 @@ func (s *playbackView) openPanel(v *View, panel app.FocusID) {
 	case playerSubtitles:
 		v.State.Focus = playbackOptionID(panel, s.content.subtitle)
 	case playerQuality:
-		state := v.Playback.State()
 		key := state.Resolution.Plan.Quality
-		if state.Selected == "" {
+		if !liveMode && state.Selected == "" {
 			key = ""
 		}
 		v.State.Focus = playbackOptionID(panel, key)
+	case playerLine:
+		v.State.Focus = playbackOptionID(panel, state.SelectedLine)
 	case playerDanmaku:
 		key := "disabled"
 		if v.playbackSettings.show {
@@ -51,8 +71,13 @@ func (s *playbackView) openPanel(v *View, panel app.FocusID) {
 }
 
 func (s *playbackView) closePanel(v *View) {
+	returnFocus := s.returnFocus
 	s.panel = ""
-	s.restoreControl(v, s.returnFocus)
+	if v.Playback != nil && v.Playback.State().Failure != "" && returnFocus == playerStatusLine {
+		v.State.Focus, v.reveal = playerStatusLine, true
+		return
+	}
+	s.restoreControl(v, returnFocus)
 }
 
 const playerPanelExit app.FocusID = "player/panel-exit"
@@ -204,13 +229,21 @@ func (p *PageContext) playbackSeekPreview(c *ui.Context, state app.PlaybackState
 
 func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item playbackItem) {
 	s, text := &p.host.player, p.Assets.Text.Playback
+	liveMode := isLivePlayback(state, item)
 	pane := *p
-	pane.active = p.active && !playbackBlocking(state) && !s.content.overlay()
+	allowDisconnectedLine := liveMode && s.panel == playerLine && state.Failure != "" && !state.LiveEnded
+	pane.active = p.active && (!playbackBlocking(state) || allowDisconnectedLine) && !s.content.overlay()
+	if s.panel == playerInfo && liveMode {
+		pane.liveRoomInfoOverlay(c, state, item)
+		return
+	}
 	if s.panel == playerInfo || s.panel == playerComments {
 		pane.playbackDrawer(c, state, item)
 		return
 	}
 	var title, current string
+	popoverWidth := float32(392)
+	popoverRight := float32(88)
 	switch s.panel {
 	case playerDanmaku:
 		title = text.Danmaku
@@ -219,14 +252,22 @@ func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item
 	case playerSpeed:
 		title, current = text.Speed, playbackRateLabel(p.host.Playback.Rate())
 	case playerQuality:
-		title, current = text.Quality, playbackQualityLabel(state)
-		if state.Selected == "" && current != "" {
-			current = text.Auto + " · " + current
+		if liveMode {
+			title = text.LiveQuality
+			popoverWidth, popoverRight = 370, 80
+		} else {
+			title, current = text.Quality, playbackQualityLabel(state)
+			if state.Selected == "" && current != "" {
+				current = text.Auto + " · " + current
+			}
 		}
+	case playerLine:
+		title = text.Line
+		popoverWidth, popoverRight = 370, 80
 	}
 	colors, d := p.Theme.Colors, p.uiColors()
 	pane.region(playerPanelGroup, focusEdges{})
-	ui.Column(c.Key("player-popover")).Absolute().Right(88).Bottom(164).Width(392).MaxHeight(680).
+	ui.Column(c.Key("player-popover")).Absolute().Right(popoverRight).Bottom(164).Width(popoverWidth).MaxHeight(680).
 		Radius(20).Background(d.playbackMenu).Border(1, withAlpha(colors.Playback.Foreground, 0x14)).
 		Shadow(0, 16, 60, 0, paint(colors.Overlay.Shadow)).Clip().Children(func() {
 		ui.Row(c).FillWidth().Height(66).Padding(0, 16).Gap(12).AlignItems(ui.Center).
@@ -243,7 +284,7 @@ func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item
 		ui.Box(c).FillWidth().Height(1).Background(withAlpha(colors.Playback.Foreground, 0x14))
 		ui.Scroll(c).FillWidth().MaxHeight(607).TrackScroll(&s.panelScroll).Children(func() {
 			ui.Column(c).FillWidth().Padding(10, 12).Gap(4).Children(func() {
-				if s.panel == playerQuality {
+				if s.panel == playerQuality && !liveMode {
 					hint := text.QualityGuest
 					if account, signedIn := currentAccount(p.host.Auth.Accounts()); signedIn {
 						hint = text.QualitySignedIn
@@ -264,9 +305,71 @@ func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item
 	})
 }
 
+func (p *PageContext) liveRoomInfoOverlay(c *ui.Context, state app.PlaybackState, current playbackItem) {
+	v, s, colors, text := p.host, &p.host.player, p.Theme.Colors, p.Assets.Text
+	entry, _ := p.State.Current()
+	canFollow := entry.Capabilities.Has(provider.FollowCreator) && current.item.Creator != nil
+	p.region(playerPanelGroup, focusEdges{})
+	roomID := current.item.Ref.ID
+	if state.Resolution.Plan.ItemID != "" {
+		roomID = state.Resolution.Plan.ItemID
+	}
+	desc := current.item.Subtitle
+	if desc == "" {
+		desc = text.Playback.RoomEmptyDesc
+	}
+	p.renderPlayerFrameless(c, "live-room-info", 860, func() {
+		p.framelessHeader(c, "LIVE \u00b7 ROOM INFO", "live", current.item.Title, "")
+		ui.Row(c).FillWidth().Gap(30).AlignItems(ui.Start).Children(func() {
+			coverBox := ui.Box(c.Key("live-room-cover")).Size(256, 144).Shrink(0).Radius(14).Clip().
+				Background(p.uiColors().coverFill)
+			coverBox.Children(func() {
+				if art := p.catalogCover(current.item.CoverURL); art != nil {
+					ui.Image(c, art).Fill().Fit(ui.Cover)
+				}
+			})
+			ui.Column(c).Grow(1).Shrink(1).Gap(10).Children(func() {
+				if current.item.Creator != nil {
+					ui.Text(c, current.item.Creator.Name).FontSize(28).FontWeight(550).MaxLines(1).
+						TextColor(paint(colors.Text.Primary))
+				}
+				var meta []string
+				if current.item.Category != "" {
+					meta = append(meta, current.item.Category)
+				}
+				if current.item.Views != nil && *current.item.Views > 0 {
+					meta = append(meta, catalogViews(*current.item.Views, text.Home)+" "+text.Live.Viewers)
+				}
+				if len(meta) != 0 {
+					ui.Text(c, strings.Join(meta, " \u00b7 ")).FontSize(18).TextColor(paint(colors.Accent.Soft))
+				}
+				ui.Text(c, desc).FillWidth().FontSize(21).LineHeight(1.7).MaxLines(4).
+					TextColor(paint(colors.Text.Secondary))
+				if roomID != "" {
+					ui.Text(c, fmt.Sprintf(text.Playback.RoomNumber, roomID)).Margin(4, 0, 0, 0).
+						FontSize(16).TextColor(paint(colors.Text.Muted))
+				}
+			})
+		})
+		ui.Row(c).Gap(16).Margin(36, 0, 0, 0).AlignSelf(ui.Start).Children(func() {
+			if canFollow {
+				label, icon := text.Detail.Follow, "plus"
+				if current.item.Creator.Following {
+					label, icon = text.Detail.Followed, "check"
+				}
+				p.styledButton(c, label, icon, playerRoomFollow, playerPanelGroup, p.toggleLiveFollow, p.framelessButtonAppearance())
+			}
+			p.styledButton(c, text.Close, "", playerPanelExit, playerPanelGroup, func() {
+				s.closePanel(v)
+			}, p.framelessButtonAppearance())
+		})
+	})
+}
+
 func (p *PageContext) playbackOptions(c *ui.Context, state app.PlaybackState) {
 	v, s, text := p.host, &p.host.player, p.Assets.Text.Playback
 	plan := state.Resolution.Plan
+	liveMode := isLivePlayback(state, s.current())
 	option := func(key, label, note string, selected bool, action func()) {
 		p.playbackOption(c, playbackOptionID(s.panel, key), label, note, selected, action)
 	}
@@ -289,9 +392,10 @@ func (p *PageContext) playbackOptions(c *ui.Context, state app.PlaybackState) {
 			})
 		}
 	case playerQuality:
-		isAuto := state.Selected == ""
+		isAuto := !liveMode && state.Selected == ""
 		for _, quality := range plan.Qualities {
-			option(quality.ID, quality.Label, p.playbackLimitLabel(quality.Limit), !isAuto && plan.Quality == quality.ID, func() {
+			selected := (!isAuto && plan.Quality == quality.ID) || (liveMode && plan.Quality == quality.ID)
+			option(quality.ID, quality.Label, p.playbackLimitLabel(quality.Limit), selected, func() {
 				s.content.requestQuality = quality.ID
 				if quality.Limit == provider.PlaybackLogin && v.openPlaybackSignIn() {
 					return
@@ -300,11 +404,31 @@ func (p *PageContext) playbackOptions(c *ui.Context, state app.PlaybackState) {
 				s.closePanel(v)
 			})
 		}
-		autoNote := ""
-		if isAuto {
-			autoNote = playbackQualityLabel(state)
+		if !liveMode {
+			autoNote := ""
+			if isAuto {
+				autoNote = playbackQualityLabel(state)
+			}
+			option("", text.Auto, autoNote, isAuto, func() { v.Playback.ChooseQuality(""); s.closePanel(v) })
 		}
-		option("", text.Auto, autoNote, isAuto, func() { v.Playback.ChooseQuality(""); s.closePanel(v) })
+	case playerLine:
+		option("", text.LineAuto, "", state.SelectedLine == "", func() {
+			s.panel = ""
+			v.Playback.ChooseLine("")
+			s.content.notice(text.LineChanged)
+			s.show(v)
+			v.State.Focus, v.reveal = playerToggle, true
+		})
+		for _, line := range plan.Lines {
+			lineID := line.ID
+			option(lineID, line.Label, "", state.SelectedLine == lineID, func() {
+				s.panel = ""
+				v.Playback.ChooseLine(lineID)
+				s.content.notice(text.LineChanged)
+				s.show(v)
+				v.State.Focus, v.reveal = playerToggle, true
+			})
+		}
 	case playerDanmaku:
 		p.playbackDanmakuOptions(c)
 	}
@@ -497,7 +621,7 @@ func (p *PageContext) playbackDiscussion(c *ui.Context, drawer ui.Element) {
 }
 
 func playbackBlocking(state app.PlaybackState) bool {
-	return playbackHasAccessDialog(state) || state.Failure != "" || state.Clock.Ended
+	return playbackHasAccessDialog(state) || state.Failure != "" || state.Clock.Ended || state.LiveEnded
 }
 
 func (p *PageContext) playbackLimitLabel(limit provider.PlaybackLimit) string {

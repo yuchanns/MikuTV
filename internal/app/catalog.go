@@ -91,6 +91,11 @@ func (c *Catalog) SeriesReader() provider.SeriesReader {
 	return reader
 }
 
+func (c *Catalog) LiveReader() provider.LiveReader {
+	reader, _ := c.session.(provider.LiveReader)
+	return reader
+}
+
 func (c *Catalog) ReadItem(ref provider.MediaRef, accept func(provider.MediaItem, error)) context.CancelFunc {
 	if c.session == nil {
 		accept(provider.MediaItem{}, &provider.Error{Code: provider.Unsupported})

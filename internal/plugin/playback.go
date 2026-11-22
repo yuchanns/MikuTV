@@ -20,7 +20,7 @@ import (
 
 func (s *Session) ResolvePlayback(ctx context.Context, request provider.PlaybackRequest) (provider.Playback, error) {
 	var result provider.Playback
-	if !s.ownsPlayback(request.PlaybackTarget) || len(request.Quality) > 512 {
+	if !s.ownsPlayback(request.PlaybackTarget) || len(request.Quality) > 512 || len(request.Line) > 128 {
 		return result, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
@@ -103,7 +103,10 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 		plan.PreviewRestriction != provider.PlaybackMembership && plan.PreviewRestriction != provider.PlaybackPurchase) {
 		return false
 	}
-	if plan.Access != provider.VideoAccessRestricted && len(plan.Streams) == 0 {
+	if plan.LiveEnded && !plan.Live {
+		return false
+	}
+	if plan.Access != provider.VideoAccessRestricted && !plan.LiveEnded && len(plan.Streams) == 0 {
 		return false
 	}
 	qualities := make(map[string]bool, len(plan.Qualities))
@@ -114,6 +117,18 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 		qualities[quality.ID] = true
 	}
 	if plan.Quality != "" && !qualities[plan.Quality] {
+		return false
+	}
+	lines := make(map[string]bool, len(plan.Lines))
+	for i := range plan.Lines {
+		line := &plan.Lines[i]
+		line.Label = strings.TrimSpace(line.Label)
+		if line.ID == "" || len(line.ID) > 128 || lines[line.ID] || line.Label == "" {
+			return false
+		}
+		lines[line.ID] = true
+	}
+	if plan.Line != "" && !lines[plan.Line] {
 		return false
 	}
 	for index := range plan.Streams {

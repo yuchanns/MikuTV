@@ -688,6 +688,10 @@ func (p *PageContext) searchMediaCard(c *ui.Context, item provider.MediaItem, wi
 		Border(0, ui.Transparent).Background(ui.Transparent).Label(item.Title).
 		OnClick(func() {
 			p.dispatch(func() {
+				if item.Ref.Kind == provider.Live && p.canPlay(item.Ref) {
+					p.openLivePlayback(item, false)
+					return
+				}
 				p.host.notice = p.Assets.Text.Search.DetailPending
 			})
 		})
