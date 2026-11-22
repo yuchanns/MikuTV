@@ -42,6 +42,7 @@ type AccountActivity struct {
 	folder       provider.AccountRow
 	filter       provider.NoticeFilter
 	pendingWrite *accountWrite
+	noticeWrite  *accountWrite
 	historyViews *historyViews
 }
 
@@ -186,6 +187,10 @@ func (a *AccountActivity) Close() {
 	if write := a.pendingWrite; write != nil {
 		write.cancel()
 		a.pendingWrite = nil
+	}
+	if write := a.noticeWrite; write != nil {
+		write.cancel()
+		a.noticeWrite = nil
 	}
 	for query := range a.reads {
 		a.remove(query)
@@ -336,4 +341,137 @@ func (a *AccountActivity) write(work func(context.Context) (int, error), done fu
 		})
 	}()
 	return true
+}
+
+func (a *AccountActivity) CanMarkNotificationsRead() bool {
+	if a == nil {
+		return false
+	}
+	_, supported := a.reader.(provider.NotificationsEditor)
+	return supported && a.Available(provider.AccountNotifications) && a.entry.Capabilities.Has(provider.EditNotifications)
+}
+
+func (a *AccountActivity) MarkingNotificationsRead() bool {
+	return a != nil && a.noticeWrite != nil
+}
+
+func (a *AccountActivity) MarkNotificationsRead(request provider.NotificationReadRequest, done func(error)) bool {
+	if !a.CanMarkNotificationsRead() || !request.Valid() || a.noticeWrite != nil {
+		return false
+	}
+	if request.All && request.Cursor == "" && (request.Filter == "" || request.Filter == provider.NoticeAll || request.Filter == provider.NoticeSystem) {
+		request.Cursor = a.latestNoticeSystemCursor()
+	}
+	editor := a.reader.(provider.NotificationsEditor)
+	ctx, cancel := context.WithCancel(context.Background())
+	write := &accountWrite{cancel: cancel}
+	a.noticeWrite = write
+	a.changed()
+	go func() {
+		result, err := editor.MarkNotificationsRead(ctx, request)
+		a.post(func() {
+			if a.noticeWrite != write {
+				return
+			}
+			cancel()
+			a.noticeWrite = nil
+			if err == nil {
+				a.applyNotificationsRead(request, result)
+			}
+			a.changed()
+			if done != nil {
+				done(err)
+			}
+		})
+	}()
+	return true
+}
+
+func (a *AccountActivity) latestNoticeSystemCursor() string {
+	best := ""
+	for query, read := range a.reads {
+		if query.Section != provider.AccountNotifications || query.Summary || read == nil {
+			continue
+		}
+		for _, row := range read.Page.Rows {
+			if row.Notice == nil || row.Notice.Cursor == "" {
+				continue
+			}
+			c := row.Notice.Cursor
+			if best == "" || len(c) > len(best) || (len(c) == len(best) && c > best) {
+				best = c
+			}
+		}
+	}
+	return best
+}
+
+func (a *AccountActivity) applyNotificationsRead(request provider.NotificationReadRequest, result provider.NotificationReadResult) {
+	markedIDs := make(map[string]bool, len(request.IDs))
+	for _, id := range request.IDs {
+		markedIDs[id] = true
+	}
+	clearedIDs := make(map[string]bool)
+	for query, read := range a.reads {
+		if query.Section != provider.AccountNotifications || query.Summary || read == nil || len(read.Page.Rows) == 0 {
+			continue
+		}
+		var updated []provider.AccountRow
+		for index, row := range read.Page.Rows {
+			if row.Notice == nil || !row.Notice.Unread {
+				continue
+			}
+			match := false
+			if request.All {
+				match = request.Filter == "" || request.Filter == provider.NoticeAll ||
+					row.Notice.Filter == request.Filter || query.Filter == request.Filter
+			} else {
+				match = markedIDs[row.ID]
+			}
+			if !match {
+				continue
+			}
+			if updated == nil {
+				updated = slices.Clone(read.Page.Rows)
+			}
+			noticeCopy := *row.Notice
+			noticeCopy.Unread = false
+			updated[index].Notice = &noticeCopy
+			clearedIDs[row.ID] = true
+		}
+		if updated != nil {
+			read.Page.Rows = updated
+		}
+	}
+
+	summaryQuery := provider.AccountQuery{Section: provider.AccountNotifications, Summary: true}
+	summaryRead := a.reads[summaryQuery]
+	if result.Unread != nil {
+		value := *result.Unread
+		if summaryRead == nil {
+			summaryRead = &accountRead{
+				cancel:          func() {},
+				AccountSnapshot: AccountSnapshot{Phase: CatalogReady, Page: provider.AccountPage{Unread: &value}},
+			}
+			a.reads[summaryQuery] = summaryRead
+		} else {
+			summaryRead.Page.Unread = &value
+			if summaryRead.Phase != CatalogLoading {
+				summaryRead.Phase = CatalogReady
+			}
+		}
+		return
+	}
+	if summaryRead == nil {
+		return
+	}
+	if request.All && (request.Filter == "" || request.Filter == provider.NoticeAll) {
+		zero := 0
+		summaryRead.Page.Unread = &zero
+		return
+	}
+	if len(clearedIDs) > 0 && summaryRead.Page.Unread != nil {
+		remaining := max(0, *summaryRead.Page.Unread-len(clearedIDs))
+		summaryRead.Page.Unread = &remaining
+	}
 }

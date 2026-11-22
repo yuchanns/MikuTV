@@ -111,6 +111,7 @@ type View struct {
 
 	accountDetailsPhone bool
 	openNotice          provider.AccountRow
+	noticeFeedback      videoDetailFeedback
 }
 
 func NewView(options Options) *View {
@@ -185,13 +186,22 @@ func (v *View) Render(c *ui.Context) {
 			}
 		case app.Series, app.SeriesCalendar, app.SeriesIndex, app.SeriesAll:
 			v.videoDetail.feedback = videoDetailFeedback{}
+			v.noticeFeedback = videoDetailFeedback{}
 			if v.creator != nil {
 				v.creator.feedback = videoDetailFeedback{}
 			}
 			v.renderFeedbackToast(c, &v.series.feedback)
+		case app.AccountMessages:
+			v.videoDetail.feedback = videoDetailFeedback{}
+			v.series.feedback = videoDetailFeedback{}
+			if v.creator != nil {
+				v.creator.feedback = videoDetailFeedback{}
+			}
+			v.renderFeedbackToast(c, &v.noticeFeedback)
 		default:
 			v.videoDetail.feedback = videoDetailFeedback{}
 			v.series.feedback = videoDetailFeedback{}
+			v.noticeFeedback = videoDetailFeedback{}
 			if v.creator != nil {
 				v.creator.feedback = videoDetailFeedback{}
 			}

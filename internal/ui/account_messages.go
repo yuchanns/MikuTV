@@ -10,15 +10,26 @@ import (
 
 const (
 	noticeTab         app.FocusID = "messages/tab/notifications"
+	noticeReadAll     app.FocusID = "messages/read-all"
 	noticeStatus      app.FocusID = "messages/status"
+	noticeOpenTarget  app.FocusID = "messages/open-target"
+	noticeOpenCreator app.FocusID = "messages/open-creator"
 	noticePage        app.Page    = "account-notice"
 	noticeTabs                    = "notice-tabs"
+	noticeActions                 = "notice-actions"
 	noticeFiltersArea             = "notice-filters"
 	noticeRows                    = "notice-rows"
 	noticeFooter                  = "notice-footer"
 	noticeListTop                 = 376
 	noticeRowHeight               = 159
 )
+
+func (v *View) showNoticeFeedback(text string) {
+	if text == "" {
+		return
+	}
+	v.noticeFeedback = videoDetailFeedback{text: text}
+}
 
 type accountMessagesPage struct{}
 
@@ -33,11 +44,23 @@ func (accountMessagesPage) Render(c *ui.Context, p *PageContext) {
 	p.left = focusDestination{Focus: app.RailFocus(app.Account)}
 	query := messagesQuery(p.host)
 	snapshot := p.host.Activity.Snapshot(query)
+	canMarkRead := p.host.Activity.CanMarkNotificationsRead()
 	activeFilter := app.FocusID("account/messages/" + query.Filter)
-	p.region(noticeTabs, focusEdges{app.Down: {Focus: activeFilter}})
-	p.region(noticeFiltersArea, focusEdges{
-		app.Up: {Focus: noticeTab}, app.Down: {Region: noticeRows},
-	})
+	tabEdges := focusEdges{app.Down: {Focus: activeFilter}}
+	filterEdges := focusEdges{app.Up: {Focus: noticeTab}, app.Down: {Region: noticeRows}}
+	if canMarkRead {
+		tabEdges[app.Right] = focusDestination{Focus: noticeReadAll, Region: noticeActions}
+		filterEdges[app.Right] = focusDestination{Focus: noticeReadAll, Region: noticeActions}
+		p.region(noticeActions, focusEdges{
+			app.Left: {Focus: noticeTab, Region: noticeTabs},
+			app.Down: {Focus: activeFilter, Region: noticeFiltersArea},
+		})
+	} else if p.active && p.State.Focus == noticeReadAll {
+		p.State.Focus = noticeTab
+		p.host.reveal = true
+	}
+	p.region(noticeTabs, tabEdges)
+	p.region(noticeFiltersArea, filterEdges)
 	p.region(noticeRows, focusEdges{app.Up: {Focus: activeFilter}, app.Down: {Region: noticeFooter}})
 	p.region(noticeFooter, focusEdges{app.Up: {Focus: activeFilter}})
 	ui.Column(c.Key("messages")).FillWidth().Padding(0, 83, 60, 103).Lang(accountLanguage).Font(accountFontFamily).Children(func() {
@@ -46,21 +69,109 @@ func (accountMessagesPage) Render(c *ui.Context, p *PageContext) {
 			ui.Text(c, text.Messages).Absolute().Top(144).Left(0).FontSize(51).FontWeight(550).LetterSpacing(1)
 			ui.Text(c, text.MessagesNote).Absolute().Top(230).Left(0).FontSize(22).
 				LineHeight(1.7).TextColor(paint(colors.Text.Muted))
-			ui.Button(c.Key("notices-read-all"), "").Label(text.ReadAllNotices).Disabled(true).
-				Absolute().Top(212).Right(0).Size(169, 56).Center().Radius(12).
-				Background(d.secondaryFill).Border(1, d.secondaryBorder).
-				Children(func() {
-					ui.Row(c).Gap(13).AlignItems(ui.Center).Children(func() {
-						ui.Icon(c, p.Assets.Icon("check")).Size(30, 30).TextColor(d.secondaryText)
-						ui.Text(c, text.ReadAllNotices).FontSize(20).FontWeight(550).TextColor(d.secondaryText)
-					})
-				})
+			if canMarkRead {
+				label := text.ReadAllNotices
+				if p.host.Activity.MarkingNotificationsRead() {
+					label = text.MarkingRead
+				}
+				p.styledButton(c, label, "check", noticeReadAll, noticeActions, func() {
+					p.markAllNotificationsRead(query)
+				}, buttonAppearance{
+					height: 56, padding: 20, radius: 12, fontSize: 20, fontWeight: 550, iconSize: 28, iconGap: 13,
+					background: d.secondaryFill, foreground: d.secondaryText, border: d.secondaryBorder,
+				}).Absolute().Top(212).Right(0)
+			}
 		})
 		p.notificationFilters(c, query)
 		ui.Box(c).Height(25)
 		ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
 		p.notificationList(c, query, snapshot)
 	})
+}
+
+func (p *PageContext) markAllNotificationsRead(query provider.AccountQuery) {
+	if !p.host.Activity.CanMarkNotificationsRead() {
+		return
+	}
+	p.host.Activity.MarkNotificationsRead(provider.NotificationReadRequest{
+		All:    true,
+		Filter: query.Filter,
+	}, func(err error) {
+		if err != nil {
+			p.host.showNoticeFeedback(p.authError(provider.CodeOf(err)))
+			return
+		}
+		p.host.showNoticeFeedback(p.Assets.Text.Activity.MarkedAllRead)
+	})
+}
+
+func (p *PageContext) noticeJumpItem(row provider.AccountRow) (provider.MediaItem, bool) {
+	var item provider.MediaItem
+	switch {
+	case row.Item != nil && row.Item.Ref.Kind.Valid() && row.Item.Ref.ID != "":
+		item = *row.Item
+	case row.Ref != nil && row.Ref.Kind.Valid() && row.Ref.ID != "":
+		item = provider.MediaItem{Ref: *row.Ref, Title: row.Title, CoverURL: row.CoverURL}
+	default:
+		return provider.MediaItem{}, false
+	}
+	if !p.canOpenNoticeTarget(item.Ref) {
+		return provider.MediaItem{}, false
+	}
+	return item, true
+}
+
+func (p *PageContext) canOpenNoticeTarget(ref provider.MediaRef) bool {
+	switch ref.Kind {
+	case provider.Video, provider.Movie, provider.Series, provider.Episode:
+		return p.canOpenVideoDetail(ref)
+	case provider.Live:
+		return p.canPlay(ref) || p.canOpenVideoDetail(ref)
+	default:
+		return false
+	}
+}
+
+func (p *PageContext) jumpToNoticeItem(item provider.MediaItem, notice *provider.AccountNotice) {
+	if item.Ref.Kind == provider.Live {
+		if p.canPlay(item.Ref) {
+			p.startDetailPlayback(item, nil)
+		} else {
+			p.openVideoDetail(item)
+		}
+		return
+	}
+	p.openVideoDetail(item)
+	if notice != nil && notice.Target == provider.NoticeTargetComments {
+		p.host.videoDetail.tab = videoDetailComments
+		p.host.videoDetail.revealSection = true
+		if p.canReadVideoDiscussion() {
+			p.State.Focus = videoDetailComments.focusID()
+		}
+	}
+}
+
+func (p *PageContext) openNotification(row provider.AccountRow) {
+	if row.Notice != nil && row.Notice.Unread && p.host.Activity.CanMarkNotificationsRead() {
+		p.host.Activity.MarkNotificationsRead(provider.NotificationReadRequest{
+			IDs:    []string{row.ID},
+			Filter: row.Notice.Filter,
+			Cursor: row.Notice.Cursor,
+		}, func(err error) {
+			if err != nil {
+				p.host.showNoticeFeedback(p.authError(provider.CodeOf(err)))
+			}
+		})
+	}
+	isSystem := row.Notice != nil && row.Notice.Filter == provider.NoticeSystem
+	if !isSystem {
+		if item, ok := p.noticeJumpItem(row); ok {
+			p.jumpToNoticeItem(item, row.Notice)
+			return
+		}
+	}
+	p.host.openNotice = row
+	p.State.Push(app.Route{Page: noticePage})
 }
 
 func (p *PageContext) notificationTabs(c *ui.Context) {
@@ -154,10 +265,7 @@ func (p *PageContext) notificationRow(c *ui.Context, row provider.AccountRow, to
 	}
 	button := ui.Button(c.Key(row.ID), "").Label(row.Title+" "+action).Absolute().Top(top).Left(0).Right(0).
 		Height(noticeRowHeight).Padding(0).Radius(12).Border(0, ui.Transparent).Background(fill).OnClick(func() {
-		p.dispatch(func() {
-			p.host.openNotice = row
-			p.State.Push(app.Route{Page: noticePage})
-		})
+		p.dispatch(func() { p.openNotification(row) })
 	})
 	p.animateFocus(button, fill, paint(colors.Text.Primary))
 	p.bind(button, id, noticeRows)
@@ -207,12 +315,45 @@ type accountNoticeDialog struct{}
 func (accountNoticeDialog) Render(c *ui.Context, p *PageContext) {
 	row, colors := p.host.openNotice, p.Theme.Colors
 	p.region(noticeFooter, nil)
+	var meta string
+	if row.Notice != nil && row.Notice.Actor != "" && row.Notice.Action != "" {
+		meta = row.Notice.Action
+	}
+	if row.Time > 0 {
+		ts := time.Unix(row.Time, 0).Local().Format("2006-01-02 15:04")
+		if meta != "" {
+			meta += " \u00b7 " + ts
+		} else {
+			meta = ts
+		}
+	}
+	jumpItem, canJumpItem := p.noticeJumpItem(row)
+	entry, _ := p.State.Current()
+	canJumpCreator := !canJumpItem && row.Notice != nil && row.Notice.ActorID != "" && row.Notice.Actor != "" &&
+		entry.Capabilities.Has(provider.ReadCreator)
 	ui.Column(c).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
-		p.framelessHeader(c, "NOTIFICATION", "info", row.Title, "")
+		p.framelessHeader(c, "NOTIFICATION", "info", row.Title, meta)
 		ui.Scroll(c.Key("notice-content")).FillWidth().MaxHeight(360).Children(func() {
 			ui.Text(c, row.Subtitle).FontSize(22).LineHeight(1.85).TextColor(paint(colors.Text.Secondary))
 		})
-		ui.Row(c).Margin(36, 0, 0, 0).Children(func() {
+		ui.Row(c).Margin(36, 0, 0, 0).Gap(16).Children(func() {
+			if canJumpItem {
+				p.styledButton(c, p.Assets.Text.Activity.OpenNoticeTarget, "play", noticeOpenTarget, noticeFooter, func() {
+					notice := row.Notice
+					p.State.Back()
+					p.jumpToNoticeItem(jumpItem, notice)
+				}, p.framelessButtonAppearance())
+			} else if canJumpCreator {
+				p.styledButton(c, p.Assets.Text.Activity.OpenNoticeCreator, "user", noticeOpenCreator, noticeFooter, func() {
+					creator := provider.Creator{
+						ID:        row.Notice.ActorID,
+						Name:      row.Notice.Actor,
+						AvatarURL: row.CreatorAvatarURL,
+					}
+					p.State.Back()
+					p.openCreator(creator)
+				}, p.framelessButtonAppearance())
+			}
 			p.styledButton(c, p.Assets.Text.Close, "", app.CloseModal, noticeFooter,
 				func() { p.State.Back() }, p.framelessButtonAppearance())
 		})

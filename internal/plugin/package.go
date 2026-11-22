@@ -55,6 +55,7 @@ var operations = map[provider.Capability][]string{
 	provider.EditHistory:                       {"removeAccountItems"},
 	provider.EditWatchLater:                    {"removeAccountItems"},
 	provider.EditTracking:                      {"removeAccountItems"},
+	provider.EditNotifications:                 {"markNotificationsRead"},
 }
 
 type Source struct {

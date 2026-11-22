@@ -245,6 +245,24 @@ func (s *Session) ReadAccount(ctx context.Context, request provider.AccountReque
 				return provider.AccountPage{}, err
 			}
 		}
+		if row.Notice != nil {
+			switch row.Notice.Filter {
+			case "", provider.NoticeAll, provider.NoticeReply, provider.NoticeLike, provider.NoticeSystem:
+			default:
+				row.Notice.Filter = ""
+			}
+			switch row.Notice.Target {
+			case "", provider.NoticeTargetComments:
+			default:
+				row.Notice.Target = ""
+			}
+			if len(row.Notice.ActorID) > 128 {
+				row.Notice.ActorID = ""
+			}
+			if len(row.Notice.Cursor) > 512 {
+				row.Notice.Cursor = ""
+			}
+		}
 	}
 	return page, nil
 }
@@ -291,6 +309,31 @@ func (s *Session) RemoveAccountItems(ctx context.Context, section provider.Accou
 	}{section, ids, secret}
 	var result struct{}
 	return s.invoke(ctx, scope, client, capability, "removeAccountItems", input, &result)
+}
+
+func (s *Session) MarkNotificationsRead(ctx context.Context, request provider.NotificationReadRequest) (provider.NotificationReadResult, error) {
+	if !request.Valid() {
+		return provider.NotificationReadResult{}, &provider.Error{Code: provider.Denied}
+	}
+	s.requests.RLock()
+	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
+	s.requests.RUnlock()
+	if owner == "" {
+		return provider.NotificationReadResult{}, &provider.Error{Code: provider.NeedsSignIn}
+	}
+	input := struct {
+		provider.NotificationReadRequest
+		Owner  string          `json:"owner"`
+		Secret json.RawMessage `json:"secret"`
+	}{request, owner, secret}
+	var result provider.NotificationReadResult
+	if err := s.invoke(ctx, scope, client, provider.EditNotifications, "markNotificationsRead", input, &result); err != nil {
+		return provider.NotificationReadResult{}, err
+	}
+	if result.Unread != nil && *result.Unread < 0 {
+		return provider.NotificationReadResult{}, &provider.Error{Code: provider.PluginFailed}
+	}
+	return result, nil
 }
 
 func (s *Session) invoke(ctx, scope context.Context, client *http.Client, op provider.Capability, export string, request, result any) error {

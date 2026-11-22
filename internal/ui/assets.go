@@ -149,7 +149,8 @@ type homeLabels struct {
 
 type accountActivityLabels struct {
 	History, Favorites, WatchLater, Messages, MessagesNote, MessagesUnread  string
-	NotificationTab, ReadAllNotices                                         string
+	NotificationTab, ReadAllNotices, MarkingRead, MarkedAllRead             string
+	OpenNoticeTarget, OpenNoticeCreator                                     string
 	RefreshingRights, RefreshedRights                                       string
 	All, Replies, Likes, System                                             string
 	SyncOn, SyncOff, SyncNote, SyncAction                                   string

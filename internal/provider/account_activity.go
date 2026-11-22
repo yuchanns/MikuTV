@@ -10,6 +10,7 @@ const EditFavoriteFolders Capability = "account.editFavoriteFolders"
 const EditWatchLater Capability = "account.editWatchLater"
 const EditHistory Capability = "account.editHistory"
 const EditTracking Capability = "account.editTracking"
+const EditNotifications Capability = "account.editNotifications"
 
 const FavoriteFolderTitleLimit = 24
 
@@ -158,10 +159,59 @@ type AccountRow struct {
 	Notice *AccountNotice `json:"notice,omitempty"`
 }
 
+type NoticeTarget string
+
+const (
+	NoticeTargetDefault  NoticeTarget = ""
+	NoticeTargetComments NoticeTarget = "comments"
+)
+
 type AccountNotice struct {
-	Actor  string `json:"actor,omitempty"`
-	Action string `json:"action,omitempty"`
-	Unread bool   `json:"unread,omitempty"`
+	Actor   string       `json:"actor,omitempty"`
+	ActorID string       `json:"actorID,omitempty"`
+	Action  string       `json:"action,omitempty"`
+	Unread  bool         `json:"unread,omitempty"`
+	Filter  NoticeFilter `json:"filter,omitempty"`
+	Target  NoticeTarget `json:"target,omitempty"`
+	Cursor  string       `json:"cursor,omitempty"`
+}
+
+type NotificationReadRequest struct {
+	All    bool         `json:"all,omitempty"`
+	Filter NoticeFilter `json:"filter,omitempty"`
+	IDs    []string     `json:"ids,omitempty"`
+	Cursor string       `json:"cursor,omitempty"`
+}
+
+func (request NotificationReadRequest) Valid() bool {
+	if len(request.Cursor) > 512 {
+		return false
+	}
+	switch request.Filter {
+	case "", NoticeAll, NoticeReply, NoticeLike, NoticeSystem:
+	default:
+		return false
+	}
+	if request.All {
+		return len(request.IDs) == 0
+	}
+	if len(request.IDs) == 0 || len(request.IDs) > 100 {
+		return false
+	}
+	for _, id := range request.IDs {
+		if id == "" || len(id) > 512 {
+			return false
+		}
+	}
+	return true
+}
+
+type NotificationReadResult struct {
+	Unread *int `json:"unread,omitempty"`
+}
+
+type NotificationsEditor interface {
+	MarkNotificationsRead(context.Context, NotificationReadRequest) (NotificationReadResult, error)
 }
 
 type AccountPage struct {

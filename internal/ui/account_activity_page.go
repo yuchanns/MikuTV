@@ -116,7 +116,10 @@ func messagesQuery(v *View) provider.AccountQuery {
 	return provider.AccountQuery{Section: provider.AccountNotifications, Filter: v.Activity.Filter()}
 }
 
-func syncAccountMessages(v *View) { v.Activity.Ensure(messagesQuery(v)) }
+func syncAccountMessages(v *View) {
+	v.Activity.Ensure(messagesQuery(v))
+	v.Activity.Ensure(provider.AccountQuery{Section: provider.AccountNotifications, Summary: true})
+}
 
 type libraryPage struct{}
 
