@@ -1,62 +1,89 @@
 package tvui
 
 import (
-	"fmt"
-
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
+const (
+	homeActionBackFocus  app.FocusID = "home-action/back"
+	homeActionRetryFocus app.FocusID = "home-action/retry"
+)
+
 type catalogActionPage struct{}
 
 type catalogAction struct {
+	id    string
 	title string
 	items []provider.MediaItem
-	list  ui.ListState
 }
 
-func (p *PageContext) openCatalogAction(title string, items []provider.MediaItem) {
+func (p *PageContext) openCatalogAction(id, title string, items []provider.MediaItem) {
 	if p.State.Push(app.Route{Page: app.HomeAction}) {
-		p.host.home.action = catalogAction{title: title, items: items}
+		p.host.home.action = catalogAction{id: id, title: title, items: items}
+		if len(items) != 0 {
+			p.State.Focus = catalogCardFocus("shelf-results", items[0].Ref)
+			p.host.reveal = true
+		}
 	}
 }
 
 func (catalogActionPage) Render(c *ui.Context, p *PageContext) {
 	action := &p.host.home.action
 	text := p.Assets.Text
-	const region = "catalog-action"
-	p.region(region, nil)
-	meta := ""
-	if len(action.items) != 0 {
-		meta = fmt.Sprintf(text.Modal.ItemsCount, len(action.items))
-	}
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
-		p.drawerHeader(c, "COLLECTION", action.title, meta, "")
-		if len(action.items) != 0 {
-			action.list.Key = func(index int) any { return action.items[index].Ref }
-			ui.List(c.Key("shelf-results"), &action.list, len(action.items)).FillWidth().Grow(1).
-				Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
-				rc, item := row.Context, action.items[row.Index]
-				sub := ""
-				if item.Creator != nil {
-					sub = item.Creator.Name
-				}
-				if p.canOpenVideoDetail(item.Ref) {
-					id := catalogCardFocus("shelf-results", item.Ref)
-					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.openVideoDetail(item) })
-				} else {
-					ui.Text(rc, item.Title).FontSize(22).Padding(14, 22).Margin(0, 0, 8, 0)
-				}
-			})
-		} else {
-			ui.Column(c).FillWidth().Grow(1).Center().Gap(20).Children(func() {
-				p.emptyDescription(c, text.EmptyTitle, text.EmptyNote)
-			})
+	items := action.items
+	var canLoadMore, loading bool
+	var loadErr string
+	var loadMore, retryMore func()
+	if action.id == "picks" && p.host.Catalog != nil {
+		snap := p.host.Catalog.Snapshot()
+		if live := firstCatalogItems(snap.Page.Collections); len(live) != 0 {
+			items = live
 		}
-		ui.Row(c).Margin(16, 0, 0, 0).Children(func() {
-			p.styledButton(c, text.Close, "", app.CloseModal, region, func() { p.State.Back() }, p.drawerButtonAppearance())
-		})
-		p.drawerFooter(c, text.Modal.HintSelect, text.Modal.HintOpen)
+		canLoadMore = snap.CanLoadMore()
+		loading = snap.Appending && snap.Phase == app.CatalogLoading
+		if catalogAppendFailed(snap) {
+			loadErr = string(snap.Error)
+		}
+		loadMore = p.host.Catalog.LoadMore
+		retryMore = p.host.Catalog.Retry
+	}
+	p.renderShelfCollection(c, shelfCollectionSpec{
+		key:         "home-action/" + action.id,
+		title:       action.title,
+		countFormat: text.Activity.FolderCount,
+		count:       len(items),
+		grid:        shelfVideoGrid,
+		backFocus:   homeActionBackFocus,
+		retryFocus:  homeActionRetryFocus,
+		itemPrefix:  "home/card/shelf-results/",
+		itemFocus: func(index int) app.FocusID {
+			return catalogCardFocus("shelf-results", items[index].Ref)
+		},
+		artworkURLs: func(index int) []string {
+			item := items[index]
+			if item.Creator != nil && item.Creator.AvatarURL != "" {
+				return []string{item.CoverURL, item.Creator.AvatarURL}
+			}
+			return []string{item.CoverURL}
+		},
+		renderCard: func(c *ui.Context, index int, id app.FocusID, region string, cardWidth float32) {
+			size := catalogCardSize{
+				width:  cardWidth,
+				height: shelfVideoGrid.cardH,
+				cover:  shelfVideoGrid.coverH,
+				title:  21,
+			}
+			p.catalogCard(c, id, region, items[index], size, nil)
+		},
+		emptyIcon:   "home",
+		emptyNote:   text.EmptyNote,
+		canLoadMore: canLoadMore,
+		loading:     loading,
+		loadErr:     loadErr,
+		moreFailed:  text.Home.MoreFailed,
+		loadMore:    loadMore,
+		retryMore:   retryMore,
 	})
 }

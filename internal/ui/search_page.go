@@ -17,7 +17,6 @@ const (
 	searchInputEdit    app.FocusID = "search/input-edit"
 	searchFilterFocus  app.FocusID = "search/filter"
 	searchRetryFocus   app.FocusID = "search/retry"
-	searchCancelFocus  app.FocusID = "search/cancel"
 	searchInputRegion              = "search/input"
 	searchHistoryRegion            = "search/history"
 	searchSuggestRegion            = "search/suggest"
@@ -326,8 +325,6 @@ func (p *PageContext) restoreSearchFocus(current app.SearchSnapshot, history, su
 		p.State.Focus = searchKindFocus(activeKind)
 	case focus == searchRetryFocus && current.Phase != app.CatalogFailed && current.Phase != app.CatalogCanceled:
 		p.State.Focus = searchInputFocus
-	case focus == searchCancelFocus && (current.Phase != app.CatalogLoading || current.ResultCount() != 0):
-		p.State.Focus = searchInputFocus
 	case strings.HasPrefix(string(focus), "search/history/"):
 		if idx, err := strconv.Atoi(strings.TrimPrefix(string(focus), "search/history/")); err != nil || idx < 0 || idx >= len(history) {
 			p.State.Focus = searchInputFocus
@@ -588,7 +585,6 @@ func (p *PageContext) searchResultsBody(c *ui.Context, current app.SearchSnapsho
 		case app.CatalogIdle, app.CatalogLoading:
 			ui.Column(c.Key("search-loading")).FillWidth().Padding(90, 20, 40, 20).AlignItems(ui.Center).Gap(20).Children(func() {
 				ui.Text(c, text.LoadingTitle).FontSize(25).TextColor(paint(colors.Text.Secondary))
-				p.button(c, text.Cancel, searchCancelFocus, searchStatusRegion, p.host.Search.Cancel).AlignSelf(ui.Center)
 			})
 		case app.CatalogFailed:
 			note := p.authError(current.Error)
@@ -838,27 +834,36 @@ func (p *PageContext) prepareSearchArtwork(current app.SearchSnapshot, activeKin
 			locations = append(locations, location)
 		}
 	}
-	addRow := func(row int) {
+	addRow := func(row int, avatars bool) {
 		start := row * 2
 		if activeKind == provider.SearchCreator {
-			for i := start; i < min(start+2, len(current.Page.Creators)); i++ {
-				add(current.Page.Creators[i].Creator.AvatarURL)
+			if !avatars {
+				for i := start; i < min(start+2, len(current.Page.Creators)); i++ {
+					add(current.Page.Creators[i].Creator.AvatarURL)
+				}
 			}
 			return
 		}
 		for i := start; i < min(start+2, len(current.Page.Items)); i++ {
 			item := current.Page.Items[i]
-			add(item.CoverURL)
-			if item.Creator != nil {
+			if !avatars {
+				add(item.CoverURL)
+			} else if item.Creator != nil {
 				add(item.Creator.AvatarURL)
 			}
 		}
 	}
 	for row := firstRow; row < endRow; row++ {
-		addRow(row)
+		addRow(row, false)
 	}
 	if focusedRow >= 0 && (focusedRow < firstRow || focusedRow >= endRow) {
-		addRow(focusedRow)
+		addRow(focusedRow, false)
+	}
+	for row := firstRow; row < endRow; row++ {
+		addRow(row, true)
+	}
+	if focusedRow >= 0 && (focusedRow < firstRow || focusedRow >= endRow) {
+		addRow(focusedRow, true)
 	}
 	p.host.Catalog.PrepareArtwork(locations)
 	p.pruneCatalogBitmaps()

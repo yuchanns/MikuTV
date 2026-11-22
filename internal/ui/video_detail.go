@@ -298,6 +298,9 @@ func (v *View) loadVideoDetail() {
 		if v.State.Page == app.VideoDetail {
 			// The loaded title can move the focused control below the viewport.
 			v.reveal = true
+			if detail.tab == videoDetailComments {
+				v.context(v.State.Location, true, 1920, 1080).ensureVideoDiscussionHot(detail)
+			}
 		}
 		resume := detail.afterLoad
 		detail.afterLoad = nil

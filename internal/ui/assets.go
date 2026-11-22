@@ -25,7 +25,7 @@ type labels struct {
 	LoadingTitle, LoadingNote, FailedTitle, FailedNote                    string
 	CanceledTitle, Retry, Cancel, Refresh                                 string
 	SettingsTitle, SettingsNote, EmptySettings                            string
-	Version, Platform, AboutNote, Licenses, Close, SaveFailed             string
+	Version, Platform, AboutNote, Licenses, Back, Close, SaveFailed       string
 	Sections                                                              []section
 	Auth                                                                  authLabels
 	Activity                                                              accountActivityLabels

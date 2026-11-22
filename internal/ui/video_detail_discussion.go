@@ -154,16 +154,36 @@ func (p *PageContext) openVideoThread(comment provider.VideoComment) {
 	}
 }
 
+func (d *videoDiscussionState) hasHot(info *provider.VideoDetails) bool {
+	return d.hotLoaded || (info != nil && (len(info.Discussion) > 0 || (info.Comments != nil && *info.Comments == 0)))
+}
+
+func (p *PageContext) ensureVideoDiscussionHot(detail *videoDetailState) {
+	if detail == nil || detail.loading || detail.failure != "" || !p.canReadVideoDiscussion() {
+		return
+	}
+	d := detail.videoDiscussion()
+	if !d.showLatest && d.root == nil && d.cancel == nil && !d.failed && !d.hasHot(detail.item.VideoDetails) {
+		p.loadVideoDiscussion(d, 0)
+	}
+}
+
 func (p *PageContext) setVideoDiscussionOrder(latest bool) {
-	d := p.host.discussionDetail().videoDiscussion()
-	if d.showLatest == latest && !d.failed && (!latest || d.hasLatest || d.cancel != nil) {
+	detail := p.host.discussionDetail()
+	d := detail.videoDiscussion()
+	hasHot := d.hasHot(detail.item.VideoDetails)
+	if d.showLatest == latest && !d.failed && (d.cancel != nil || (latest && d.hasLatest) || (!latest && hasHot)) {
 		return
 	}
 	d.cancelLoad()
 	d.showLatest, d.failed = latest, false
 	d.focusCommentOnLoad = false
 	d.listRows.ScrollTo(0, ui.Start)
-	if latest && !d.hasLatest {
+	if latest {
+		if !d.hasLatest {
+			p.loadVideoDiscussion(d, 0)
+		}
+	} else if !hasHot && p.canReadVideoDiscussion() {
 		p.loadVideoDiscussion(d, 0)
 	}
 }
@@ -239,6 +259,10 @@ func (p *PageContext) loadVideoDiscussion(d *videoDiscussionState, page int) {
 				d.hotLoaded, d.nextHot = true, result.NextPage
 				if page != 0 && appended == 0 {
 					d.nextHot = 0
+				}
+				if focusComment && (p.State.Page == app.VideoDetail || p.State.Page == app.Player) && p.State.Focus == videoDiscussionHot &&
+					d.root == nil && !d.showLatest && len(info.Discussion) != 0 {
+					p.host.moveFocus(videoCommentFocus(info.Discussion[0].ID), app.Down, true)
 				}
 			}
 			if page != 0 && appended != 0 && p.State.Focus == videoDiscussionMoreReplies {

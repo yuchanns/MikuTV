@@ -381,6 +381,8 @@ func (s videoPaneSession) VideoComments(_ context.Context, query provider.VideoC
 	rows := []provider.VideoComment{{ID: "newest", Author: "Another viewer", Body: "Most recent comment", ReplyCount: &count}}
 	if query.ThreadID != "" {
 		rows = []provider.VideoComment{{ID: "reply", Author: "Creator", Body: "Reply from the creator", IsCreator: true}}
+	} else if query.Order == provider.VideoCommentsHot {
+		rows = []provider.VideoComment{{ID: "hot", Author: "Viewer", Body: "Most liked comment", ReplyCount: &count}}
 	}
 	return provider.VideoCommentPage{Comments: rows}, nil
 }
@@ -971,5 +973,103 @@ func TestVideoDetailSynopsisCacheReusesResult(t *testing.T) {
 	narrower := detail.cachedSynopsis(body, 400)
 	if detail.synopsisWidth != 400 || !narrower.truncated {
 		t.Fatalf("synopsis cache did not recompute on width change: width=%v %+v", detail.synopsisWidth, narrower)
+	}
+}
+
+func TestVideoDetailCommentsLazyLoadsHotWhenUnpopulated(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := testEntries()
+	entries[0].Capabilities = provider.Capabilities{
+		provider.GetCatalogItem, provider.ReadVideoComments,
+	}
+	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := videoPaneSession{queries: make(chan provider.VideoCommentQuery, 4), edits: make(chan provider.VideoEdit, 1)}
+	callbacks := make(chan func(), 4)
+	catalog := app.NewCatalog(func(string) provider.Session { return session }, func(fn func()) { callbacks <- fn }, func() {})
+	defer catalog.Close()
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
+	view.SyncEntry()
+	if !state.Push(app.Route{Page: app.VideoDetail}) {
+		t.Fatal("could not open video details")
+	}
+	ref := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Series, ID: "ss45969"}
+	commentCount := int64(42)
+	view.videoDetail.item = provider.MediaItem{
+		Ref:   ref,
+		Title: "Series With Lazy Hot Comments",
+		VideoDetails: &provider.VideoDetails{
+			Comments: &commentCount,
+			// Intentionally leave Discussion empty to verify lazy hot-comment loading.
+		},
+	}
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	tester.Frame()
+
+	// Switch to Comments tab -> must trigger VideoCommentsHot automatically instead of showing NoComments.
+	page := &PageContext{State: state, Assets: assets, host: view}
+	page.selectVideoDetailTab(videoDetailComments, app.Right)
+	tester.Frame()
+	if tester.HasText(assets.Text.Detail.NoComments) {
+		t.Fatal("Comments tab showed NoComments while hot comments were loading")
+	}
+	select {
+	case cb := <-callbacks:
+		cb()
+	case <-time.After(2 * time.Second):
+		t.Fatal("selecting Comments tab did not lazy-load hot comments when Discussion was empty")
+	}
+	query := <-session.queries
+	if query.Ref != ref || query.Order != provider.VideoCommentsHot || query.Page != 0 {
+		t.Fatalf("unexpected hot query: %+v", query)
+	}
+	tester.Frame()
+	if !tester.HasText("Most liked comment") || tester.HasText(assets.Text.Detail.NoComments) {
+		t.Fatalf("lazy-loaded hot comments did not render")
+	}
+
+	// Switch to Latest and back to Hot -> Hot stays cached with no redundant query.
+	page.setVideoDiscussionOrder(true)
+	select {
+	case cb := <-callbacks:
+		cb()
+	case <-time.After(2 * time.Second):
+		t.Fatal("switching to Latest did not load latest comments")
+	}
+	latestQuery := <-session.queries
+	if latestQuery.Order != provider.VideoCommentsLatest {
+		t.Fatalf("unexpected latest query: %+v", latestQuery)
+	}
+	page.setVideoDiscussionOrder(false)
+	tester.Frame()
+	if !tester.HasText("Most liked comment") {
+		t.Fatal("switching back to Hot lost loaded hot comments")
+	}
+	select {
+	case extra := <-session.queries:
+		t.Fatalf("unexpected redundant query after hot comments were cached: %+v", extra)
+	default:
+	}
+
+	// Zero comment count skips redundant Hot RPC.
+	zero := int64(0)
+	view.videoDetail.item.VideoDetails = &provider.VideoDetails{Comments: &zero}
+	view.videoDetail.discussion = nil
+	view.videoDetail.tab = videoDetailOverview
+	page.selectVideoDetailTab(videoDetailComments, app.Right)
+	tester.Frame()
+	select {
+	case extra := <-session.queries:
+		t.Fatalf("unexpected query when comment count is explicitly 0: %+v", extra)
+	default:
 	}
 }

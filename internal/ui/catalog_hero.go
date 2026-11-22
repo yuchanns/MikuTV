@@ -230,7 +230,7 @@ func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem
 				p.openPlayback([]playbackItem{{item: *item}}, 0, false, nil)
 				return
 			}
-			p.openCatalogAction(text.Play, nil)
+			p.openCatalogAction("play", text.Play, nil)
 		}, p.playButtonAppearance()).Width(179).Center()
 		if item != nil && p.canOpenVideoDetail(item.Ref) {
 			p.styledButton(c, text.Details, "info", homeDetailAction, homeHero, func() {

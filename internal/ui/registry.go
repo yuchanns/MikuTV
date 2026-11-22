@@ -160,10 +160,10 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	registrations := []Registration{
 		home,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.HomeAction}, Parent: app.Route{Page: app.Home},
-			Initial: focus(app.CloseModal), RequiresEntry: true, Modal: true},
-			Component: catalogActionPage{}, ModalPresentation: modalDrawer, ModalWidth: 680,
+			Initial: focus(homeActionBackFocus), ContentFocus: homeActionBackFocus, RequiresEntry: true, Transient: true},
+			Component: catalogActionPage{}, RawScreen: true,
 			Leave: func(v *View) {
-				if v.State.Page != app.VideoDetail {
+				if v.State.Page != app.VideoDetail && v.State.Page != app.Player {
 					v.home.action = catalogAction{}
 				}
 			}},
@@ -208,22 +208,20 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Component: searchFiltersPage{}, ModalPresentation: modalDrawer, ModalWidth: 660},
 		following,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.FollowingAll}, Parent: app.Route{Page: app.Following},
-			Initial: focus(app.CloseModal), RequiresEntry: true, Capability: provider.BrowseFollowing, Modal: true},
-			Component: followingAllPage{}, ModalPresentation: modalDrawer, ModalWidth: 680,
+			Initial: focus(followingAllBackFocus), ContentFocus: followingAllBackFocus, RequiresEntry: true, Capability: provider.BrowseFollowing, Transient: true},
+			Component: followingAllPage{}, RawScreen: true,
 			Leave: func(v *View) {
-				if v.State.Page != app.VideoDetail {
+				if v.State.Page != app.VideoDetail && v.State.Page != app.Player {
 					v.following.allSection = ""
-					v.following.allList = ui.ListState{}
 				}
 			}},
 		series,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.SeriesAll}, Parent: app.Route{Page: app.Series},
-			Initial: focus(app.CloseModal), RequiresEntry: true, Capability: provider.BrowseSeries, Modal: true},
-			Component: seriesAllPage{}, ModalPresentation: modalDrawer, ModalWidth: 680,
+			Initial: focus(seriesAllBackFocus), ContentFocus: seriesAllBackFocus, RequiresEntry: true, Capability: provider.BrowseSeries, Transient: true},
+			Component: seriesAllPage{}, RawScreen: true,
 			Leave: func(v *View) {
-				if v.State.Page != app.VideoDetail {
+				if v.State.Page != app.VideoDetail && v.State.Page != app.Player {
 					v.series.allSection = ""
-					v.series.allList = ui.ListState{}
 				}
 			}},
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.SeriesIndex}, Parent: app.Route{Page: app.Series},
@@ -247,12 +245,11 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			}},
 		live,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.LiveAll}, Parent: app.Route{Page: app.Live},
-			Initial: focus(app.CloseModal), RequiresEntry: true, Capability: provider.BrowseLive, Modal: true},
-			Component: liveAllPage{}, ModalPresentation: modalDrawer, ModalWidth: 680,
+			Initial: focus(liveAllBackFocus), ContentFocus: liveAllBackFocus, RequiresEntry: true, Capability: provider.BrowseLive, Transient: true},
+			Component: liveAllPage{}, RawScreen: true,
 			Leave: func(v *View) {
-				if v.State.Page != app.Player {
+				if v.State.Page != app.Player && v.State.Page != app.VideoDetail {
 					v.live.allSection = ""
-					v.live.allList = ui.ListState{}
 				}
 			}},
 		library,

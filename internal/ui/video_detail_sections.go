@@ -148,6 +148,9 @@ func (p *PageContext) selectVideoDetailTab(tab videoDetailTab, direction app.Dir
 	}
 	detail.tab, detail.expanded, detail.revealSection = tab, false, true
 	p.host.moveFocus(tab.focusID(), direction, false)
+	if tab == videoDetailComments {
+		p.ensureVideoDiscussionHot(detail)
+	}
 }
 
 func videoDetailSectionFocus(tab videoDetailTab, info *provider.VideoDetails) app.FocusID {

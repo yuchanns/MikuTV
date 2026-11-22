@@ -2,7 +2,6 @@ package tvui
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -28,8 +27,8 @@ const (
 	seriesPicksAllFocus     app.FocusID = "series/all/picks"
 	seriesTrackedAllFocus   app.FocusID = "series/all/tracked"
 	seriesRetryFocus        app.FocusID = "series/retry"
-	seriesCancelFocus       app.FocusID = "series/cancel"
-	seriesAllMoreFocus      app.FocusID = "series-all/more"
+	seriesAllBackFocus      app.FocusID = "series-all/back"
+	seriesAllRetryFocus     app.FocusID = "series-all/retry"
 
 	seriesHeaderRegion  = "series/header"
 	seriesToolsRegion   = "series/tools"
@@ -53,8 +52,8 @@ const (
 type seriesViewState struct {
 	picksScroll   ui.ScrollState
 	trackedScroll ui.ScrollState
+	featuredRef   provider.MediaRef
 	allSection    seriesAllKind
-	allList       ui.ListState
 	filterKey     string
 	filterList    ui.ListState
 	trackPending  context.CancelFunc
@@ -88,6 +87,7 @@ func (v *View) selectSeriesGenre(genre string) {
 		return
 	}
 	v.series.picksScroll = ui.ScrollState{}
+	v.series.featuredRef = provider.MediaRef{}
 	v.setCatalogFocus(v.activeScroll, seriesGenreFocus(genre), true)
 	v.Series.SelectGenre(genre)
 }
@@ -134,20 +134,19 @@ func (seriesPage) Render(c *ui.Context, p *PageContext) {
 	}
 	snap := catalog.Hub()
 	p.restoreSeriesHubFocus(snap)
-	p.prepareSeriesHubArtwork(snap)
-	p.seriesHubRegions(snap)
+	featured := p.seriesFeaturedEntry(snap)
+	p.prepareSeriesHubArtwork(snap, featured)
+	p.seriesHubRegions(snap, featured != nil)
 
 	ui.Box(c.Key("series-page")).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
-		if snap.Hero != nil && p.scroll().Y < seriesArtHeight {
-			p.seriesBackdrop(c, *snap.Hero)
+		if featured != nil && p.scroll().Y < seriesArtHeight {
+			p.seriesBackdrop(c, *featured)
 		}
 		ui.Column(c.Key("series-content")).FillWidth().Padding(0, 0, screenBottomInset, 0).ZIndex(1).Children(func() {
 			p.seriesHeader(c, snap)
 			switch {
 			case snap.Phase == app.CatalogIdle || (snap.Phase == app.CatalogLoading && !snap.Loaded):
-				p.seriesStateBlock(c, "series", p.Assets.Text.Series.Loading, "", p.Assets.Text.Cancel, "", seriesCancelFocus, seriesStatusRegion, func() {
-					catalog.CancelHub()
-				})
+				p.seriesStateBlock(c, "series", p.Assets.Text.Series.Loading, "", "", "", "", seriesStatusRegion, nil)
 				return
 			case snap.Phase == app.CatalogFailed && !snap.Loaded:
 				p.seriesStateBlock(c, "series", p.Assets.Text.Series.LoadFailed, p.authError(snap.Error), p.Assets.Text.Retry, "refresh", seriesRetryFocus, seriesStatusRegion, func() {
@@ -160,8 +159,8 @@ func (seriesPage) Render(c *ui.Context, p *PageContext) {
 				})
 				return
 			}
-			if snap.Hero != nil {
-				p.seriesHero(c, *snap.Hero)
+			if featured != nil {
+				p.seriesHero(c, *featured)
 			}
 			p.seriesPosterShelf(c, "picks", p.Assets.Text.Series.PicksTitle, p.Assets.Text.Series.PicksNote,
 				snap.Items, &p.host.series.picksScroll, seriesPicksAllFocus, seriesPicksRegion,
@@ -181,8 +180,7 @@ func (p *PageContext) restoreSeriesHubFocus(snap app.SeriesHubSnapshot) {
 	}
 	focus := p.State.Focus
 	tab := seriesGenreFocus(snap.Genre)
-	if (focus == seriesRetryFocus && snap.Phase != app.CatalogFailed && snap.Phase != app.CatalogCanceled) ||
-		(focus == seriesCancelFocus && snap.Phase != app.CatalogLoading) {
+	if focus == seriesRetryFocus && snap.Phase != app.CatalogFailed && snap.Phase != app.CatalogCanceled {
 		p.State.Focus = tab
 		p.host.reveal = true
 		return
@@ -212,7 +210,7 @@ func (p *PageContext) restoreSeriesHubFocus(snap app.SeriesHubSnapshot) {
 	}
 }
 
-func (p *PageContext) seriesHubRegions(snap app.SeriesHubSnapshot) {
+func (p *PageContext) seriesHubRegions(snap app.SeriesHubSnapshot, hasHero bool) {
 	tab := seriesGenreFocus(snap.Genre)
 	hasTools := !snap.Loaded || snap.SupportsIndex || snap.SupportsCalendar
 	headerEdges := focusEdges{}
@@ -253,7 +251,7 @@ func (p *PageContext) seriesHubRegions(snap app.SeriesHubSnapshot) {
 		picksDest.Focus = target
 	}
 	belowHeader := picksDest
-	if snap.Hero != nil {
+	if hasHero {
 		belowHeader = focusDestination{Focus: seriesHeroPlayFocus, Region: seriesHeroRegion}
 	}
 	headerEdges[app.Down] = belowHeader
@@ -264,14 +262,14 @@ func (p *PageContext) seriesHubRegions(snap app.SeriesHubSnapshot) {
 			app.Down: belowHeader,
 		})
 	}
-	if snap.Hero != nil {
+	if hasHero {
 		p.region(seriesHeroRegion, focusEdges{
 			app.Up:   {Focus: tab, Region: seriesHeaderRegion},
 			app.Down: picksDest,
 		})
 	}
 	abovePicks := focusDestination{Focus: tab, Region: seriesHeaderRegion}
-	if snap.Hero != nil {
+	if hasHero {
 		abovePicks = focusDestination{Focus: seriesHeroPlayFocus, Region: seriesHeroRegion}
 	}
 	picksEdges := focusEdges{app.Up: abovePicks}
@@ -286,19 +284,117 @@ func (p *PageContext) seriesHubRegions(snap app.SeriesHubSnapshot) {
 	p.region(seriesPicksRegion, picksEdges)
 }
 
-func (p *PageContext) prepareSeriesHubArtwork(snap app.SeriesHubSnapshot) {
+func (p *PageContext) seriesFeaturedEntry(snap app.SeriesHubSnapshot) *provider.SeriesEntry {
+	focus := p.State.Focus
+	find := func(ref provider.MediaRef) *provider.SeriesEntry {
+		if ref.ID == "" {
+			return nil
+		}
+		if snap.Hero != nil && snap.Hero.Item.Ref == ref {
+			copyEntry := *snap.Hero
+			return &copyEntry
+		}
+		for i := range snap.Items {
+			if snap.Items[i].Item.Ref == ref {
+				copyEntry := snap.Items[i]
+				return &copyEntry
+			}
+		}
+		for i := range snap.Tracked {
+			if snap.Tracked[i].Item.Ref == ref {
+				copyEntry := snap.Tracked[i]
+				return &copyEntry
+			}
+		}
+		return nil
+	}
+	if strings.HasPrefix(string(focus), "series/picks/") {
+		for i := range snap.Items {
+			if seriesCardFocus("picks", snap.Items[i].Item.Ref) == focus {
+				p.host.series.featuredRef = snap.Items[i].Item.Ref
+				if snap.Hero != nil && snap.Hero.Item.Ref == snap.Items[i].Item.Ref {
+					copyEntry := *snap.Hero
+					return &copyEntry
+				}
+				copyEntry := snap.Items[i]
+				return &copyEntry
+			}
+		}
+	}
+	if strings.HasPrefix(string(focus), "series/tracked/") {
+		for i := range snap.Tracked {
+			if seriesCardFocus("tracked", snap.Tracked[i].Item.Ref) == focus {
+				p.host.series.featuredRef = snap.Tracked[i].Item.Ref
+				if snap.Hero != nil && snap.Hero.Item.Ref == snap.Tracked[i].Item.Ref {
+					copyEntry := *snap.Hero
+					return &copyEntry
+				}
+				copyEntry := snap.Tracked[i]
+				return &copyEntry
+			}
+		}
+	}
+	if entry := find(p.host.series.featuredRef); entry != nil {
+		return entry
+	}
+	if snap.Hero != nil {
+		copyEntry := *snap.Hero
+		return &copyEntry
+	}
+	if len(snap.Items) != 0 {
+		copyEntry := snap.Items[0]
+		return &copyEntry
+	}
+	return nil
+}
+
+func (p *PageContext) prepareSeriesHubArtwork(snap app.SeriesHubSnapshot, featured *provider.SeriesEntry) {
 	if p.host.Catalog == nil {
 		return
 	}
-	if snap.Hero != nil {
-		if snap.Hero.Item.BackdropURL != "" {
-			p.host.Catalog.PrepareBackdrops([]string{snap.Hero.Item.BackdropURL})
+	backdrops := make([]string, 0, 6)
+	addBackdrop := func(entry *provider.SeriesEntry) {
+		if entry == nil {
+			return
 		}
-		if snap.Hero.Item.CoverURL != "" {
-			p.host.Catalog.PrepareArtwork([]string{snap.Hero.Item.CoverURL})
+		if entry.Item.BackdropURL != "" {
+			backdrops = append(backdrops, entry.Item.BackdropURL)
+		} else if entry.Item.CoverURL != "" {
+			backdrops = append(backdrops, entry.Item.CoverURL)
 		}
 	}
-	urls := make([]string, 0, 20)
+	addBackdrop(featured)
+	if snap.Hero != nil && (featured == nil || snap.Hero.Item.Ref != featured.Item.Ref) {
+		addBackdrop(snap.Hero)
+	}
+	addNeighbors := func(items []provider.SeriesEntry) {
+		if featured == nil {
+			return
+		}
+		for i := range items {
+			if items[i].Item.Ref == featured.Item.Ref {
+				if i+1 < len(items) {
+					addBackdrop(&items[i+1])
+				}
+				if i > 0 {
+					addBackdrop(&items[i-1])
+				}
+				return
+			}
+		}
+	}
+	addNeighbors(snap.Items)
+	addNeighbors(snap.Tracked)
+	if len(backdrops) != 0 {
+		p.host.Catalog.PrepareBackdrops(backdrops)
+	}
+	urls := make([]string, 0, 24)
+	if featured != nil && featured.Item.CoverURL != "" {
+		urls = append(urls, featured.Item.CoverURL)
+	}
+	if snap.Hero != nil && snap.Hero.Item.CoverURL != "" {
+		urls = append(urls, snap.Hero.Item.CoverURL)
+	}
 	viewport := p.Width - 103
 	if len(snap.Items) != 0 {
 		first, end := visibleItemRange(p.host.series.picksScroll.X, viewport, seriesPosterStride, len(snap.Items), 2)
@@ -322,8 +418,12 @@ func (p *PageContext) prepareSeriesHubArtwork(snap app.SeriesHubSnapshot) {
 func (p *PageContext) seriesBackdrop(c *ui.Context, hero provider.SeriesEntry) {
 	canvas := p.Theme.Colors.Surface.Canvas
 	var art ui.ImageSource
-	if hero.Item.BackdropURL != "" {
-		art = p.catalogBitmap(catalogImageKey{location: hero.Item.BackdropURL, backdrop: true})
+	backdropLoc := hero.Item.BackdropURL
+	if backdropLoc == "" {
+		backdropLoc = hero.Item.CoverURL
+	}
+	if backdropLoc != "" {
+		art = p.catalogBitmap(catalogImageKey{location: backdropLoc, backdrop: true})
 	}
 	if art == nil && hero.Item.CoverURL != "" {
 		art = p.catalogCover(hero.Item.CoverURL)
@@ -658,14 +758,26 @@ func (p *PageContext) seriesStateBlock(c *ui.Context, icon, title, note, action,
 		if note != "" {
 			ui.Text(c, note).Margin(0, 0, 32, 0).FontSize(21).LineHeight(1.5).TextColor(paint(colors.Text.Muted))
 		}
-		p.styledButton(c, action, actionIcon, focus, region, run, style).AlignSelf(ui.Center)
+		if action != "" && run != nil {
+			p.styledButton(c, action, actionIcon, focus, region, run, style).AlignSelf(ui.Center)
+		}
 	})
 }
 
 func (p *PageContext) openSeriesAll(kind seriesAllKind) {
 	if p.State.Push(app.Route{Page: app.SeriesAll}) {
 		p.host.series.allSection = kind
-		p.host.series.allList = ui.ListState{}
+		if catalog := p.host.Series; catalog != nil {
+			snap := catalog.Hub()
+			items := snap.Items
+			if kind == seriesAllTracked {
+				items = snap.Tracked
+			}
+			if len(items) != 0 {
+				p.State.Focus = seriesAllItemFocus(items[0].Item.Ref)
+				p.host.reveal = true
+			}
+		}
 	}
 }
 
@@ -681,7 +793,8 @@ func (seriesAllPage) Render(c *ui.Context, p *PageContext) {
 	}
 	var items []provider.SeriesEntry
 	var canLoadMore, loading bool
-	var loadMore func()
+	var loadErr string
+	var loadMore, retryMore func()
 	if catalog != nil {
 		snap := catalog.Hub()
 		if kind == seriesAllTracked {
@@ -690,61 +803,38 @@ func (seriesAllPage) Render(c *ui.Context, p *PageContext) {
 			items = snap.Items
 			canLoadMore = snap.CanLoadMore()
 			loading = snap.Appending && snap.Phase == app.CatalogLoading
+			if snap.Appending && snap.Phase == app.CatalogFailed {
+				loadErr = string(snap.Error)
+			}
 			loadMore = catalog.LoadMoreHub
+			retryMore = catalog.RetryHub
 		}
 	}
-	const region = "series-all"
-	p.region(region, nil)
-	meta := ""
-	if len(items) != 0 {
-		meta = fmt.Sprintf(text.Modal.ItemsCount, len(items))
-	}
-	eyebrow := "SERIES \u00b7 COLLECTION"
-	if kind == seriesAllTracked {
-		eyebrow = "SERIES \u00b7 TRACKING"
-	}
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
-		p.drawerHeader(c, eyebrow, title, meta, "")
-		if len(items) == 0 {
-			ui.Column(c).FillWidth().Grow(1).Center().Gap(20).Children(func() {
-				p.emptyDescription(c, text.EmptyTitle, text.EmptyNote)
-			})
-		} else {
-			list := &p.host.series.allList
-			totalRows := len(items)
-			if canLoadMore || loading {
-				totalRows++
-			}
-			list.Key = func(index int) any {
-				if index >= len(items) {
-					return "more"
-				}
-				return items[index].Item.Ref
-			}
-			ui.List(c.Key("series-all-list"), list, totalRows).FillWidth().Grow(1).
-				Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
-				rc := row.Context
-				if row.Index >= len(items) {
-					label := text.Activity.More
-					if loading {
-						label = text.LoadingTitle
-					}
-					p.drawerOptionRow(rc, seriesAllMoreFocus, region, label, "", false, func() {
-						if canLoadMore && loadMore != nil {
-							loadMore()
-						}
-					})
-					return
-				}
-				entry := items[row.Index]
-				p.drawerOptionRow(rc, seriesAllItemFocus(entry.Item.Ref), region, entry.Item.Title, entry.Status, false, func() {
-					p.openVideoDetail(entry.Item)
-				})
-			})
-		}
-		ui.Row(c).Margin(16, 0, 0, 0).Children(func() {
-			p.styledButton(c, text.Close, "", app.CloseModal, region, func() { p.State.Back() }, p.drawerButtonAppearance())
-		})
-		p.drawerFooter(c, text.Modal.HintSelect, text.Modal.HintOpen)
+	p.renderShelfCollection(c, shelfCollectionSpec{
+		key:         "series-all/" + string(kind),
+		title:       title,
+		countFormat: text.Series.WorksCount,
+		count:       len(items),
+		grid:        shelfPosterGrid,
+		backFocus:   seriesAllBackFocus,
+		retryFocus:  seriesAllRetryFocus,
+		itemPrefix:  "series-all/item/",
+		itemFocus: func(index int) app.FocusID {
+			return seriesAllItemFocus(items[index].Item.Ref)
+		},
+		artworkURLs: func(index int) []string {
+			return []string{items[index].Item.CoverURL}
+		},
+		renderCard: func(c *ui.Context, index int, id app.FocusID, region string, cardWidth float32) {
+			p.seriesCard(c, id, region, items[index], cardWidth, shelfPosterGrid.coverH, shelfPosterGrid.cardH, 21, 15)
+		},
+		emptyIcon:   "series",
+		emptyNote:   text.EmptyNote,
+		canLoadMore: canLoadMore,
+		loading:     loading,
+		loadErr:     loadErr,
+		moreFailed:  text.Series.MoreFailed,
+		loadMore:    loadMore,
+		retryMore:   retryMore,
 	})
 }

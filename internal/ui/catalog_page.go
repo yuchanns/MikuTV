@@ -43,7 +43,7 @@ const (
 	homeDiscoveryHeight               = 360
 	homeColumns                       = 5
 	homeFeatureInterval               = 8 * time.Second
-	maxCatalogBitmaps                 = 64
+	maxCatalogBitmaps                 = 128
 )
 
 var homeTabs = [...]string{"", "popular", "ranking", "regions"}
@@ -118,6 +118,10 @@ func (v *View) backFromHome() bool {
 }
 
 func (catalogPage) Render(c *ui.Context, p *PageContext) {
+	if p.Location.Page != app.Home {
+		p.Outlet(c)
+		return
+	}
 	catalog := p.host.Catalog
 	entry, _ := p.State.Current()
 	if !entry.Capabilities.Has(provider.BrowseCatalog) {
@@ -466,7 +470,7 @@ func (p *PageContext) catalogRefreshControl(c *ui.Context, current app.CatalogSn
 	if !current.Appending {
 		switch current.Phase {
 		case app.CatalogLoading:
-			label, icon, action = text.Cancel, "", catalog.Cancel
+			label, icon, action = text.LoadingTitle, "", func() {}
 		case app.CatalogFailed, app.CatalogCanceled:
 			label, action = text.Retry, catalog.Retry
 		}
@@ -644,17 +648,21 @@ func (p *PageContext) catalogFooter(c *ui.Context, current app.CatalogSnapshot) 
 
 func (p *PageContext) prepareCatalogArtwork(rows []catalogWindow, shelves []catalogShelf, scroll float32) {
 	home := &p.host.home
-	locations := make([]string, 0, 32)
-	seen := make(map[string]struct{}, 32)
+	locations := make([]string, 0, 64)
+	seen := make(map[string]struct{}, 64)
 	includeLocation := func(location string) {
 		if _, ok := seen[location]; location != "" && !ok {
 			seen[location] = struct{}{}
 			locations = append(locations, location)
 		}
 	}
-	include := func(items []provider.MediaItem) {
+	includeCovers := func(items []provider.MediaItem) {
 		for _, item := range items {
 			includeLocation(item.CoverURL)
+		}
+	}
+	includeAvatars := func(items []provider.MediaItem) {
+		for _, item := range items {
 			if item.Creator != nil {
 				includeLocation(item.Creator.AvatarURL)
 			}
@@ -662,9 +670,10 @@ func (p *PageContext) prepareCatalogArtwork(rows []catalogWindow, shelves []cata
 	}
 	var backdrops []string
 	heroVisible := home.tab == "" && scroll < homeArtHeight && len(home.featured) != 0
+	var visibleSlices [][]provider.MediaItem
 	if heroVisible {
 		selected := home.featured[home.selected]
-		include(home.featured[home.selected : home.selected+1])
+		visibleSlices = append(visibleSlices, home.featured[home.selected:home.selected+1])
 		if selected.BackdropURL != "" {
 			backdrops = append(backdrops, selected.BackdropURL)
 		}
@@ -684,20 +693,28 @@ func (p *PageContext) prepareCatalogArtwork(rows []catalogWindow, shelves []cata
 					break
 				}
 			}
-			include(items[first:min(first+homeColumns+1, len(items))])
+			visibleSlices = append(visibleSlices, items[first:min(first+homeColumns+1, len(items))])
 		}
 	}
 	for _, section := range home.layout.sections {
 		items := section.group.Items
 		grid := section.grid
 		if grid.podium != 0 && section.top+grid.heading >= scroll && section.top < scroll+p.Height {
-			include(items[:min(grid.podium, len(items))])
+			visibleSlices = append(visibleSlices, items[:min(grid.podium, len(items))])
 		}
 		first, end := section.visibleRows(scroll, p.Height, len(items), 0)
-		include(items[min(grid.firstItem(first), len(items)):min(grid.firstItem(end), len(items))])
+		visibleSlices = append(visibleSlices, items[min(grid.firstItem(first), len(items)):min(grid.firstItem(end), len(items))])
 	}
+	// Prioritize all visible covers before tiny creator avatars, then overscan covers/avatars.
+	for _, batch := range visibleSlices {
+		includeCovers(batch)
+	}
+	for _, batch := range visibleSlices {
+		includeAvatars(batch)
+	}
+	var overscanSlices [][]provider.MediaItem
 	if heroVisible {
-		include(home.featured)
+		overscanSlices = append(overscanSlices, home.featured)
 	}
 	for idx, window := range rows {
 		section := home.layout.sections[idx]
@@ -705,14 +722,20 @@ func (p *PageContext) prepareCatalogArtwork(rows []catalogWindow, shelves []cata
 		if window.focused >= 0 {
 			start := min(grid.firstItem(max(0, window.focused-1)), len(items))
 			end := min(grid.firstItem(window.focused+2), len(items))
-			include(items[start:end])
+			overscanSlices = append(overscanSlices, items[start:end])
 		}
-		include(items[min(grid.firstItem(window.first), len(items)):min(grid.firstItem(window.end), len(items))])
+		overscanSlices = append(overscanSlices, items[min(grid.firstItem(window.first), len(items)):min(grid.firstItem(window.end), len(items))])
 	}
 	for idx, shelf := range shelves {
 		if p.catalogShelfVisible(idx, scroll) {
-			include(shelf.items[:min(homeShelfLimit, len(shelf.items))])
+			overscanSlices = append(overscanSlices, shelf.items[:min(homeShelfLimit, len(shelf.items))])
 		}
+	}
+	for _, batch := range overscanSlices {
+		includeCovers(batch)
+	}
+	for _, batch := range overscanSlices {
+		includeAvatars(batch)
 	}
 	p.host.Catalog.PrepareArtwork(locations)
 	p.host.Catalog.PrepareBackdrops(backdrops)

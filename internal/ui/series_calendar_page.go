@@ -14,7 +14,6 @@ import (
 const (
 	seriesCalendarBackFocus    app.FocusID = "series-calendar/back"
 	seriesCalendarRetryFocus   app.FocusID = "series-calendar/retry"
-	seriesCalendarCancelFocus  app.FocusID = "series-calendar/cancel"
 	seriesCalendarToIndexFocus app.FocusID = "series-calendar/to-index"
 
 	seriesCalendarHeaderRegion = "series-calendar/header"
@@ -76,9 +75,7 @@ func (seriesCalendarPage) Render(c *ui.Context, p *PageContext) {
 		p.seriesSubpageHeading(c, seriesCalendarBackFocus, seriesCalendarHeaderRegion, text.Series.Calendar, text.Series.CalendarNote)
 		switch {
 		case snap.Phase == app.CatalogIdle || (snap.Phase == app.CatalogLoading && !snap.Loaded):
-			p.seriesStateBlock(c, "history", text.Series.Loading, "", text.Cancel, "", seriesCalendarCancelFocus, seriesCalendarStatusRegion, func() {
-				catalog.CancelCalendar()
-			})
+			p.seriesStateBlock(c, "history", text.Series.Loading, "", "", "", "", seriesCalendarStatusRegion, nil)
 			return
 		case snap.Phase == app.CatalogFailed && !snap.Loaded:
 			p.seriesStateBlock(c, "history", text.Series.LoadFailed, p.authError(snap.Error), text.Retry, "refresh", seriesCalendarRetryFocus, seriesCalendarStatusRegion, func() {
@@ -127,8 +124,7 @@ func (p *PageContext) restoreSeriesCalendarFocus(snap app.SeriesCalendarSnapshot
 	}
 	focus := p.State.Focus
 	dayFocus := seriesCalendarDayFocus(min(max(snap.Selected, 0), max(0, len(snap.Days)-1)))
-	if (focus == seriesCalendarRetryFocus && snap.Phase != app.CatalogFailed && snap.Phase != app.CatalogCanceled) ||
-		(focus == seriesCalendarCancelFocus && snap.Phase != app.CatalogLoading) {
+	if focus == seriesCalendarRetryFocus && snap.Phase != app.CatalogFailed && snap.Phase != app.CatalogCanceled {
 		if len(snap.Days) != 0 {
 			p.State.Focus = dayFocus
 		} else {

@@ -1,7 +1,6 @@
 package tvui
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 
@@ -29,11 +28,11 @@ const (
 	followingTabLive        app.FocusID = "following/tab/live"
 	followingSignInFocus    app.FocusID = "following/sign-in"
 	followingRetryFocus     app.FocusID = "following/retry"
-	followingCancelFocus    app.FocusID = "following/cancel"
 	followingDiscoverFocus  app.FocusID = "following/discover"
 	followingUpdatesAll     app.FocusID = "following/all/updates"
 	followingLiveAll        app.FocusID = "following/all/live"
-	followingAllMoreFocus   app.FocusID = "following-all/more"
+	followingAllBackFocus   app.FocusID = "following-all/back"
+	followingAllRetryFocus  app.FocusID = "following-all/retry"
 
 	followingHeaderRegion   = "following/header"
 	followingCreatorsRegion = "following/creators"
@@ -64,7 +63,6 @@ type followingViewState struct {
 	liveScroll       ui.ScrollState
 	lastCreatorIndex int
 	allSection       followingAllKind
-	allList          ui.ListState
 }
 
 func (s *followingViewState) activeTab(supportsLive bool) followingTab {
@@ -149,6 +147,10 @@ func (v *View) backFromFollowing() bool {
 type followingPage struct{}
 
 func (followingPage) Render(c *ui.Context, p *PageContext) {
+	if p.Location.Page != app.Following {
+		p.Outlet(c)
+		return
+	}
 	feed := p.host.Following
 	entry, _ := p.State.Current()
 	if feed == nil || !entry.Capabilities.Has(provider.BrowseFollowing) {
@@ -226,10 +228,6 @@ func (p *PageContext) restoreFollowingFocus(snapshot app.FollowingSnapshot, sign
 		return
 	}
 	if focus == followingRetryFocus && snapshot.Phase != app.CatalogFailed && snapshot.Phase != app.CatalogCanceled {
-		p.setFollowingFocus(tabFocus)
-		return
-	}
-	if focus == followingCancelFocus && snapshot.Phase != app.CatalogLoading {
 		p.setFollowingFocus(tabFocus)
 		return
 	}
@@ -369,7 +367,8 @@ func (p *PageContext) prepareFollowingArtwork(snapshot app.FollowingSnapshot) {
 	}
 	view := &p.host.following
 	viewport := p.Width - 103
-	urls := make([]string, 0, 24)
+	urls := make([]string, 0, 48)
+	var cardAvatars []string
 	if len(snapshot.Creators) != 0 {
 		first, end := visibleItemRange(view.creatorScroll.X, viewport, followingAvatarStride, len(snapshot.Creators), 3)
 		for i := first; i < end; i++ {
@@ -387,7 +386,7 @@ func (p *PageContext) prepareFollowingArtwork(snapshot app.FollowingSnapshot) {
 				urls = append(urls, item.CoverURL)
 			}
 			if item.Creator != nil && item.Creator.AvatarURL != "" {
-				urls = append(urls, item.Creator.AvatarURL)
+				cardAvatars = append(cardAvatars, item.Creator.AvatarURL)
 			}
 		}
 	}
@@ -400,6 +399,7 @@ func (p *PageContext) prepareFollowingArtwork(snapshot app.FollowingSnapshot) {
 			}
 		}
 	}
+	urls = append(urls, cardAvatars...)
 	p.host.Catalog.PrepareArtwork(urls)
 }
 
@@ -734,9 +734,7 @@ func (p *PageContext) followingGuestState(c *ui.Context) {
 
 func (p *PageContext) followingLoadingState(c *ui.Context) {
 	text := p.Assets.Text
-	p.followingStateBlock(c, "following", text.Following.Loading, "", text.Cancel, "", followingCancelFocus, func() {
-		p.host.Following.Cancel()
-	})
+	p.followingStateBlock(c, "following", text.Following.Loading, "", "", "", "", nil)
 }
 
 func (p *PageContext) followingFailedState(c *ui.Context, code provider.ErrorCode) {
@@ -780,14 +778,26 @@ func (p *PageContext) followingStateBlock(c *ui.Context, icon, title, note, acti
 		if note != "" {
 			ui.Text(c, note).Margin(0, 0, 32, 0).FontSize(21).LineHeight(1.5).TextColor(paint(colors.Text.Muted))
 		}
-		p.styledButton(c, action, actionIcon, focus, followingStatusRegion, run, style).AlignSelf(ui.Center)
+		if action != "" && run != nil {
+			p.styledButton(c, action, actionIcon, focus, followingStatusRegion, run, style).AlignSelf(ui.Center)
+		}
 	})
 }
 
 func (p *PageContext) openFollowingAll(kind followingAllKind) {
 	if p.State.Push(app.Route{Page: app.FollowingAll}) {
 		p.host.following.allSection = kind
-		p.host.following.allList = ui.ListState{}
+		if feed := p.host.Following; feed != nil {
+			snap := feed.Snapshot()
+			items := snap.Updates
+			if kind == followingAllLive {
+				items = snap.LiveRooms
+			}
+			if len(items) != 0 {
+				p.State.Focus = followingAllItemFocus(items[0].Ref)
+				p.host.reveal = true
+			}
+		}
 	}
 }
 
@@ -795,14 +805,19 @@ type followingAllPage struct{}
 
 func (followingAllPage) Render(c *ui.Context, p *PageContext) {
 	feed := p.host.Following
-	text, colors := p.Assets.Text, p.Theme.Colors
+	text := p.Assets.Text
 	kind := p.host.following.allSection
 	title := text.Following.UpdatesTitle
+	emptyNote := text.Following.EmptyUpdates
+	emptyIcon := "following"
 	if kind == followingAllLive {
 		title = text.Following.LiveTitle
+		emptyNote = text.Following.EmptyLive
+		emptyIcon = "live"
 	}
 	var items []provider.MediaItem
 	var canLoadMore, loading bool
+	var loadErr string
 	var loadMore func()
 	if feed != nil {
 		snap := feed.Snapshot()
@@ -810,80 +825,55 @@ func (followingAllPage) Render(c *ui.Context, p *PageContext) {
 			items = snap.LiveRooms
 			canLoadMore = snap.CanLoadMoreLive()
 			loading = snap.LiveLoading
+			loadErr = string(snap.LiveError)
 			loadMore = feed.LoadMoreLive
 		} else {
 			items = snap.Updates
 			canLoadMore = snap.CanLoadMoreUpdates()
 			loading = snap.UpdatesLoading
+			loadErr = string(snap.UpdatesError)
 			loadMore = feed.LoadMoreUpdates
 		}
 	}
-	const region = "following-all"
-	p.region(region, nil)
-	meta := ""
-	if len(items) != 0 {
-		meta = fmt.Sprintf(text.Modal.ItemsCount, len(items))
-	}
-	eyebrow := "FOLLOWING \u00b7 UPDATES"
-	if kind == followingAllLive {
-		eyebrow = "FOLLOWING \u00b7 LIVE"
-	}
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
-		p.drawerHeader(c, eyebrow, title, meta, "")
-		if len(items) == 0 {
-			ui.Column(c).FillWidth().Grow(1).Center().Gap(20).Children(func() {
-				emptyNote := text.Following.EmptyUpdates
-				if kind == followingAllLive {
-					emptyNote = text.Following.EmptyLive
-				}
-				p.emptyDescription(c, text.EmptyTitle, emptyNote)
-			})
-		} else {
-			list := &p.host.following.allList
-			totalRows := len(items)
-			if canLoadMore || loading {
-				totalRows++
+	p.renderShelfCollection(c, shelfCollectionSpec{
+		key:         "following-all/" + string(kind),
+		title:       title,
+		countFormat: text.Activity.FolderCount,
+		count:       len(items),
+		grid:        shelfVideoGrid,
+		backFocus:   followingAllBackFocus,
+		retryFocus:  followingAllRetryFocus,
+		itemPrefix:  "following-all/item/",
+		itemFocus: func(index int) app.FocusID {
+			return followingAllItemFocus(items[index].Ref)
+		},
+		artworkURLs: func(index int) []string {
+			item := items[index]
+			if kind != followingAllLive && item.Creator != nil && item.Creator.AvatarURL != "" {
+				return []string{item.CoverURL, item.Creator.AvatarURL}
 			}
-			list.Key = func(index int) any {
-				if index >= len(items) {
-					return "more"
-				}
-				return items[index].Ref
+			return []string{item.CoverURL}
+		},
+		renderCard: func(c *ui.Context, index int, id app.FocusID, region string, cardWidth float32) {
+			size := catalogCardSize{
+				width:  cardWidth,
+				height: shelfVideoGrid.cardH,
+				cover:  shelfVideoGrid.coverH,
+				title:  21,
 			}
-			ui.List(c.Key("following-all-list"), list, totalRows).FillWidth().Grow(1).
-				Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
-				rc := row.Context
-				if row.Index >= len(items) {
-					label := text.Activity.More
-					if loading {
-						label = text.LoadingTitle
-					}
-					p.drawerOptionRow(rc, followingAllMoreFocus, region, label, "", false, func() {
-						if canLoadMore && loadMore != nil {
-							loadMore()
-						}
-					})
-					return
-				}
-				item := items[row.Index]
-				id := followingAllItemFocus(item.Ref)
-				sub := ""
-				if item.Creator != nil {
-					sub = item.Creator.Name
-				}
-				if kind == followingAllLive && p.canPlay(item.Ref) {
-					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.openLivePlayback(item, false) })
-				} else if kind != followingAllLive && p.canOpenVideoDetail(item.Ref) {
-					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.openVideoDetail(item) })
-				} else {
-					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.host.notice = text.Search.DetailPending })
-				}
-			})
-		}
-		ui.Row(c).Margin(16, 0, 0, 0).Children(func() {
-			p.styledButton(c, text.Close, "", app.CloseModal, region, func() { p.State.Back() }, p.drawerButtonAppearance())
-		})
-		p.drawerFooter(c, text.Modal.HintSelect, text.Modal.HintOpen)
+			if kind == followingAllLive {
+				p.followingLiveCard(c, id, region, items[index], size)
+			} else {
+				p.catalogCard(c, id, region, items[index], size, nil)
+			}
+		},
+		emptyIcon:   emptyIcon,
+		emptyNote:   emptyNote,
+		canLoadMore: canLoadMore,
+		loading:     loading,
+		loadErr:     loadErr,
+		moreFailed:  text.Following.MoreFailed,
+		loadMore:    loadMore,
+		retryMore:   loadMore,
 	})
-	_ = colors
 }

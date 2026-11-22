@@ -16,7 +16,6 @@ const (
 	seriesIndexResetFocus  app.FocusID = "series-index/reset"
 	seriesIndexEmptyReset  app.FocusID = "series-index/empty-reset"
 	seriesIndexRetryFocus  app.FocusID = "series-index/retry"
-	seriesIndexCancelFocus app.FocusID = "series-index/cancel"
 	seriesIndexMoreRetry   app.FocusID = "series-index/more-retry"
 
 	seriesIndexHeaderRegion  = "series-index/header"
@@ -103,9 +102,7 @@ func (seriesIndexPage) Render(c *ui.Context, p *PageContext) {
 		})
 		switch {
 		case snap.Phase == app.CatalogIdle || (snap.Phase == app.CatalogLoading && len(snap.Items) == 0):
-			p.seriesStateBlock(c, "search", text.Series.Loading, "", text.Cancel, "", seriesIndexCancelFocus, seriesIndexStatusRegion, func() {
-				catalog.CancelIndex()
-			})
+			p.seriesStateBlock(c, "search", text.Series.Loading, "", "", "", "", seriesIndexStatusRegion, nil)
 			return
 		case snap.Phase == app.CatalogFailed && len(snap.Items) == 0:
 			p.seriesStateBlock(c, "search", text.Series.LoadFailed, p.authError(snap.Error), text.Retry, "refresh", seriesIndexRetryFocus, seriesIndexStatusRegion, func() {
@@ -244,7 +241,6 @@ func (p *PageContext) restoreSeriesIndexFocus(snap app.SeriesIndexSnapshot) {
 		fallback = seriesIndexFilterFocus(snap.FilterGroups[0].Key)
 	}
 	if (focus == seriesIndexRetryFocus && snap.Phase != app.CatalogFailed && snap.Phase != app.CatalogCanceled) ||
-		(focus == seriesIndexCancelFocus && snap.Phase != app.CatalogLoading) ||
 		(focus == seriesIndexEmptyReset && len(snap.Items) != 0) {
 		p.State.Focus = fallback
 		p.host.reveal = true

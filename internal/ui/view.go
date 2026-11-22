@@ -183,7 +183,7 @@ func (v *View) Render(c *ui.Context) {
 			if v.creator != nil {
 				v.renderFeedbackToast(c, &v.creator.feedback)
 			}
-		case app.Series, app.SeriesCalendar, app.SeriesIndex:
+		case app.Series, app.SeriesCalendar, app.SeriesIndex, app.SeriesAll:
 			v.videoDetail.feedback = videoDetailFeedback{}
 			if v.creator != nil {
 				v.creator.feedback = videoDetailFeedback{}
@@ -269,8 +269,9 @@ func (v *View) renderScreen(c *ui.Context, page *PageContext) {
 		transition = *rootReg.Transition
 		screen.Absolute().Left(0).Top(0).ZIndex(1).Background(paint(v.Theme.Colors.Surface.Canvas))
 	}
+	curReg := v.Pages.components[page.Location.Route]
 	screen.Transition(transition).Children(func() {
-		if rootReg.RawScreen {
+		if rootReg.RawScreen || curReg.RawScreen {
 			v.Pages.render(c, page)
 			return
 		}

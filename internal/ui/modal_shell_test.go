@@ -37,9 +37,6 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		{Page: app.SeriesIndexFilter},
 		{Page: app.SearchFilters},
 		{Page: app.AccountPicker},
-		{Page: app.HomeAction},
-		{Page: app.FollowingAll},
-		{Page: app.SeriesAll},
 		{Page: app.Licenses, Section: "about"},
 	}
 	for _, route := range drawerRoutes {
@@ -48,6 +45,28 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		}
 		if blur := view.modalBlur(route, false); blur != drawerBlurRadius {
 			t.Errorf("route %+v: want drawer blur %v, got %v", route, drawerBlurRadius, blur)
+		}
+	}
+
+	// Shelf "See All" pages must be full-screen non-modal collection routes, never drawers.
+	for _, route := range []app.Route{
+		{Page: app.HomeAction},
+		{Page: app.FollowingAll},
+		{Page: app.SeriesAll},
+		{Page: app.LiveAll},
+	} {
+		reg, ok := pages.components[route]
+		if !ok {
+			t.Fatalf("missing registration for %+v", route)
+		}
+		if reg.Policy.Modal {
+			t.Errorf("route %+v: want non-modal full-screen collection, got Modal=true", route)
+		}
+		if !reg.RawScreen {
+			t.Errorf("route %+v: want RawScreen=true", route)
+		}
+		if blur := view.modalBlur(route, false); blur != 0 {
+			t.Errorf("route %+v: want blur 0, got %v", route, blur)
 		}
 	}
 

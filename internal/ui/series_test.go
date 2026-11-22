@@ -626,3 +626,114 @@ func TestSeriesTrackingSyncAcrossHubCalendarDetailAndFeedback(t *testing.T) {
 		t.Fatalf("expected source-specific untracked feedback, got %q", view.videoDetail.feedback.text)
 	}
 }
+
+func TestSeriesHubBackdropFollowsFocusedCard(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := app.Entry{
+		ID: "sample-source", SourceID: "sample-source", Name: "Series Hub",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.BrowseSeries, provider.GetCatalogItem, provider.TrackSeries},
+	}
+	state, err := app.NewState([]app.Entry{entry}, entry.ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref1 := provider.MediaRef{EntryID: entry.ID, Kind: provider.Series, ID: "ss101"}
+	ref2 := provider.MediaRef{EntryID: entry.ID, Kind: provider.Series, ID: "ss102"}
+	ref3 := provider.MediaRef{EntryID: entry.ID, Kind: provider.Series, ID: "ss103"}
+	s1 := provider.SeriesEntry{
+		Item:    provider.MediaItem{Ref: ref1, Title: "First Show Hero", Subtitle: "First synopsis", BackdropURL: "https://example.com/bg1.jpg"},
+		Eyebrow: "ANIME / FEATURED",
+	}
+	s2 := provider.SeriesEntry{
+		Item:    provider.MediaItem{Ref: ref2, Title: "Second Show Hero", Subtitle: "Second synopsis", BackdropURL: "https://example.com/bg2.jpg"},
+		Eyebrow: "CINEMA / FEATURED",
+	}
+	s3 := provider.SeriesEntry{
+		Item:    provider.MediaItem{Ref: ref3, Title: "Tracked Show Hero", Subtitle: "Tracked synopsis", BackdropURL: "https://example.com/bg3.jpg"},
+		Eyebrow: "DOCUMENTARY / FEATURED",
+		Tracked: true,
+	}
+	sess := &uiSeriesSession{
+		hub: provider.SeriesPage{
+			Genres:  []provider.SeriesFilterOption{{Value: "", Label: "All"}, {Value: "1", Label: "Anime"}},
+			Hero:    &s1,
+			Items:   []provider.SeriesEntry{s1, s2},
+			Tracked: []provider.SeriesEntry{s3},
+		},
+	}
+	queue := make(chan func(), 64)
+	post := func(fn func()) { queue <- fn }
+	drainOne := func() {
+		select {
+		case fn := <-queue:
+			fn()
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for async delivery")
+		}
+	}
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	catalog := app.NewCatalog(func(string) provider.Session { return sess }, post, func() {})
+	t.Cleanup(catalog.Close)
+	series := app.NewSeriesCatalog(post, func() {})
+	t.Cleanup(series.Close)
+	view := newTestView(t, Options{
+		State: state, Catalog: catalog, Series: series,
+		Pages: pages, Assets: assets, Theme: theme.Default(),
+	})
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	if !state.Navigate(app.Route{Page: app.Series}) {
+		t.Fatal("failed to navigate to Series")
+	}
+	view.SyncEntry()
+	for !series.Hub().Loaded {
+		drainOne()
+	}
+	drain()
+	tester.Frame()
+	if !tester.HasText("First synopsis") {
+		t.Fatal("initial series hero did not render first show")
+	}
+
+	// Focus second card in Picks shelf -> Hero title/synopsis & featuredRef switch to s2.
+	state.Focus = seriesCardFocus("picks", ref2)
+	tester.Frame()
+	if view.series.featuredRef != ref2 || !tester.HasText("Second synopsis") {
+		t.Fatalf("focusing second picks card did not update hero: featured=%+v", view.series.featuredRef)
+	}
+
+	// Move focus up to Hero Play button -> featuredRef retains s2 so Hero buttons operate on s2.
+	state.Focus = seriesHeroPlayFocus
+	tester.Frame()
+	if view.series.featuredRef != ref2 || !tester.HasText("Second synopsis") {
+		t.Fatalf("moving focus to Hero buttons lost featured picks card: featured=%+v", view.series.featuredRef)
+	}
+
+	// Focus Tracked shelf card -> Hero follows s3.
+	state.Focus = seriesCardFocus("tracked", ref3)
+	tester.Frame()
+	if view.series.featuredRef != ref3 || !tester.HasText("Tracked synopsis") {
+		t.Fatalf("focusing tracked card did not update hero: featured=%+v", view.series.featuredRef)
+	}
+
+	// Switching genre resets featuredRef.
+	view.selectSeriesGenre("1")
+	if view.series.featuredRef.ID != "" {
+		t.Fatalf("switching series genre did not reset featuredRef: %+v", view.series.featuredRef)
+	}
+}

@@ -182,7 +182,7 @@ func (p *PageContext) catalogShelf(c *ui.Context, shelf catalogShelf, idx int, s
 						p.State.Navigate(app.Route{Page: app.Following})
 						return
 					}
-					p.openCatalogAction(shelf.title, shelf.items)
+					p.openCatalogAction(shelf.id, shelf.title, shelf.items)
 				}, buttonAppearance{
 					height: 40, radius: 8, fontSize: 17,
 					background: ui.Transparent, foreground: paint(colors.Text.Muted),

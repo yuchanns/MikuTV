@@ -114,7 +114,7 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 		if len(rows) == 0 && !directory {
 			switch snapshot.Phase {
 			case app.CatalogIdle, app.CatalogLoading:
-				p.libraryEmpty(c, "", text.LoadingTitle, "", text.Cancel, "", emptyFocus, func() { activity.Cancel(query) })
+				p.libraryEmpty(c, "", text.LoadingTitle, "", "", "", "", nil)
 			case app.CatalogFailed:
 				p.libraryEmpty(c, "", text.FailedTitle, p.authError(snapshot.Error), text.Retry, "", emptyFocus, func() { activity.Retry(query) })
 			case app.CatalogCanceled:
@@ -158,7 +158,9 @@ func (p *PageContext) libraryEmpty(c *ui.Context, icon, title, note, action, act
 		if note != "" {
 			ui.Text(c, note).Margin(0, 0, 34, 0).FontSize(21).LineHeight(1.38).TextColor(paint(colors.Text.Muted))
 		}
-		p.styledButton(c, action, actionIcon, focus, favoriteStatus, run, style).AlignSelf(ui.Center)
+		if action != "" && run != nil {
+			p.styledButton(c, action, actionIcon, focus, favoriteStatus, run, style).AlignSelf(ui.Center)
+		}
 	})
 }
 
@@ -347,6 +349,8 @@ func (p *PageContext) prepareAccountArtwork(items []provider.AccountRow) {
 		if item.CoverURL != "" {
 			locations = append(locations, item.CoverURL)
 		}
+	}
+	for _, item := range items {
 		if item.CreatorAvatarURL != "" {
 			locations = append(locations, item.CreatorAvatarURL)
 		}

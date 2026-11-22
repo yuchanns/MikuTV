@@ -1,7 +1,6 @@
 package tvui
 
 import (
-	"fmt"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -24,8 +23,8 @@ const (
 	liveRoomsAllFocus     app.FocusID = "live/all/rooms"
 	liveFollowingAllFocus app.FocusID = "live/all/following"
 	liveRetryFocus        app.FocusID = "live/retry"
-	liveCancelFocus       app.FocusID = "live/cancel"
-	liveAllMoreFocus      app.FocusID = "live-all/more"
+	liveAllBackFocus      app.FocusID = "live-all/back"
+	liveAllRetryFocus     app.FocusID = "live-all/retry"
 
 	liveHeaderRegion    = "live/header"
 	liveHeroRegion      = "live/hero"
@@ -47,7 +46,6 @@ type liveViewState struct {
 	followingScroll ui.ScrollState
 	featuredRef     provider.MediaRef
 	allSection      liveAllKind
-	allList         ui.ListState
 }
 
 func liveAreaFocus(id string) app.FocusID {
@@ -135,9 +133,7 @@ func (livePage) Render(c *ui.Context, p *PageContext) {
 			p.liveHeader(c, snap)
 			switch {
 			case snap.Phase == app.CatalogIdle || (snap.Phase == app.CatalogLoading && !snap.Loaded):
-				p.liveStateBlock(c, "live", p.Assets.Text.Live.Loading, "", p.Assets.Text.Cancel, "", liveCancelFocus, func() {
-					catalog.Cancel()
-				})
+				p.liveStateBlock(c, "live", p.Assets.Text.Live.Loading, "", "", "", "", nil)
 				return
 			case snap.Phase == app.CatalogFailed && !snap.Loaded:
 				p.liveStateBlock(c, "live", p.Assets.Text.Live.LoadFailed, p.authError(snap.Error), p.Assets.Text.Retry, "refresh", liveRetryFocus, func() {
@@ -175,8 +171,7 @@ func (p *PageContext) restoreLiveFocus(snap app.LiveSnapshot) {
 	}
 	focus := p.State.Focus
 	tab := liveAreaFocus(snap.Area)
-	if (focus == liveRetryFocus && snap.Phase != app.CatalogFailed && snap.Phase != app.CatalogCanceled) ||
-		(focus == liveCancelFocus && snap.Phase != app.CatalogLoading) {
+	if focus == liveRetryFocus && snap.Phase != app.CatalogFailed && snap.Phase != app.CatalogCanceled {
 		p.State.Focus = tab
 		p.host.reveal = true
 		return
@@ -685,14 +680,26 @@ func (p *PageContext) liveStateBlock(c *ui.Context, icon, title, note, action, a
 		if note != "" {
 			ui.Text(c, note).Margin(0, 0, 32, 0).FontSize(21).LineHeight(1.5).TextColor(paint(colors.Text.Muted))
 		}
-		p.styledButton(c, action, actionIcon, focus, liveStatusRegion, run, style).AlignSelf(ui.Center)
+		if action != "" && run != nil {
+			p.styledButton(c, action, actionIcon, focus, liveStatusRegion, run, style).AlignSelf(ui.Center)
+		}
 	})
 }
 
 func (p *PageContext) openLiveAll(kind liveAllKind) {
 	if p.State.Push(app.Route{Page: app.LiveAll}) {
 		p.host.live.allSection = kind
-		p.host.live.allList = ui.ListState{}
+		if catalog := p.host.Live; catalog != nil {
+			snap := catalog.Snapshot()
+			items := snap.Rooms
+			if kind == liveAllFollowing {
+				items = snap.FollowingRooms
+			}
+			if len(items) != 0 {
+				p.State.Focus = liveAllItemFocus(items[0].Ref)
+				p.host.reveal = true
+			}
+		}
 	}
 }
 
@@ -703,13 +710,12 @@ func (liveAllPage) Render(c *ui.Context, p *PageContext) {
 	text := p.Assets.Text
 	kind := p.host.live.allSection
 	title := text.Live.RecommendedTitle
-	eyebrow := "LIVE \u00b7 ROOMS"
 	if kind == liveAllFollowing {
 		title = text.Live.FollowingTitle
-		eyebrow = "LIVE \u00b7 FOLLOWING"
 	}
 	var items []provider.MediaItem
 	var canLoadMore, loading bool
+	var loadErr string
 	var loadMore func()
 	if catalog != nil {
 		snap := catalog.Snapshot()
@@ -717,73 +723,47 @@ func (liveAllPage) Render(c *ui.Context, p *PageContext) {
 			items = snap.FollowingRooms
 			canLoadMore = snap.CanLoadMoreFollowing()
 			loading = snap.FollowingLoading
+			loadErr = string(snap.FollowingError)
 			loadMore = catalog.LoadMoreFollowing
 		} else {
 			items = snap.Rooms
 			canLoadMore = snap.CanLoadMoreRooms()
 			loading = snap.RoomsLoading
+			loadErr = string(snap.RoomsError)
 			loadMore = catalog.LoadMoreRooms
 		}
 	}
-	const region = "live-all"
-	p.region(region, nil)
-	meta := ""
-	if len(items) != 0 {
-		meta = fmt.Sprintf(text.Modal.ItemsCount, len(items))
-	}
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
-		p.drawerHeader(c, eyebrow, title, meta, "")
-		if len(items) == 0 {
-			ui.Column(c).FillWidth().Grow(1).Center().Gap(20).Children(func() {
-				p.emptyDescription(c, text.EmptyTitle, text.Live.EmptyArea)
-			})
-		} else {
-			list := &p.host.live.allList
-			totalRows := len(items)
-			if canLoadMore || loading {
-				totalRows++
+	p.renderShelfCollection(c, shelfCollectionSpec{
+		key:         "live-all/" + string(kind),
+		title:       title,
+		countFormat: text.Activity.FolderCount,
+		count:       len(items),
+		grid:        shelfVideoGrid,
+		backFocus:   liveAllBackFocus,
+		retryFocus:  liveAllRetryFocus,
+		itemPrefix:  "live-all/item/",
+		itemFocus: func(index int) app.FocusID {
+			return liveAllItemFocus(items[index].Ref)
+		},
+		artworkURLs: func(index int) []string {
+			return []string{items[index].CoverURL}
+		},
+		renderCard: func(c *ui.Context, index int, id app.FocusID, region string, cardWidth float32) {
+			size := catalogCardSize{
+				width:  cardWidth,
+				height: shelfVideoGrid.cardH,
+				cover:  shelfVideoGrid.coverH,
+				title:  21,
 			}
-			list.Key = func(index int) any {
-				if index >= len(items) {
-					return "more"
-				}
-				return items[index].Ref
-			}
-			ui.List(c.Key("live-all-list"), list, totalRows).FillWidth().Grow(1).
-				Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
-				rc := row.Context
-				if row.Index >= len(items) {
-					label := text.Activity.More
-					if loading {
-						label = text.LoadingTitle
-					}
-					p.drawerOptionRow(rc, liveAllMoreFocus, region, label, "", false, func() {
-						if canLoadMore && loadMore != nil {
-							loadMore()
-						}
-					})
-					return
-				}
-				item := items[row.Index]
-				id := liveAllItemFocus(item.Ref)
-				var parts []string
-				if item.Creator != nil && item.Creator.Name != "" {
-					parts = append(parts, item.Creator.Name)
-				}
-				if item.Category != "" {
-					parts = append(parts, item.Category)
-				}
-				if item.Views != nil && *item.Views > 0 {
-					parts = append(parts, catalogViews(*item.Views, text.Home))
-				}
-				p.drawerOptionRow(rc, id, region, item.Title, strings.Join(parts, " \u00b7 "), false, func() {
-					p.openLivePlayback(item, false)
-				})
-			})
-		}
-		ui.Row(c).Margin(16, 0, 0, 0).Children(func() {
-			p.styledButton(c, text.Close, "", app.CloseModal, region, func() { p.State.Back() }, p.drawerButtonAppearance())
-		})
-		p.drawerFooter(c, text.Modal.HintSelect, text.Modal.HintOpen)
+			p.liveRoomCard(c, id, region, items[index], size)
+		},
+		emptyIcon:   "live",
+		emptyNote:   text.Live.EmptyArea,
+		canLoadMore: canLoadMore,
+		loading:     loading,
+		loadErr:     loadErr,
+		moreFailed:  text.Live.MoreFailed,
+		loadMore:    loadMore,
+		retryMore:   loadMore,
 	})
 }

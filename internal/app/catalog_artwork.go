@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	maxCatalogArtwork   = 32
-	catalogArtworkCache = 48
-	catalogImageWorkers = 4
+	maxCatalogArtwork   = 96
+	catalogArtworkCache = 128
+	catalogImageWorkers = 6
 	maxCatalogBackdrops = 2
 )
 
@@ -61,7 +61,22 @@ func (c *Catalog) PrepareArtwork(locations []string) {
 		}
 		c.artwork = newCatalogArtwork(loader.LoadCatalogArtwork, catalogArtworkCache, catalogImageWorkers)
 	}
-	c.prepareArtwork(c.artwork, locations[:min(len(locations), maxCatalogArtwork)])
+	deduped := make([]string, 0, min(len(locations), maxCatalogArtwork))
+	seen := make(map[string]struct{}, min(len(locations), maxCatalogArtwork))
+	for _, location := range locations {
+		if location == "" {
+			continue
+		}
+		if _, ok := seen[location]; ok {
+			continue
+		}
+		seen[location] = struct{}{}
+		deduped = append(deduped, location)
+		if len(deduped) >= maxCatalogArtwork {
+			break
+		}
+	}
+	c.prepareArtwork(c.artwork, deduped)
 }
 
 func (c *Catalog) PrepareBackdrops(locations []string) {
