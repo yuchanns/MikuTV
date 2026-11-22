@@ -3,6 +3,7 @@ package tvui
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
@@ -45,6 +46,24 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 		belowHeader = focusDestination{Region: favoriteStatus}
 	}
 	activeTab := app.FocusID("library/tab/" + query.Section)
+	if p.active && available && !directory && !managing && snapshot.Phase == app.CatalogReady &&
+		strings.HasPrefix(string(p.State.Focus), "account/") {
+		found := false
+		for _, row := range rows {
+			if libraryCardFocus(query, row) == p.State.Focus {
+				found = true
+				break
+			}
+		}
+		if !found {
+			if len(rows) > 0 {
+				p.State.Focus = libraryCardFocus(query, rows[0])
+			} else {
+				p.State.Focus = activeTab
+			}
+			p.host.reveal = true
+		}
+	}
 	emptyFocus := app.ContentAction
 	if query.Folder != "" {
 		emptyFocus = "library/empty-action"

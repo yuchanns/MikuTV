@@ -346,12 +346,14 @@ func (v *View) dismissAfter(page app.Page) func() {
 		}
 		var resume func()
 		var resumeCreator func()
+		var resumeSeries func()
 		var resumePlayer func()
 		if page == app.SignInQR {
 			resume = v.videoDetail.signInAction
 			if v.creator != nil {
 				resumeCreator = v.creator.signInAction
 			}
+			resumeSeries = v.series.signInAction
 			resumePlayer = v.player.content.afterLogin
 		}
 		v.dispatch(func() {
@@ -365,6 +367,9 @@ func (v *View) dismissAfter(page app.Page) func() {
 		}
 		if resumeCreator != nil {
 			v.resumeCreatorAfterSignIn(resumeCreator)
+		}
+		if resumeSeries != nil {
+			v.resumeSeriesAfterSignIn(resumeSeries)
 		}
 		if resumePlayer != nil && v.State.Page == app.Player {
 			v.dispatch(resumePlayer)

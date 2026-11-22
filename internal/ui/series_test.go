@@ -15,9 +15,11 @@ import (
 )
 
 type uiSeriesSession struct {
+	uiAuthSource
 	mu          sync.Mutex
 	calls       []provider.SeriesRequest
 	playCalls   []provider.PlaybackRequest
+	trackCalls  []provider.SeriesTrackRequest
 	detail      map[string]provider.MediaItem
 	plans       map[string]provider.PlaybackPlan
 	hub         provider.SeriesPage
@@ -33,6 +35,10 @@ func (s *uiSeriesSession) Item(_ context.Context, ref provider.MediaRef) (provid
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if item, ok := s.detail[ref.ID]; ok {
+		if item.VideoDetails != nil {
+			details := *item.VideoDetails
+			item.VideoDetails = &details
+		}
 		return item, nil
 	}
 	return provider.MediaItem{}, &provider.Error{Code: provider.Expired}
@@ -78,6 +84,19 @@ type fakeMediaTransport struct{}
 
 func (fakeMediaTransport) OpenResource(_ context.Context, _ provider.PlaybackResource, _, _ string) (*http.Response, error) {
 	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: http.NoBody}, nil
+}
+
+func (s *uiSeriesSession) TrackSeries(_ context.Context, req provider.SeriesTrackRequest) (provider.SeriesTrackResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.trackCalls = append(s.trackCalls, req)
+	if item, ok := s.detail[req.Ref.ID]; ok && item.VideoDetails != nil {
+		details := *item.VideoDetails
+		details.Engagement.Tracked = req.Enabled
+		item.VideoDetails = &details
+		s.detail[req.Ref.ID] = item
+	}
+	return provider.SeriesTrackResult{Tracked: req.Enabled}, nil
 }
 
 func (s *uiSeriesSession) Close() {}
@@ -464,5 +483,146 @@ func TestSeriesPlaybackHeroEpisodesUpcomingAndAccessStates(t *testing.T) {
 	if state.Page != app.Player || view.videoDetail.part != 1 || playback.State().Target.PartID != "cid-2" || !playback.State().PreviewPending {
 		t.Fatalf("expected clicking ep 2 on Series detail to play cid-2 preview, got page=%s part=%d targetPart=%q pending=%t",
 			state.Page, view.videoDetail.part, playback.State().Target.PartID, playback.State().PreviewPending)
+	}
+}
+
+func TestSeriesTrackingSyncAcrossHubCalendarDetailAndFeedback(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := app.Entry{
+		ID: "sample-source", SourceID: "sample-source", Name: "SampleSource",
+		Presentation: provider.SourcePresentation{
+			Series: provider.SeriesPresentation{TrackLabel: "追番", TrackedLabel: "已追番"},
+		},
+		Capabilities: provider.Capabilities{
+			provider.BrowseCatalog, provider.GetCatalogItem, provider.BrowseSeries, provider.TrackSeries, provider.SignIn,
+		},
+	}
+	state, err := app.NewState([]app.Entry{entry}, entry.ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ref := provider.MediaRef{EntryID: entry.ID, Kind: provider.Series, ID: "ss100"}
+	hero := provider.SeriesEntry{Item: provider.MediaItem{Ref: ref, Title: "Mountains & Seas", Category: "Doc"}, Tracked: false}
+	sess := &uiSeriesSession{
+		hub: provider.SeriesPage{
+			Genres:           []provider.SeriesFilterOption{{Value: "", Label: "All"}},
+			Hero:             &hero,
+			Items:            []provider.SeriesEntry{hero},
+			SupportsIndex:    true,
+			SupportsCalendar: true,
+		},
+		calendar: provider.SeriesPage{
+			Days: []provider.SeriesCalendarDay{
+				{Date: "11-22", Month: 11, Day: 22, Weekday: 0, IsToday: true, Entries: []provider.SeriesScheduleEntry{{Time: "18:00", Entry: hero}}},
+			},
+		},
+		detail: map[string]provider.MediaItem{
+			"ss100": {
+				Ref: ref, Title: "Mountains & Seas", Subtitle: "Synopsis",
+				VideoDetails: &provider.VideoDetails{Engagement: provider.VideoEngagement{Tracked: false}},
+			},
+		},
+	}
+
+	queue := make(chan func(), 64)
+	post := func(fn func()) { queue <- fn }
+	drainOne := func() {
+		select {
+		case fn := <-queue:
+			fn()
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for async delivery")
+		}
+	}
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+
+	catalog := app.NewCatalog(func(string) provider.Session { return sess }, post, func() {})
+	t.Cleanup(catalog.Close)
+	series := app.NewSeriesCatalog(post, func() {})
+	t.Cleanup(series.Close)
+
+	store := uiTestKeychain{data: []byte(`{"selected":"u1","accounts":[{"account":{"id":"u1","name":"Tester"},"data":"e30="}]}`)}
+	auth := app.NewAuth(store, post, func() {}, func() {}, func() {})
+	t.Cleanup(auth.Close)
+
+	view := newTestView(t, Options{
+		State: state, Catalog: catalog, Series: series, Auth: auth,
+		Pages: pages, Assets: assets, Theme: theme.Default(),
+	})
+	view.SyncEntry()
+	for auth.Accounts().CurrentID != "u1" {
+		drainOne()
+	}
+	drain()
+
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	if !state.Navigate(app.Route{Page: app.Series}) {
+		t.Fatal("failed to navigate to Series")
+	}
+	view.SyncEntry()
+	for !series.Hub().Loaded {
+		drainOne()
+	}
+	series.EnsureCalendar()
+	for !series.Calendar().Loaded {
+		drainOne()
+	}
+	drain()
+	tester.Frame()
+
+	// 1. Track from Series Hub Hero -> syncs Hub Hero, Tracked shelf, Calendar, and displays source-specific feedback!
+	state.Focus = seriesHeroTrackFocus
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	drainOne()
+	drain()
+	tester.Frame()
+	if !series.Hub().Hero.Tracked || len(series.Hub().Tracked) != 1 || !series.Calendar().Days[0].Entries[0].Entry.Tracked {
+		t.Fatalf("Hero track did not sync across Hub/Tracked/Calendar: hub=%+v cal=%+v", series.Hub(), series.Calendar())
+	}
+	if view.series.feedback.text != "已追番" {
+		t.Fatalf("expected source-specific tracked feedback, got %q", view.series.feedback.text)
+	}
+
+	// 2. Open Series Detail -> Hero track button reflects Tracked=true -> click untracks and syncs back to Hub & Calendar!
+	state.Focus = seriesHeroDetailFocus
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	for view.videoDetail.loading {
+		drainOne()
+	}
+	drain()
+	tester.Frame()
+	if !view.videoDetail.item.VideoDetails.Engagement.Tracked {
+		t.Fatalf("expected detail to load Tracked=true, got %+v", view.videoDetail.item.VideoDetails)
+	}
+	state.Focus = videoDetailTrack
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	drainOne()
+	drain()
+	tester.Frame()
+	if view.videoDetail.item.VideoDetails.Engagement.Tracked || series.Hub().Hero.Tracked || len(series.Hub().Tracked) != 0 || series.Calendar().Days[0].Entries[0].Entry.Tracked {
+		t.Fatalf("Detail untrack did not sync across Detail/Hub/Tracked/Calendar")
+	}
+	if view.videoDetail.feedback.text != "已取消追番" {
+		t.Fatalf("expected source-specific untracked feedback, got %q", view.videoDetail.feedback.text)
 	}
 }

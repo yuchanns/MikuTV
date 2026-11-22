@@ -25,6 +25,7 @@ var operations = map[provider.Capability][]string{
 	provider.BrowseLibrary:                     {"readAccount"},
 	provider.BrowseFollowing:                   {"readFollowing"},
 	provider.BrowseSeries:                      {"readSeries"},
+	provider.TrackSeries:                       {"trackSeries"},
 	provider.BrowseCatalog:                     {"browse"},
 	provider.GetCatalogItem:                    {"getItem"},
 	provider.SearchCatalog:                     {"search"},

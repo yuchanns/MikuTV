@@ -160,6 +160,23 @@ func TestSeriesCatalogFiltersPaginationCalendarAndIsolation(t *testing.T) {
 		t.Fatalf("expected selected day 1, got %d", catalog.Calendar().Selected)
 	}
 
+	// ApplyTracked syncs Hub Hero, Hub Items, Hub Tracked shelf, Index Items, and Calendar Days!
+	target := catalog.Hub().Hero
+	if target == nil || target.Tracked {
+		t.Fatalf("expected untracked hub hero, got %+v", target)
+	}
+	catalog.ApplyTracked(*target, true)
+	if !catalog.Hub().Hero.Tracked || len(catalog.Hub().Tracked) != 1 || catalog.Hub().Tracked[0].Item.Ref != target.Item.Ref {
+		t.Fatalf("ApplyTracked(true) did not sync Hub hero & tracked shelf: hero=%+v tracked=%+v", catalog.Hub().Hero, catalog.Hub().Tracked)
+	}
+	if !catalog.Index().Items[0].Tracked || !catalog.Calendar().Days[0].Entries[0].Entry.Tracked {
+		t.Fatalf("ApplyTracked(true) did not sync Index & Calendar: idx=%+v cal=%+v", catalog.Index().Items[0], catalog.Calendar().Days[0].Entries[0])
+	}
+	catalog.ApplyTracked(*target, false)
+	if catalog.Hub().Hero.Tracked || len(catalog.Hub().Tracked) != 0 || catalog.Index().Items[0].Tracked || catalog.Calendar().Days[0].Entries[0].Entry.Tracked {
+		t.Fatalf("ApplyTracked(false) did not clear tracked state across all series views")
+	}
+
 	// Account / entry switch isolates cleanly.
 	catalog.Bind(entry, "u2", reader)
 	drain()

@@ -155,6 +155,16 @@ func (c *Catalog) FollowCreator(request provider.CreatorFollowRequest, accept fu
 	}, accept)
 }
 
+func (c *Catalog) TrackSeries(request provider.SeriesTrackRequest, accept func(provider.SeriesTrackResult, error)) context.CancelFunc {
+	tracker, _ := c.session.(provider.SeriesTracker)
+	return catalogResult(c, func(ctx context.Context) (provider.SeriesTrackResult, error) {
+		if tracker == nil {
+			return provider.SeriesTrackResult{}, &provider.Error{Code: provider.Unsupported}
+		}
+		return tracker.TrackSeries(ctx, request)
+	}, accept)
+}
+
 func catalogResult[T any](c *Catalog, operation func(context.Context) (T, error), accept func(T, error)) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	sessionGen := c.sessionGen

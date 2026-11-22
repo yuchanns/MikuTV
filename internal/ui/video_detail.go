@@ -16,6 +16,7 @@ import (
 const (
 	videoDetailPlay      app.FocusID = "video-detail/play"
 	videoDetailLater     app.FocusID = "video-detail/later"
+	videoDetailTrack     app.FocusID = "video-detail/track"
 	videoDetailCreatorID app.FocusID = "video-detail/creator"
 	videoDetailFollow    app.FocusID = "video-detail/follow"
 	videoDetailLike      app.FocusID = "video-detail/like"
@@ -503,6 +504,20 @@ func (p *PageContext) videoDetailActions(c *ui.Context, item provider.MediaItem)
 					}
 				}
 			}
+		}
+		if item.Ref.Kind == provider.Series && entry.Capabilities.Has(provider.TrackSeries) {
+			tracked := item.VideoDetails != nil && item.VideoDetails.Engagement.Tracked
+			trackIcon := "detail/plus"
+			if tracked {
+				trackIcon = "detail/check"
+			}
+			d := p.uiColors()
+			p.styledButton(c, p.sourceSeriesTrackLabel(tracked), trackIcon, videoDetailTrack, videoDetailControls, func() {
+				p.toggleSeriesTrack(provider.SeriesEntry{Item: item, Tracked: tracked})
+			}, buttonAppearance{
+				height: 62, minWidth: 165, padding: 24, radius: 12, fontSize: 22, fontWeight: 550, iconSize: 28, iconGap: 13, focusShadow: true,
+				background: d.secondaryFill, foreground: d.secondaryText, border: d.secondaryBorder,
+			}).Center()
 		}
 	})
 }

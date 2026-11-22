@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/yuchanns/MikuTV/internal/provider"
@@ -72,6 +73,28 @@ func (s *Session) ReadSeries(ctx context.Context, request provider.SeriesRequest
 		}
 	}
 	return page, nil
+}
+
+func (s *Session) TrackSeries(ctx context.Context, request provider.SeriesTrackRequest) (provider.SeriesTrackResult, error) {
+	if !s.ownsVideo(request.Ref) || request.Ref.Kind != provider.Series {
+		return provider.SeriesTrackResult{}, &provider.Error{Code: provider.Denied}
+	}
+	s.requests.RLock()
+	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
+	s.requests.RUnlock()
+	if owner == "" {
+		return provider.SeriesTrackResult{}, &provider.Error{Code: provider.NeedsSignIn}
+	}
+	input := struct {
+		provider.SeriesTrackRequest
+		Owner  string          `json:"owner"`
+		Secret json.RawMessage `json:"secret"`
+	}{request, owner, secret}
+	var result provider.SeriesTrackResult
+	if err := s.invoke(ctx, scope, client, provider.TrackSeries, "trackSeries", input, &result); err != nil {
+		return provider.SeriesTrackResult{}, err
+	}
+	return result, nil
 }
 
 func (s *Session) sanitizeSeriesEntry(entry *provider.SeriesEntry) error {

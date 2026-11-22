@@ -243,6 +243,17 @@ func (p *PageContext) removeLibraryItems(query provider.AccountQuery, resources 
 		for _, id := range resources[completed:] {
 			management.picked[id] = true
 		}
+		if query.Section == provider.AccountTracking && completed > 0 {
+			for _, id := range resources[:completed] {
+				refID := id
+				if !strings.HasPrefix(refID, "ss") {
+					refID = "ss" + refID
+				}
+				p.host.syncSeriesTracked(provider.SeriesEntry{
+					Item: provider.MediaItem{Ref: provider.MediaRef{EntryID: p.State.CurrentEntry, Kind: provider.Series, ID: refID}},
+				}, false, false)
+			}
+		}
 		if len(activity.Snapshot(query).Page.Rows) == 0 {
 			*management = favoriteManagement{}
 		}

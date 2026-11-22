@@ -171,13 +171,22 @@ func (v *View) Render(c *ui.Context) {
 		switch top.Page {
 		case app.VideoDetail:
 			v.renderVideoDetailFeedback(c)
+			v.series.feedback = videoDetailFeedback{}
 		case app.Creator:
 			v.videoDetail.feedback = videoDetailFeedback{}
+			v.series.feedback = videoDetailFeedback{}
 			if v.creator != nil {
 				v.renderFeedbackToast(c, &v.creator.feedback)
 			}
+		case app.Series, app.SeriesCalendar, app.SeriesIndex:
+			v.videoDetail.feedback = videoDetailFeedback{}
+			if v.creator != nil {
+				v.creator.feedback = videoDetailFeedback{}
+			}
+			v.renderFeedbackToast(c, &v.series.feedback)
 		default:
 			v.videoDetail.feedback = videoDetailFeedback{}
+			v.series.feedback = videoDetailFeedback{}
 			if v.creator != nil {
 				v.creator.feedback = videoDetailFeedback{}
 			}
@@ -333,6 +342,12 @@ func (v *View) SyncEntry() {
 		}
 		v.closeAllVideoDetails()
 		v.closeAllCreators()
+		if v.series.trackPending != nil {
+			v.series.trackPending()
+			v.series.trackPending = nil
+		}
+		v.series.signInAction = nil
+		v.series.feedback = videoDetailFeedback{}
 		if v.Playback != nil && v.Playback.Active() {
 			v.leavePlayback()
 		}

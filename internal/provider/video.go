@@ -67,6 +67,7 @@ type VideoEngagement struct {
 	WatchLater bool `json:"watchLater,omitempty"`
 	Liked      bool `json:"liked,omitempty"`
 	Favorite   bool `json:"favorite,omitempty"`
+	Tracked    bool `json:"tracked,omitempty"`
 }
 
 type VideoEdit struct {

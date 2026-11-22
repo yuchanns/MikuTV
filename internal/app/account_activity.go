@@ -85,7 +85,11 @@ func (a *AccountActivity) Ensure(query provider.AccountQuery) {
 }
 
 func (a *AccountActivity) Refresh(query provider.AccountQuery) {
-	a.start(query, "", provider.AccountPage{})
+	var previous provider.AccountPage
+	if read := a.reads[query]; read != nil {
+		previous = read.Page
+	}
+	a.start(query, "", previous)
 }
 
 func (a *AccountActivity) Retry(query provider.AccountQuery) {

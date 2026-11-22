@@ -61,7 +61,7 @@ type seriesLabels struct {
 	Reset, Results, WorksCount, RatingSuffix                    string
 	NoFilterResults, NoFilterNote                               string
 	Today, MonthSuffix, Scheduled, NoUpdates, NoUpdatesNote     string
-	Track, Tracked, TrackPending                                string
+	Track, Tracked, TrackRemoved                                string
 	Loading, LoadFailed, MoreFailed                             string
 	Weekdays                                                    []string
 }

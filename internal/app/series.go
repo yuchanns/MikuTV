@@ -550,6 +550,80 @@ func (s *SeriesCatalog) loadCalendar() {
 	}()
 }
 
+func (s *SeriesCatalog) ApplyTracked(entry provider.SeriesEntry, tracked bool) {
+	if s == nil || entry.Item.Ref.ID == "" {
+		return
+	}
+	ref := entry.Item.Ref
+	hubChanged, indexChanged, calChanged := false, false, false
+
+	if s.hub.Hero != nil && s.hub.Hero.Item.Ref == ref && s.hub.Hero.Tracked != tracked {
+		hero := *s.hub.Hero
+		hero.Tracked = tracked
+		s.hub.Hero = &hero
+		hubChanged = true
+	}
+	for i := range s.hub.Items {
+		if s.hub.Items[i].Item.Ref == ref && s.hub.Items[i].Tracked != tracked {
+			s.hub.Items[i].Tracked = tracked
+			hubChanged = true
+		}
+	}
+	if tracked {
+		idx := slices.IndexFunc(s.hub.Tracked, func(existing provider.SeriesEntry) bool {
+			return existing.Item.Ref == ref
+		})
+		if idx >= 0 {
+			if !s.hub.Tracked[idx].Tracked {
+				s.hub.Tracked[idx].Tracked = true
+				hubChanged = true
+			}
+		} else if s.hub.Loaded && entry.Item.Title != "" {
+			added := entry
+			added.Tracked = true
+			s.hub.Tracked = append([]provider.SeriesEntry{added}, s.hub.Tracked...)
+			hubChanged = true
+		}
+	} else {
+		before := len(s.hub.Tracked)
+		s.hub.Tracked = slices.DeleteFunc(slices.Clone(s.hub.Tracked), func(existing provider.SeriesEntry) bool {
+			return existing.Item.Ref == ref
+		})
+		if len(s.hub.Tracked) != before {
+			hubChanged = true
+		}
+	}
+
+	for i := range s.index.Items {
+		if s.index.Items[i].Item.Ref == ref && s.index.Items[i].Tracked != tracked {
+			s.index.Items[i].Tracked = tracked
+			indexChanged = true
+		}
+	}
+
+	for d := range s.calendar.Days {
+		for e := range s.calendar.Days[d].Entries {
+			if s.calendar.Days[d].Entries[e].Entry.Item.Ref == ref && s.calendar.Days[d].Entries[e].Entry.Tracked != tracked {
+				s.calendar.Days[d].Entries[e].Entry.Tracked = tracked
+				calChanged = true
+			}
+		}
+	}
+
+	if hubChanged {
+		s.hub.Revision++
+	}
+	if indexChanged {
+		s.index.Revision++
+	}
+	if calChanged {
+		s.calendar.Revision++
+	}
+	if hubChanged || indexChanged || calChanged {
+		s.changed()
+	}
+}
+
 func (s *SeriesCatalog) cancelAll() {
 	s.hubCall.stop()
 	s.indexCall.stop()

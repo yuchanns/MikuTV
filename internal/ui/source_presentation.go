@@ -76,6 +76,17 @@ func (p *PageContext) sourceSeriesTrackLabel(tracked bool) string {
 	return p.Assets.Text.Series.Track
 }
 
+func (p *PageContext) sourceSeriesTrackFeedback(tracked bool) string {
+	if tracked {
+		return p.sourceSeriesTrackLabel(true)
+	}
+	removed := p.Assets.Text.Series.TrackRemoved
+	if label := strings.TrimSpace(p.sourcePresentation().Series.TrackLabel); label != "" {
+		return strings.ReplaceAll(removed, p.Assets.Text.Series.Track, label)
+	}
+	return removed
+}
+
 func (p *PageContext) sourceMembership() string {
 	if membership := strings.TrimSpace(p.sourcePresentation().Membership); membership != "" {
 		return membership

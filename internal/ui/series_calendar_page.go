@@ -241,7 +241,7 @@ func (p *PageContext) seriesCalendarDayStrip(c *ui.Context, snap app.SeriesCalen
 }
 
 func (p *PageContext) seriesScheduleRow(c *ui.Context, item provider.SeriesScheduleEntry) {
-	colors, d, text := p.Theme.Colors, p.uiColors(), p.Assets.Text.Series
+	colors, d := p.Theme.Colors, p.uiColors()
 	showID := seriesCalendarShowFocus(item.Entry.Item.Ref)
 	trackID := seriesCalendarTrackFocus(item.Entry.Item.Ref)
 	showFocused := p.paintFocus() == showID
@@ -279,7 +279,7 @@ func (p *PageContext) seriesScheduleRow(c *ui.Context, item provider.SeriesSched
 			trackIcon = "check"
 		}
 		p.styledButton(c, p.sourceSeriesTrackLabel(item.Entry.Tracked), trackIcon, trackID, seriesCalendarListRegion, func() {
-			p.host.notice = text.TrackPending
+			p.toggleSeriesTrack(item.Entry)
 		}, buttonAppearance{
 			height: 50, minWidth: 125, padding: 20, radius: 12, fontSize: 19, iconSize: 19, iconGap: 10,
 			background: d.secondaryFill, foreground: d.secondaryText, border: d.secondaryBorder,

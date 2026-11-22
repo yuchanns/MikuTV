@@ -270,6 +270,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				if v.creator != nil {
 					v.creator.signInAction = nil
 				}
+				v.series.signInAction = nil
 				v.player.content.afterLogin = nil
 			}},
 		Registration{Policy: authModal(app.SignOut, app.Account, app.CloseModal), Component: signOutDialog{},

@@ -1,6 +1,7 @@
 package tvui
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
@@ -56,6 +57,9 @@ type seriesViewState struct {
 	allList       ui.ListState
 	filterKey     string
 	filterList    ui.ListState
+	trackPending  context.CancelFunc
+	signInAction  func()
+	feedback      videoDetailFeedback
 }
 
 func seriesGenreFocus(value string) app.FocusID {
@@ -501,7 +505,7 @@ func (p *PageContext) seriesHero(c *ui.Context, hero provider.SeriesEntry) {
 					trackIcon = "check"
 				}
 				p.styledButton(c, p.sourceSeriesTrackLabel(hero.Tracked), trackIcon, seriesHeroTrackFocus, seriesHeroRegion, func() {
-					p.host.notice = text.Series.TrackPending
+					p.toggleSeriesTrack(hero)
 				}, secondaryStyle)
 			})
 		})

@@ -74,6 +74,21 @@ type SeriesPage struct {
 	SupportsCalendar bool                 `json:"supportsCalendar,omitempty"`
 }
 
+const TrackSeries Capability = "account.trackSeries"
+
+type SeriesTrackRequest struct {
+	Ref     MediaRef `json:"ref"`
+	Enabled bool     `json:"enabled"`
+}
+
+type SeriesTrackResult struct {
+	Tracked bool `json:"tracked"`
+}
+
 type SeriesReader interface {
 	ReadSeries(context.Context, SeriesRequest) (SeriesPage, error)
+}
+
+type SeriesTracker interface {
+	TrackSeries(context.Context, SeriesTrackRequest) (SeriesTrackResult, error)
 }
