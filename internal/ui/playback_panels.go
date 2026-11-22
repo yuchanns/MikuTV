@@ -37,6 +37,12 @@ func (s *playbackView) openPanel(v *View, panel app.FocusID) {
 			v.State.Focus = playerPanelExit
 		}
 	case playerComments:
+		if liveMode {
+			s.liveChatAutoFollow = true
+			s.liveChatLastRev = 0
+			v.State.Focus = playerLiveChatScroll
+			break
+		}
 		detail := v.discussionDetail()
 		d := detail.videoDiscussion()
 		v.State.Focus = d.firstFocus(true, detail.item.VideoDetails)
@@ -492,6 +498,10 @@ func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, cur
 	ui.Box(c.Key("player-drawer-edge")).Absolute().Top(0).Bottom(0).Right(playerDrawerWidth - 1).Width(1).
 		Background(paint(colors.Border.Subtle))
 	if s.panel == playerComments {
+		if isLivePlayback(state, current) {
+			p.liveChatPanel(c, drawer, current)
+			return
+		}
 		p.playbackDiscussion(c, drawer)
 		return
 	}

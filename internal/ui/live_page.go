@@ -45,6 +45,7 @@ type liveViewState struct {
 	headerScroll    ui.ScrollState
 	roomsScroll     ui.ScrollState
 	followingScroll ui.ScrollState
+	featuredRef     provider.MediaRef
 	allSection      liveAllKind
 	allList         ui.ListState
 }
@@ -75,6 +76,7 @@ func (v *View) selectLiveArea(area string) {
 		return
 	}
 	v.live.roomsScroll = ui.ScrollState{}
+	v.live.featuredRef = provider.MediaRef{}
 	v.setCatalogFocus(v.activeScroll, liveAreaFocus(area), true)
 	v.Live.SelectArea(area)
 }
@@ -121,12 +123,13 @@ func (livePage) Render(c *ui.Context, p *PageContext) {
 	}
 	snap := catalog.Snapshot()
 	p.restoreLiveFocus(snap)
-	p.prepareLiveArtwork(snap)
+	featured := p.liveFeaturedItem(snap)
+	p.prepareLiveArtwork(snap, featured)
 	p.liveRegions(snap)
 
 	ui.Box(c.Key("live-page")).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
-		if snap.Hero != nil && p.scroll().Y < liveArtHeight {
-			p.liveBackdrop(c, *snap.Hero)
+		if featured != nil && p.scroll().Y < liveArtHeight {
+			p.liveBackdrop(c, *featured)
 		}
 		ui.Column(c.Key("live-content")).FillWidth().Padding(0, 0, screenBottomInset, 0).ZIndex(1).Children(func() {
 			p.liveHeader(c, snap)
@@ -147,8 +150,8 @@ func (livePage) Render(c *ui.Context, p *PageContext) {
 				})
 				return
 			}
-			if snap.Hero != nil {
-				p.liveHero(c, *snap.Hero)
+			if featured != nil {
+				p.liveHero(c, *featured)
 			}
 			if len(snap.Rooms) == 0 && snap.Phase == app.CatalogReady {
 				p.liveEmptyArea(c)
@@ -287,17 +290,97 @@ func (p *PageContext) liveRegions(snap app.LiveSnapshot) {
 	}
 }
 
-func (p *PageContext) prepareLiveArtwork(snap app.LiveSnapshot) {
+func (p *PageContext) liveFeaturedItem(snap app.LiveSnapshot) *provider.MediaItem {
+	focus := p.State.Focus
+	find := func(ref provider.MediaRef) *provider.MediaItem {
+		if ref.ID == "" {
+			return nil
+		}
+		if snap.Hero != nil && snap.Hero.Ref == ref {
+			copyItem := *snap.Hero
+			return &copyItem
+		}
+		for i := range snap.Rooms {
+			if snap.Rooms[i].Ref == ref {
+				copyItem := snap.Rooms[i]
+				return &copyItem
+			}
+		}
+		for i := range snap.FollowingRooms {
+			if snap.FollowingRooms[i].Ref == ref {
+				copyItem := snap.FollowingRooms[i]
+				return &copyItem
+			}
+		}
+		return nil
+	}
+	if strings.HasPrefix(string(focus), "live/rooms/") {
+		for i := range snap.Rooms {
+			if liveRoomCardFocus("rooms", snap.Rooms[i].Ref) == focus {
+				p.host.live.featuredRef = snap.Rooms[i].Ref
+				if snap.Hero != nil && snap.Hero.Ref == snap.Rooms[i].Ref {
+					copyItem := *snap.Hero
+					return &copyItem
+				}
+				copyItem := snap.Rooms[i]
+				return &copyItem
+			}
+		}
+	}
+	if strings.HasPrefix(string(focus), "live/following/") {
+		for i := range snap.FollowingRooms {
+			if liveRoomCardFocus("following", snap.FollowingRooms[i].Ref) == focus {
+				p.host.live.featuredRef = snap.FollowingRooms[i].Ref
+				if snap.Hero != nil && snap.Hero.Ref == snap.FollowingRooms[i].Ref {
+					copyItem := *snap.Hero
+					return &copyItem
+				}
+				copyItem := snap.FollowingRooms[i]
+				return &copyItem
+			}
+		}
+	}
+	if item := find(p.host.live.featuredRef); item != nil {
+		return item
+	}
+	if snap.Hero != nil {
+		copyItem := *snap.Hero
+		return &copyItem
+	}
+	if len(snap.Rooms) != 0 {
+		copyItem := snap.Rooms[0]
+		return &copyItem
+	}
+	return nil
+}
+
+func (p *PageContext) prepareLiveArtwork(snap app.LiveSnapshot, featured *provider.MediaItem) {
 	if p.host.Catalog == nil {
 		return
 	}
-	if snap.Hero != nil {
-		if snap.Hero.BackdropURL != "" {
-			p.host.Catalog.PrepareBackdrops([]string{snap.Hero.BackdropURL})
+	var backdrops []string
+	addBackdrop := func(item *provider.MediaItem) {
+		if item == nil {
+			return
 		}
-		if snap.Hero.CoverURL != "" {
-			p.host.Catalog.PrepareArtwork([]string{snap.Hero.CoverURL})
+		if item.BackdropURL != "" {
+			backdrops = append(backdrops, item.BackdropURL)
+		} else if item.CoverURL != "" {
+			backdrops = append(backdrops, item.CoverURL)
 		}
+	}
+	addBackdrop(featured)
+	if snap.Hero != nil && (featured == nil || snap.Hero.Ref != featured.Ref) {
+		addBackdrop(snap.Hero)
+	}
+	if len(backdrops) != 0 {
+		p.host.Catalog.PrepareBackdrops(backdrops)
+	}
+	if featured != nil && featured.CoverURL != "" {
+		p.host.Catalog.PrepareArtwork([]string{featured.CoverURL})
+	}
+	if snap.Hero != nil && snap.Hero.CoverURL != "" {
+		p.host.Catalog.PrepareArtwork([]string{snap.Hero.CoverURL})
 	}
 	urls := make([]string, 0, 20)
 	viewport := p.Width - 103
@@ -324,8 +407,12 @@ func (p *PageContext) prepareLiveArtwork(snap app.LiveSnapshot) {
 func (p *PageContext) liveBackdrop(c *ui.Context, hero provider.MediaItem) {
 	canvas := p.Theme.Colors.Surface.Canvas
 	var art ui.ImageSource
-	if hero.BackdropURL != "" {
-		art = p.catalogBitmap(catalogImageKey{location: hero.BackdropURL, backdrop: true})
+	backdropLoc := hero.BackdropURL
+	if backdropLoc == "" {
+		backdropLoc = hero.CoverURL
+	}
+	if backdropLoc != "" {
+		art = p.catalogBitmap(catalogImageKey{location: backdropLoc, backdrop: true})
 	}
 	if art == nil && hero.CoverURL != "" {
 		art = p.catalogCover(hero.CoverURL)

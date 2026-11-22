@@ -308,7 +308,7 @@ func (s *Session) invoke(ctx, scope context.Context, client *http.Client, op pro
 	if err != nil {
 		return &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
-	secure := strings.HasPrefix(string(op), "account.") || op == provider.ReportPlayback
+	secure := strings.HasPrefix(string(op), "account.") || op == provider.ReportPlayback || op == provider.WriteLiveChat
 	data, err := s.source.execute(ctx, client, s.storage, export, params, secure)
 	if scope.Err() != nil {
 		return context.Canceled

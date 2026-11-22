@@ -144,6 +144,14 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 	if manifest.Capabilities.Has(provider.SearchSuggest) && !manifest.Capabilities.Has(provider.SearchCatalog) {
 		return sourceManifest{}, fmt.Errorf("%w: %s requires %s", ErrIncompatible, provider.SearchSuggest, provider.SearchCatalog)
 	}
+	if manifest.Capabilities.Has(provider.WriteLiveChat) {
+		if !manifest.Capabilities.Has(provider.LiveChat) {
+			return sourceManifest{}, fmt.Errorf("%w: %s requires %s", ErrIncompatible, provider.WriteLiveChat, provider.LiveChat)
+		}
+		if !manifest.Capabilities.Has(provider.SignIn) {
+			return sourceManifest{}, fmt.Errorf("%w: %s requires %s", ErrIncompatible, provider.WriteLiveChat, provider.SignIn)
+		}
+	}
 	for i, host := range manifest.Permissions.Network {
 		host = strings.ToLower(host)
 		if !validHostPattern(host) {

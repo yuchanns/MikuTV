@@ -1,6 +1,8 @@
 package plugin
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -10,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,6 +20,8 @@ import (
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/webapi"
 )
+
+const maxInflateBytes = 4 << 20
 
 const StorageCapacity = 8 << 10
 
@@ -89,7 +94,15 @@ func (s *Storage) delete(key string) error {
 	return err
 }
 
-func installHost(ctx context.Context, rt *moejs.Runtime, store *Storage) error {
+func installHost(ctx context.Context, rt *moejs.Runtime, store *Storage, extra ...map[string]any) error {
+	var extras map[string]any
+	if len(extra) > 0 {
+		extras = extra[0]
+	}
+	return installHostWith(ctx, rt, store, extras)
+}
+
+func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, extra map[string]any) error {
 	get := rt.Function("get", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
@@ -135,10 +148,41 @@ func installHost(ctx context.Context, rt *moejs.Runtime, store *Storage) error {
 		}
 		return rt.FromGo(hex.EncodeToString(ciphertext))
 	})
-	return rt.SetGlobal("host", map[string]any{
-		"storage": map[string]any{"get": get, "set": set, "delete": remove},
-		"crypto":  map[string]any{"sha256": digest, "encryptRSAOAEP": encrypt},
+	inflateZlib := rt.Function("inflateZlib", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		if err := ctx.Err(); err != nil {
+			return moejs.Undefined(), err
+		}
+		raw, err := rt.ToGo(moejs.Arg(args, 0))
+		if err != nil {
+			return moejs.Undefined(), err
+		}
+		data, ok := raw.([]byte)
+		if !ok || len(data) == 0 {
+			return moejs.Undefined(), errors.New("byte buffer required")
+		}
+		reader, err := zlib.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return moejs.Undefined(), err
+		}
+		defer reader.Close()
+		out, err := io.ReadAll(io.LimitReader(reader, maxInflateBytes+1))
+		if err != nil {
+			return moejs.Undefined(), err
+		}
+		if len(out) > maxInflateBytes {
+			return moejs.Undefined(), errors.New("decompressed payload exceeds limit")
+		}
+		return rt.FromGo(out)
 	})
+	hostObj := map[string]any{
+		"storage":  map[string]any{"get": get, "set": set, "delete": remove},
+		"crypto":   map[string]any{"sha256": digest, "encryptRSAOAEP": encrypt},
+		"compress": map[string]any{"inflateZlib": inflateZlib},
+	}
+	for k, v := range extra {
+		hostObj[k] = v
+	}
+	return rt.SetGlobal("host", hostObj)
 }
 
 func (s *Source) allowRequest(secure bool) func(*http.Request) error {

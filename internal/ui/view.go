@@ -49,6 +49,7 @@ type Options struct {
 	Following   *app.FollowingFeed
 	Series      *app.SeriesCatalog
 	Live        *app.LiveCatalog
+	LiveChat    *app.LiveChat
 	Auth        *app.Auth
 	Activity    *app.AccountActivity
 	Pages       *Pages
@@ -65,6 +66,7 @@ type View struct {
 	Following       *app.FollowingFeed
 	Series          *app.SeriesCatalog
 	Live            *app.LiveCatalog
+	LiveChat        *app.LiveChat
 	Auth            *app.Auth
 	Activity        *app.AccountActivity
 	Playback        *app.Playback
@@ -113,7 +115,7 @@ type View struct {
 
 func NewView(options Options) *View {
 	v := &View{
-		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, Auth: options.Auth, Activity: options.Activity,
+		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Version: options.Version, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}
@@ -428,6 +430,13 @@ func (v *View) SyncAccountActivity() {
 		if v.Live.Bind(entry, owner, reader) {
 			v.live = liveViewState{}
 		}
+	}
+	if v.LiveChat != nil {
+		var client provider.LiveChatClient
+		if v.Catalog != nil {
+			client = v.Catalog.LiveChatClient()
+		}
+		v.LiveChat.SetContext(entry.ID, entry.Generation, owner, client, entry.Capabilities.Has(provider.LiveChat))
 	}
 	if sync := v.Pages.components[v.State.Route].Sync; sync != nil {
 		sync(v)

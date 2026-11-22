@@ -472,6 +472,10 @@ func scheduleDanmaku(items []provider.Danmaku, density int, viewportWidth float3
 }
 
 func (p *PageContext) drawDanmaku(c *ui.Context, state app.PlaybackState) {
+	if state.Resolution.Plan.Live || state.Target.Ref.Kind == provider.Live {
+		p.drawLiveDanmaku(c, state)
+		return
+	}
 	settings := p.host.playbackSettings
 	content := &p.host.player.content
 	if len(content.danmaku) == 0 || settings.density == 0 {
@@ -524,6 +528,26 @@ func (p *PageContext) playbackDanmakuOptions(c *ui.Context) {
 		p.playbackSlider(c, "opacity", text.Opacity, &options.opacity, 5)
 	})
 	entry, _ := p.State.Current()
+	liveMode := v.Playback != nil && isLivePlayback(v.Playback.State(), v.player.current())
+	if liveMode {
+		if entry.Capabilities.Has(provider.WriteLiveChat) {
+			muted := v.LiveChat != nil && v.LiveChat.Snapshot().Muted
+			if muted {
+				ui.Row(c).FillWidth().Height(62).Radius(11).Gap(12).Center().
+					Background(paint(colors.Disabled.Background)).IgnoreInput(true).Children(func() {
+					ui.Icon(c, p.Assets.Icon("comment")).Size(22, 22).TextColor(paint(colors.Disabled.Foreground))
+					ui.Text(c, text.LiveChatMuted).FontSize(20).TextColor(paint(colors.Disabled.Foreground))
+				})
+			} else {
+				p.styledButton(c, text.LiveChatSend, "comment", playbackOptionID(playerDanmaku, "send"), playerPanelGroup,
+					func() { p.beginLiveChatCompose(playbackOptionID(playerDanmaku, "send")) }, buttonAppearance{
+						height: 62, radius: 11, fontSize: 20, iconSize: 22, iconGap: 12,
+						background: withAlpha(colors.Playback.Foreground, 0x06), foreground: paint(colors.Accent.Soft),
+					}).FillWidth().Center()
+			}
+		}
+		return
+	}
 	if entry.Capabilities.Has(provider.WriteDanmaku) {
 		p.styledButton(c, text.SendDanmaku, "comment", playbackOptionID(playerDanmaku, "send"), playerPanelGroup,
 			p.beginDanmaku, buttonAppearance{
@@ -585,13 +609,17 @@ func (p *PageContext) playbackSlider(c *ui.Context, key, label string, value *in
 }
 
 type danmakuDraft struct {
-	mode    provider.DanmakuMode
-	body    string
-	input   string
-	edit    bool
-	preview ui.ScrollState
-	failure provider.ErrorCode
-	cancel  context.CancelFunc
+	mode          provider.DanmakuMode
+	live          bool
+	muted         bool
+	returnFocus   app.FocusID
+	body          string
+	input         string
+	edit          bool
+	preview       ui.ScrollState
+	failure       provider.ErrorCode
+	failureDetail string
+	cancel        context.CancelFunc
 }
 
 const (
@@ -610,14 +638,19 @@ func (p *PageContext) beginDanmaku() {
 }
 
 func (p *PageContext) drawDanmakuComposer(c *ui.Context, draft *danmakuDraft) {
-	text, colors := p.Assets.Text.Playback, p.Theme.Colors
+	v, text, colors := p.host, p.Assets.Text.Playback, p.Theme.Colors
 	hasDraft := strings.TrimSpace(draft.body) != ""
+	isMuted := draft.muted || (draft.live && v.LiveChat != nil && v.LiveChat.Snapshot().Muted)
+	eyebrow, title, maxLen := "DANMAKU", text.SendDanmaku, provider.DanmakuLimit
+	if draft.live {
+		eyebrow, title, maxLen = "LIVE \u00b7 CHAT", text.LiveChatSend, provider.LiveChatLimit
+	}
 	p.region(danmakuRegion, focusEdges{})
 	p.renderPlayerFrameless(c, "danmaku-compose", 820, func() {
-		p.framelessHeader(c, "DANMAKU", "comment", text.SendDanmaku, "")
+		p.framelessHeader(c, eyebrow, "comment", title, "")
 		if draft.edit {
 			input := ui.TextInput(c.Key("danmaku-input"), &draft.input).FillWidth().Height(105).FontSize(28).
-				Label(text.SendDanmaku).Placeholder(text.DanmakuPlaceholder).MaxLength(provider.DanmakuLimit).
+				Label(title).Placeholder(text.DanmakuPlaceholder).MaxLength(maxLen).
 				ReturnKey(ui.ReturnDone).OnTextKey(func(key ui.TextKey) bool {
 				if key.Key != ui.KeyEnter && key.Key != ui.KeyEscape {
 					return false
@@ -628,7 +661,7 @@ func (p *PageContext) drawDanmakuComposer(c *ui.Context, draft *danmakuDraft) {
 				}
 				draft.edit = false
 				p.State.Focus, p.host.reveal = danmakuEdit, true
-				if strings.TrimSpace(draft.body) != "" && key.Key == ui.KeyEnter {
+				if strings.TrimSpace(draft.body) != "" && key.Key == ui.KeyEnter && !isMuted {
 					p.State.Focus = danmakuSend
 				}
 				return true
@@ -650,37 +683,63 @@ func (p *PageContext) drawDanmakuComposer(c *ui.Context, draft *danmakuDraft) {
 				p.bindDraftPreview(preview, danmakuPreview, danmakuRegion, &draft.preview, danmakuEdit, 52)
 			}
 		}
-		ui.Row(c).Gap(12).Margin(28, 0, 0, 0).Children(func() {
-			for _, option := range []struct {
-				mode  provider.DanmakuMode
-				label string
-			}{
-				{provider.DanmakuScroll, text.ScrollMode}, {provider.DanmakuTop, text.TopMode}, {provider.DanmakuBottom, text.BottomMode},
-			} {
-				id := app.FocusID("player/danmaku-mode/" + option.mode)
-				style := p.framelessButtonAppearance()
-				style.height, style.radius, style.padding, style.fontSize = 50, 13, 24, 19
-				selected := draft.mode == option.mode
-				if selected {
-					style.background = withAlpha(colors.Accent.Primary, 0x22)
-					style.foreground = paint(colors.Accent.Soft)
-					style.border = withAlpha(colors.Accent.Soft, 0x58)
+		if !draft.live {
+			ui.Row(c).Gap(12).Margin(28, 0, 0, 0).Children(func() {
+				for _, option := range []struct {
+					mode  provider.DanmakuMode
+					label string
+				}{
+					{provider.DanmakuScroll, text.ScrollMode}, {provider.DanmakuTop, text.TopMode}, {provider.DanmakuBottom, text.BottomMode},
+				} {
+					id := app.FocusID("player/danmaku-mode/" + option.mode)
+					style := p.framelessButtonAppearance()
+					style.height, style.radius, style.padding, style.fontSize = 50, 13, 24, 19
+					selected := draft.mode == option.mode
+					if selected {
+						style.background = withAlpha(colors.Accent.Primary, 0x22)
+						style.foreground = paint(colors.Accent.Soft)
+						style.border = withAlpha(colors.Accent.Soft, 0x58)
+					}
+					p.styledButton(c, option.label, "", id, danmakuRegion, func() { draft.mode = option.mode }, style).AccessSelected(selected)
 				}
-				p.styledButton(c, option.label, "", id, danmakuRegion, func() { draft.mode = option.mode }, style).AccessSelected(selected)
-			}
-		})
-		if draft.failure != "" {
-			ui.Text(c, p.authError(draft.failure)).Margin(16, 0, 0, 0).FontSize(18).TextColor(paint(colors.Status.Error.Foreground))
+			})
+		}
+		if isMuted {
+			ui.Text(c, text.LiveChatMuted).Margin(16, 0, 0, 0).FontSize(18).TextColor(paint(colors.Status.Error.Foreground))
+		} else if draft.failure != "" {
+			ui.Text(c, p.danmakuSendError(draft.failure, draft.failureDetail)).Margin(16, 0, 0, 0).FontSize(18).TextColor(paint(colors.Status.Error.Foreground))
 		}
 		ui.Row(c).Gap(16).Margin(36, 0, 0, 0).AlignSelf(ui.Start).Children(func() {
 			p.styledButton(c, p.Assets.Text.Detail.EditComment, "", danmakuEdit, danmakuRegion, func() {
 				draft.edit, draft.input = true, draft.body
 				p.State.Focus, p.host.reveal = danmakuInput, true
 			}, p.framelessButtonAppearance())
-			p.styledButton(c, text.Send, "send", danmakuSend, danmakuRegion, func() { p.sendDanmaku(draft) }, p.framelessButtonAppearance()).
-				Disabled(draft.cancel != nil || draft.edit || !hasDraft)
+			p.styledButton(c, text.Send, "send", danmakuSend, danmakuRegion, func() {
+				if draft.live {
+					p.sendLiveChat(draft)
+				} else {
+					p.sendDanmaku(draft)
+				}
+			}, p.framelessButtonAppearance()).
+				Disabled(draft.cancel != nil || draft.edit || !hasDraft || isMuted)
 		})
 	})
+}
+
+func (p *PageContext) danmakuSendError(code provider.ErrorCode, detail string) string {
+	switch code {
+	case provider.Network, provider.Timeout:
+		return p.Assets.Text.Auth.NetworkFailed
+	case provider.RateLimited:
+		return p.Assets.Text.Playback.LiveChatRateLimited
+	case provider.NeedsSignIn, provider.Expired:
+		return p.Assets.Text.Auth.AccountExpired
+	default:
+		if detail != "" && !strings.HasPrefix(detail, "code:") {
+			return detail
+		}
+		return p.Assets.Text.Playback.LiveChatSendFailed
+	}
 }
 
 func (p *PageContext) sendDanmaku(draft *danmakuDraft) {

@@ -106,6 +106,9 @@ type playbackLabels struct {
 	QualityGuest, QualitySignedIn, QualityMember                                                          string
 	RoomInfo, RoomNumber, RoomEmptyDesc, LiveQuality, Line, LineAuto, LineChanged                         string
 	LiveDisconnected, LiveDisconnectedBody, LiveEnded, LiveEndedBody, MoreLive                            string
+	LiveChatTitle, LiveChatViewers, LiveChatSend, LiveChatMuted                                           string
+	LiveChatConnecting, LiveChatReconnecting, LiveChatDisconnected, LiveChatEmpty, LiveChatGuest          string
+	LiveChatSendFailed, LiveChatRateLimited                                                               string
 }
 
 type playbackAccessLabels struct {

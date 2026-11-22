@@ -27,6 +27,8 @@ var operations = map[provider.Capability][]string{
 	provider.BrowseSeries:                      {"readSeries"},
 	provider.TrackSeries:                       {"trackSeries"},
 	provider.BrowseLive:                        {"readLive"},
+	provider.LiveChat:                          {"connectLiveChat"},
+	provider.WriteLiveChat:                     {"sendLiveChat"},
 	provider.BrowseCatalog:                     {"browse"},
 	provider.GetCatalogItem:                    {"getItem"},
 	provider.SearchCatalog:                     {"search"},

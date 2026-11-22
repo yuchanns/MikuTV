@@ -63,8 +63,11 @@ type playbackView struct {
 	hideAt           time.Time
 	panel            app.FocusID
 	returnFocus      app.FocusID
-	controlFocus     app.FocusID
-	panelScroll      ui.ScrollState
+	controlFocus       app.FocusID
+	panelScroll        ui.ScrollState
+	liveChatScroll     ui.ScrollState
+	liveChatAutoFollow bool
+	liveChatLastRev    uint64
 	scrubbing        bool
 	scrubPosition    float64
 	scrubWasPlaying  bool
@@ -102,6 +105,9 @@ func (v *View) leavePlayback() {
 	v.player.discussion.discussion.cancelLoad()
 	v.player.discussion.cancelOperation()
 	v.player = playbackView{}
+	if v.LiveChat != nil {
+		v.LiveChat.Leave()
+	}
 	if v.Playback != nil {
 		v.Playback.Close()
 	}
@@ -242,6 +248,16 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 		syncSource = setting.HistorySync(item.Ref.EntryID, owner)
 	}
 	v.Playback.Start(provider.PlaybackTarget{Ref: item.Ref, PartID: part}, owner, syncSource, start)
+	if v.LiveChat != nil {
+		if item.Ref.Kind == provider.Live {
+			s.liveChatAutoFollow = true
+			s.liveChatScroll = ui.ScrollState{}
+			s.liveChatLastRev = 0
+			v.LiveChat.Connect(item.Ref, "")
+		} else {
+			v.LiveChat.Leave()
+		}
+	}
 
 	if item.VideoDetails != nil && item.Ref.Kind != provider.Live {
 		return
@@ -435,7 +451,8 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 	if drawerOpen && !playbackHasAccessDialog(state) {
 		surfaceWidth -= playerDrawerWidth
 	}
-	if s.content.needsAnimationFrame(v, state, now, surfaceWidth) {
+	if s.content.needsAnimationFrame(v, state, now, surfaceWidth) ||
+		(liveMode && s.content.needsLiveDanmakuFrame(v, state, now)) {
 		c.AnimationFrame()
 	} else {
 		c.After(s.content.refresh(v, state))
@@ -573,6 +590,9 @@ func (s *playbackView) updatePlan(v *View, state app.PlaybackState) {
 		return
 	}
 	s.version = state.Revision
+	if state.LiveEnded && v.LiveChat != nil {
+		v.LiveChat.Leave()
+	}
 	if s.content.resumeQuality && !state.Loading {
 		s.content.resumeQuality = false
 		if s.content.requestQuality != "" {
@@ -734,12 +754,18 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 			ui.Row(c).Height(65).Gap(15).Shrink(0).AlignItems(ui.Center).Children(func() {
 				entry, _ := p.State.Current()
 				if liveMode {
+					if entry.Capabilities.Has(provider.LiveChat) {
+						controls.playerButton(c, playerComments, "comment", text.LiveChatTitle, "", false, func() { s.openPanel(v, playerComments) })
+					}
 					if entry.Capabilities.Has(provider.FollowCreator) && item.item.Creator != nil {
 						followIcon, followTitle := "plus", p.Assets.Text.Detail.Follow
 						if item.item.Creator.Following {
 							followIcon, followTitle = "check", p.Assets.Text.Detail.Followed
 						}
 						controls.playerButton(c, playerLiveFollow, followIcon, followTitle, "", false, p.toggleLiveFollow)
+					}
+					if entry.Capabilities.Has(provider.LiveChat) {
+						controls.playerButton(c, playerDanmaku, "", text.Danmaku, text.Danmaku, false, func() { s.openPanel(v, playerDanmaku) })
 					}
 					if len(state.Resolution.Plan.Qualities) > 0 || playbackQualityLabel(state) != "" {
 						controls.playerButton(c, playerQuality, "", text.LiveQuality, playbackQualityLabel(state), false, func() { s.openPanel(v, playerQuality) })

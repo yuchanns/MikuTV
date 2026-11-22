@@ -96,6 +96,21 @@ func (c *Catalog) LiveReader() provider.LiveReader {
 	return reader
 }
 
+func (c *Catalog) LiveChatClient() provider.LiveChatClient {
+	client, _ := c.session.(provider.LiveChatClient)
+	return client
+}
+
+func (c *Catalog) SendLiveChat(post provider.LiveChatPost, accept func(provider.LiveChatSendResult, error)) context.CancelFunc {
+	writer, _ := c.session.(provider.LiveChatWriter)
+	return catalogResult(c, func(ctx context.Context) (provider.LiveChatSendResult, error) {
+		if writer == nil {
+			return provider.LiveChatSendResult{}, &provider.Error{Code: provider.Unsupported}
+		}
+		return writer.SendLiveChat(ctx, post)
+	}, accept)
+}
+
 func (c *Catalog) ReadItem(ref provider.MediaRef, accept func(provider.MediaItem, error)) context.CancelFunc {
 	if c.session == nil {
 		accept(provider.MediaItem{}, &provider.Error{Code: provider.Unsupported})

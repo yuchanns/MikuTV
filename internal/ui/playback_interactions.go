@@ -43,8 +43,15 @@ func (s *playbackView) backFromContent(v *View) bool {
 		if draft.cancel != nil {
 			return true
 		}
+		target := draft.returnFocus
+		if target == "" {
+			target = playbackOptionID(playerDanmaku, "send")
+		}
+		if target == playerLiveCompose && s.panel != playerComments {
+			target = playerComments
+		}
 		s.content.draft = nil
-		v.State.Focus, v.reveal = playbackOptionID(playerDanmaku, "send"), true
+		v.State.Focus, v.reveal = target, true
 		return true
 	}
 	if chooser := s.content.chooser; chooser != nil {
