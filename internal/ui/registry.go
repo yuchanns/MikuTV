@@ -126,13 +126,12 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Initial: focus(videoDetailPlay), RequiresEntry: true, Capability: provider.GetCatalogItem, Transient: true},
 			Component: videoDetailPage{}, FullScreen: true, PreserveFocusUnderlay: true,
 			Transition: &videoDetailTransition, ScreenInsets: &[4]float32{},
-			Sync: syncVideoDetail, Back: (*View).backFromVideoDetail, Leave: func(v *View) {
-				switch v.State.Page {
-				case app.VideoConfirm, app.VideoCommentCompose, app.SignInQR, app.Player:
-				default:
-					v.videoDetail.close()
-				}
-			}},
+			Sync: syncVideoDetail, Back: (*View).backFromVideoDetail, Leave: (*View).leaveVideoDetail},
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.Creator},
+			Initial: focus(creatorFollowFocus), RequiresEntry: true, Capability: provider.ReadCreator, Transient: true},
+			Component: creatorPage{}, FullScreen: true, PreserveFocusUnderlay: true,
+			Transition: &videoDetailTransition, ScreenInsets: &[4]float32{},
+			Sync: syncCreator, Back: (*View).backFromCreator, Leave: (*View).leaveCreator},
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.Player},
 			Initial: focus(playerToggle), RequiresEntry: true, Capability: provider.ResolvePlayback, Transient: true},
 			Component: playbackPage{}, FullScreen: true, RawScreen: true, TransparentCanvas: true,
@@ -205,6 +204,9 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				v.qrPayload, v.qrImage = "", nil
 				v.qrHasAction = false
 				v.videoDetail.signInAction = nil
+				if v.creator != nil {
+					v.creator.signInAction = nil
+				}
 				v.player.content.afterLogin = nil
 			}},
 		Registration{Policy: authModal(app.SignOut, app.Account, app.CloseModal), Component: signOutDialog{}, ModalWidth: 700, ModalHeight: 290,

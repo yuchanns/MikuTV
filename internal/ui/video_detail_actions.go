@@ -148,6 +148,9 @@ func (p *PageContext) editVideo(request provider.VideoEdit) {
 			}
 		}
 		detail.applyVideoEdit(request, result)
+		if result.Following != nil && detail.item.Creator != nil {
+			p.host.syncCreatorFollowing(detail.item.Creator.ID, *result.Following)
+		}
 		if detail == &p.host.player.discussion {
 			p.host.syncPlaybackEngagement(request, result)
 		}

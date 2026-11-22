@@ -31,8 +31,17 @@ type labels struct {
 	Activity                                                              accountActivityLabels
 	Home                                                                  homeLabels
 	Search                                                                searchLabels
+	Creator                                                               creatorLabels
 	Detail                                                                detailLabels
 	Playback                                                              playbackLabels
+}
+
+type creatorLabels struct {
+	Eyebrow, Videos, Posts, Collections, About         string
+	Followers, Works, CollectionWorks                  string
+	Location, Category, EmptyBio                       string
+	NoVideos, NoPosts, NoCollections                   string
+	Loading, LoadFailed, MoreFailed                    string
 }
 
 type searchLabels struct {

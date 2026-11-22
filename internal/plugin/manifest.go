@@ -119,6 +119,7 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 	}
 	if (manifest.Capabilities.Has(provider.EditVideo) || manifest.Capabilities.Has(provider.WriteVideoComments) ||
 		manifest.Capabilities.Has(provider.WriteDanmaku) || manifest.Capabilities.Has(provider.EditVideoFavorites) ||
+		manifest.Capabilities.Has(provider.FollowCreator) ||
 		manifest.Capabilities.Has(provider.ReportPlayback)) &&
 		!manifest.Capabilities.Has(provider.SignIn) {
 		return sourceManifest{}, fmt.Errorf("%w: video interaction requires sign-in", ErrIncompatible)

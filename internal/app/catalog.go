@@ -125,6 +125,26 @@ func (c *Catalog) ReadVideoComments(query provider.VideoCommentQuery, accept fun
 	}, accept)
 }
 
+func (c *Catalog) ReadCreator(request provider.CreatorRequest, accept func(provider.CreatorPage, error)) context.CancelFunc {
+	reader, _ := c.session.(provider.CreatorReader)
+	return catalogResult(c, func(ctx context.Context) (provider.CreatorPage, error) {
+		if reader == nil {
+			return provider.CreatorPage{}, &provider.Error{Code: provider.Unsupported}
+		}
+		return reader.ReadCreator(ctx, request)
+	}, accept)
+}
+
+func (c *Catalog) FollowCreator(request provider.CreatorFollowRequest, accept func(provider.CreatorFollowResult, error)) context.CancelFunc {
+	follower, _ := c.session.(provider.CreatorFollower)
+	return catalogResult(c, func(ctx context.Context) (provider.CreatorFollowResult, error) {
+		if follower == nil {
+			return provider.CreatorFollowResult{}, &provider.Error{Code: provider.Unsupported}
+		}
+		return follower.FollowCreator(ctx, request)
+	}, accept)
+}
+
 func catalogResult[T any](c *Catalog, operation func(context.Context) (T, error), accept func(T, error)) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	sessionGen := c.sessionGen

@@ -120,13 +120,52 @@ func (p *PageContext) openVideoDetail(item provider.MediaItem) {
 		return
 	}
 	view := p.host
-	view.videoDetail.close()
+	if view.videoDetail.seed.Ref.ID != "" && view.State.RouteCount(app.VideoDetail) > 1 {
+		saved := view.videoDetail
+		if saved.cancel != nil {
+			saved.cancel()
+			saved.cancel = nil
+		}
+		saved.cancelOperation()
+		saved.discussion.cancelLoad()
+		saved.feedback = videoDetailFeedback{}
+		view.videoDetailStack = append(view.videoDetailStack, saved)
+		view.videoDetail = videoDetailState{}
+	} else {
+		view.videoDetail.close()
+	}
 	view.videoDetail.seed = item
 	if len(layers) == 1 {
 		view.videoDetail.entrance.from = layers[0]
 	}
 	view.reveal = true
 	view.loadVideoDetail()
+}
+
+func (v *View) closeAllVideoDetails() {
+	v.videoDetail.close()
+	for i := range v.videoDetailStack {
+		v.videoDetailStack[i].close()
+	}
+	v.videoDetailStack = nil
+}
+
+func (v *View) leaveVideoDetail() {
+	needed := v.State.RouteCount(app.VideoDetail)
+	have := len(v.videoDetailStack)
+	if v.videoDetail.seed.Ref.ID != "" {
+		have++
+	}
+	for have > needed {
+		v.videoDetail.close()
+		if len(v.videoDetailStack) > 0 {
+			last := len(v.videoDetailStack) - 1
+			v.videoDetail = v.videoDetailStack[last]
+			v.videoDetailStack[last] = videoDetailState{}
+			v.videoDetailStack = v.videoDetailStack[:last]
+		}
+		have--
+	}
 }
 
 func (v *View) renderVideoDetailEntrance(c *ui.Context, width, height float32) {
@@ -407,7 +446,12 @@ func (p *PageContext) videoDetailCreator(c *ui.Context, creator provider.Creator
 			height: 34, padding: 15, radius: 20, fontSize: 16, focusShadow: true,
 			background: ui.Transparent, foreground: paint(colors.Text.Secondary), border: d.strongBorder,
 		}
-		p.styledButton(c, creator.Name, "", videoDetailCreatorID, videoDetailControls, func() {}, style).AlignSelf(ui.Center)
+		openCreator := func() {}
+		if p.canOpenCreator(&creator) {
+			selected := creator
+			openCreator = func() { p.dispatch(func() { p.openCreator(selected) }) }
+		}
+		p.styledButton(c, creator.Name, "", videoDetailCreatorID, videoDetailControls, openCreator, style).AlignSelf(ui.Center)
 		if entry.Capabilities.Has(provider.EditVideo) {
 			follow := text.Follow
 			if creator.Following {

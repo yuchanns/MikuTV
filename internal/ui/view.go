@@ -88,9 +88,12 @@ type View struct {
 	home            catalogHome
 	homeStates      map[string]catalogHome
 	entryGeneration uint64
-	search          searchViewState
-	videoDetail     videoDetailState
-	player          playbackView
+	search           searchViewState
+	videoDetail      videoDetailState
+	videoDetailStack []videoDetailState
+	creator          *creatorState
+	creatorStack     []*creatorState
+	player           playbackView
 	favorites       favoritesUI
 
 	playbackSettings playbackSettings
@@ -152,13 +155,26 @@ func (v *View) Render(c *ui.Context) {
 	}
 	screen.Children(func() {
 		if fromVideo && len(layers) == 1 {
-			v.renderVideoDetailEntrance(c, width, height)
+			if layers[0].Page == app.Creator {
+				v.renderCreatorEntrance(c, width, height)
+			} else {
+				v.renderVideoDetailEntrance(c, width, height)
+			}
 		}
 		v.renderRootPage(c, layers[0], len(layers) == 1, width, height)
-		if top.Page == app.VideoDetail {
+		switch top.Page {
+		case app.VideoDetail:
 			v.renderVideoDetailFeedback(c)
-		} else {
+		case app.Creator:
 			v.videoDetail.feedback = videoDetailFeedback{}
+			if v.creator != nil {
+				v.renderFeedbackToast(c, &v.creator.feedback)
+			}
+		default:
+			v.videoDetail.feedback = videoDetailFeedback{}
+			if v.creator != nil {
+				v.creator.feedback = videoDetailFeedback{}
+			}
 		}
 		if v.notice != "" {
 			ui.Text(c, v.notice).Absolute().Right(32).Bottom(28).Padding(18, 24).
@@ -369,7 +385,8 @@ func (v *View) SyncEntry() {
 			saved.rotateAt = time.Time{}
 			v.homeStates[v.home.entry] = saved
 		}
-		v.videoDetail.close()
+		v.closeAllVideoDetails()
+		v.closeAllCreators()
 		if v.Playback != nil && v.Playback.Active() {
 			v.leavePlayback()
 		}

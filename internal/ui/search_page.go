@@ -748,6 +748,10 @@ func (p *PageContext) searchCreatorCard(c *ui.Context, item provider.SearchCreat
 		Background(bg).Border(1, paint(colors.Border.Subtle)).
 		OnClick(func() {
 			p.dispatch(func() {
+				if p.canOpenCreator(&item.Creator) {
+					p.openCreator(item.Creator)
+					return
+				}
 				p.host.notice = text.Search.DetailPending
 			})
 		})

@@ -27,6 +27,8 @@ var operations = map[provider.Capability][]string{
 	provider.GetCatalogItem:                    {"getItem"},
 	provider.SearchCatalog:                     {"search"},
 	provider.SearchSuggest:                     {"searchSuggest"},
+	provider.ReadCreator:                       {"readCreator"},
+	provider.FollowCreator:                     {"followCreator"},
 	provider.EditVideo:                         {"editVideo"},
 	provider.ReadVideoComments:                 {"videoComments"},
 	provider.WriteVideoComments:                {"editVideo"},

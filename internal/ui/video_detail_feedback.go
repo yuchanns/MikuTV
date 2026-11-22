@@ -23,8 +23,11 @@ type videoDetailFeedback struct {
 }
 
 func (v *View) renderVideoDetailFeedback(c *ui.Context) {
-	f := &v.videoDetail.feedback
-	if f.text == "" {
+	v.renderFeedbackToast(c, &v.videoDetail.feedback)
+}
+
+func (v *View) renderFeedbackToast(c *ui.Context, f *videoDetailFeedback) {
+	if f == nil || f.text == "" {
 		return
 	}
 	now := c.Now()

@@ -13,6 +13,7 @@ const (
 	Home                Page = "home"
 	HomeAction          Page = "homeAction"
 	VideoDetail         Page = "videoDetail"
+	Creator             Page = "creator"
 	Player              Page = "player"
 	VideoConfirm        Page = "videoConfirm"
 	VideoCommentCompose Page = "videoCommentCompose"

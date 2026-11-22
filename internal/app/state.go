@@ -105,6 +105,20 @@ func (s *State) Layers() []Location {
 	return layers[first:]
 }
 
+// RouteCount reports how many times page appears in the active navigation stack.
+func (s *State) RouteCount(page Page) int {
+	count := 0
+	for _, loc := range s.history {
+		if loc.Page == page {
+			count++
+		}
+	}
+	if s.Page == page {
+		count++
+	}
+	return count
+}
+
 // Back returns false only when the system should handle leaving an app root.
 func (s *State) Back() bool {
 	if len(s.history) > 0 {
