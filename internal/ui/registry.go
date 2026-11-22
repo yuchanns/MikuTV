@@ -127,6 +127,22 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			}
 		}
 	}
+	series := content(app.Series, provider.BrowseSeries)
+	series.Component, series.Sync = seriesPage{}, syncSeriesHub
+	series.RawScreen = true
+	series.Policy.ExitFocus = app.RailFocus(app.Series)
+	series.Back = (*View).backFromSeries
+	series.Navigation.Label = func(p *PageContext) string { return p.sourceSearchSeriesLabel() }
+	series.AfterMove = func(v *View, direction app.Direction, group string, next app.FocusID) {
+		if (direction == app.Left || direction == app.Right) && group == seriesHeaderRegion && v.Series != nil {
+			for _, g := range v.Series.Hub().Genres {
+				if next == seriesGenreFocus(g.Value) {
+					v.selectSeriesGenre(g.Value)
+					break
+				}
+			}
+		}
+	}
 	registrations := []Registration{
 		home,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.HomeAction}, Parent: app.Route{Page: app.Home},
@@ -187,7 +203,36 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 					v.following.allList = ui.ListState{}
 				}
 			}},
-		content(app.Series, provider.BrowseSeries),
+		series,
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.SeriesAll}, Parent: app.Route{Page: app.Series},
+			Initial: focus(app.CloseModal), RequiresEntry: true, Capability: provider.BrowseSeries, Modal: true},
+			Component: seriesAllPage{}, ModalWidth: 990, ModalHeight: 680,
+			Leave: func(v *View) {
+				if v.State.Page != app.VideoDetail {
+					v.series.allSection = ""
+					v.series.allList = ui.ListState{}
+				}
+			}},
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.SeriesIndex}, Parent: app.Route{Page: app.Series},
+			Initial: focus(seriesIndexBackFocus), ContentFocus: seriesIndexBackFocus, RequiresEntry: true, Capability: provider.BrowseSeries},
+			Component: seriesIndexPage{}, RawScreen: true, Sync: syncSeriesIndex, Back: (*View).backFromSeriesIndex},
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.SeriesIndexFilter}, Parent: app.Route{Page: app.SeriesIndex},
+			Initial: focus(seriesFilterOptionFocus(0)), RequiresEntry: true, Capability: provider.BrowseSeries, Modal: true},
+			Component: seriesIndexFilterPage{}, ModalWidth: 700, ResolveModalHeight: seriesIndexFilterModalHeight,
+			ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.SeriesCalendar}, Parent: app.Route{Page: app.Series},
+			Initial: focus(seriesCalendarDayFocus(0)), ContentFocus: seriesCalendarDayFocus(0), RequiresEntry: true, Capability: provider.BrowseSeries},
+			Component: seriesCalendarPage{}, RawScreen: true, Sync: syncSeriesCalendar, Back: (*View).backFromSeriesCalendar,
+			AfterMove: func(v *View, direction app.Direction, group string, next app.FocusID) {
+				if (direction == app.Left || direction == app.Right) && group == seriesCalendarDaysRegion && v.Series != nil {
+					for i := range v.Series.Calendar().Days {
+						if next == seriesCalendarDayFocus(i) {
+							v.Series.SelectCalendarDay(i)
+							break
+						}
+					}
+				}
+			}},
 		content(app.Live, provider.BrowseLive),
 		library,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.Entries}, Transient: true, ResolveFocus: func(s *app.State) app.FocusID { return s.PickerFocus() }},

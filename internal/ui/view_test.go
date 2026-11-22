@@ -66,6 +66,10 @@ func newTestView(t *testing.T, options Options) *View {
 		options.Following = app.NewFollowingFeed(post, changed)
 		t.Cleanup(options.Following.Close)
 	}
+	if options.Series == nil {
+		options.Series = app.NewSeriesCatalog(post, changed)
+		t.Cleanup(options.Series.Close)
+	}
 	return NewView(options)
 }
 

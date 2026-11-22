@@ -32,6 +32,7 @@ type labels struct {
 	Home                                                                  homeLabels
 	Search                                                                searchLabels
 	Following                                                             followingLabels
+	Series                                                                seriesLabels
 	Creator                                                               creatorLabels
 	Detail                                                                detailLabels
 	Playback                                                              playbackLabels
@@ -45,6 +46,17 @@ type followingLabels struct {
 	EmptyCreatorsTitle, EmptyCreatorsNote           string
 	EmptyUpdates, EmptyLive                         string
 	Loading, LoadFailed, MoreFailed                 string
+}
+
+type seriesLabels struct {
+	Eyebrow, PicksTitle, PicksNote, TrackedTitle, TrackedNote   string
+	Index, IndexNote, Calendar, CalendarNote                    string
+	Reset, Results, WorksCount, RatingSuffix                    string
+	NoFilterResults, NoFilterNote                               string
+	Today, MonthSuffix, Scheduled, NoUpdates, NoUpdatesNote     string
+	Track, Tracked, TrackPending, PlayPending                   string
+	Loading, LoadFailed, MoreFailed                             string
+	Weekdays                                                    []string
 }
 
 type creatorLabels struct {

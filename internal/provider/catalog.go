@@ -75,6 +75,11 @@ type SearchPresentation struct {
 	SeriesLabel  string `json:"seriesLabel,omitempty"`
 }
 
+type SeriesPresentation struct {
+	TrackLabel   string `json:"trackLabel,omitempty"`
+	TrackedLabel string `json:"trackedLabel,omitempty"`
+}
+
 type SourcePresentation struct {
 	CreatorMark       string              `json:"creatorMark,omitempty"`
 	CreatorGroupTitle string              `json:"creatorGroupTitle,omitempty"`
@@ -82,6 +87,7 @@ type SourcePresentation struct {
 	MobileApp         string              `json:"mobileApp,omitempty"`
 	Sections          SectionPresentation `json:"sections,omitzero"`
 	Search            SearchPresentation  `json:"search,omitzero"`
+	Series            SeriesPresentation  `json:"series,omitzero"`
 }
 
 type VideoDetails struct {

@@ -62,6 +62,20 @@ func (p *PageContext) sourceSearchSeriesLabel() string {
 	return p.Assets.Text.Search.KindSeries
 }
 
+func (p *PageContext) sourceSeriesTrackLabel(tracked bool) string {
+	pres := p.sourcePresentation().Series
+	if tracked {
+		if label := strings.TrimSpace(pres.TrackedLabel); label != "" {
+			return label
+		}
+		return p.Assets.Text.Series.Tracked
+	}
+	if label := strings.TrimSpace(pres.TrackLabel); label != "" {
+		return label
+	}
+	return p.Assets.Text.Series.Track
+}
+
 func (p *PageContext) sourceMembership() string {
 	if membership := strings.TrimSpace(p.sourcePresentation().Membership); membership != "" {
 		return membership
