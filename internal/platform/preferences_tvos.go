@@ -23,11 +23,12 @@ const (
 
 // Preferences uses the app's defaults domain; tvOS does not allow desktop data paths.
 type Preferences struct {
-	defaults     objc.ID
-	key          objc.ID
-	positionsKey objc.ID
-	domain       objc.ID
-	writes       sync.Mutex
+	defaults         objc.ID
+	key              objc.ID
+	positionsKey     objc.ID
+	searchHistoryKey objc.ID
+	domain           objc.ID
+	writes           sync.Mutex
 }
 
 func NewPreferences() (*Preferences, error) {
@@ -39,6 +40,7 @@ func NewPreferences() (*Preferences, error) {
 	strSel := objc.RegisterName("stringWithUTF8String:")
 	key := strCls.Send(strSel, "recentEntry")
 	positionsKey := strCls.Send(strSel, playbackPositionsDefaultsKey)
+	searchHistoryKey := strCls.Send(strSel, searchHistoryDefaultsKey)
 	bundle := objc.ID(objc.GetClass("NSBundle")).Send(objc.RegisterName("mainBundle"))
 	domain := bundle.Send(objc.RegisterName("bundleIdentifier"))
 	if domain == 0 {
@@ -47,8 +49,9 @@ func NewPreferences() (*Preferences, error) {
 	retain := objc.RegisterName("retain")
 	key.Send(retain)
 	positionsKey.Send(retain)
+	searchHistoryKey.Send(retain)
 	domain.Send(retain)
-	return &Preferences{defaults: defaults, key: key, positionsKey: positionsKey, domain: domain}, nil
+	return &Preferences{defaults: defaults, key: key, positionsKey: positionsKey, searchHistoryKey: searchHistoryKey, domain: domain}, nil
 }
 
 func withAutoreleasePool(fn func()) {
@@ -143,6 +146,42 @@ func (p *Preferences) SavePlaybackPosition(owner string, target provider.Playbac
 	return saveErr
 }
 
+func (p *Preferences) loadSearchHistoryLocked() searchHistoryStore {
+	value := p.defaults.Send(objc.RegisterName("stringForKey:"), p.searchHistoryKey)
+	if value == 0 {
+		return searchHistoryStore{}
+	}
+	return parseSearchHistoryStore(objc.Send[string](value, objc.RegisterName("UTF8String")))
+}
+
+func (p *Preferences) SearchHistory(entryID, owner string) []string {
+	var queries []string
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		store := p.loadSearchHistoryLocked()
+		queries = store.get(entryID, owner)
+	})
+	return queries
+}
+
+func (p *Preferences) SaveSearchHistory(entryID, owner string, queries []string) error {
+	var saveErr error
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		store := p.loadSearchHistoryLocked()
+		store.put(entryID, owner, queries)
+		encoded, err := store.encode()
+		if err != nil {
+			saveErr = err
+			return
+		}
+		saveErr = p.saveStringLocked(p.searchHistoryKey, nsStringObj(encoded), "", 0)
+	})
+	return saveErr
+}
+
 func (p *Preferences) ClearAccount(entryID, owner string) error {
 	var clearErr error
 	withAutoreleasePool(func() {
@@ -150,15 +189,26 @@ func (p *Preferences) ClearAccount(entryID, owner string) error {
 		defer p.writes.Unlock()
 		p.defaults.Send(objc.RegisterName("removeObjectForKey:"), historySyncKey(entryID, owner))
 		store := p.loadPlaybackPositionsLocked()
-		if !store.clearAccount(entryID, owner) {
-			return
+		if store.clearAccount(entryID, owner) {
+			encoded, err := store.encode()
+			if err != nil {
+				clearErr = err
+				return
+			}
+			if err := p.saveStringLocked(p.positionsKey, nsStringObj(encoded), "", 0); err != nil {
+				clearErr = err
+				return
+			}
 		}
-		encoded, err := store.encode()
-		if err != nil {
-			clearErr = err
-			return
+		history := p.loadSearchHistoryLocked()
+		if history.clearAccount(entryID, owner) {
+			encoded, err := history.encode()
+			if err != nil {
+				clearErr = err
+				return
+			}
+			clearErr = p.saveStringLocked(p.searchHistoryKey, nsStringObj(encoded), "", 0)
 		}
-		clearErr = p.saveStringLocked(p.positionsKey, nsStringObj(encoded), "", 0)
 	})
 	return clearErr
 }
@@ -175,7 +225,19 @@ func (p *Preferences) ClearEntry(entryID string) error {
 				clearErr = err
 				return
 			}
-			clearErr = p.saveStringLocked(p.positionsKey, nsStringObj(encoded), "", 0)
+			if err := p.saveStringLocked(p.positionsKey, nsStringObj(encoded), "", 0); err != nil {
+				clearErr = err
+				return
+			}
+		}
+		history := p.loadSearchHistoryLocked()
+		if history.clearEntry(entryID) {
+			encoded, err := history.encode()
+			if err != nil {
+				clearErr = err
+				return
+			}
+			clearErr = p.saveStringLocked(p.searchHistoryKey, nsStringObj(encoded), "", 0)
 		}
 	})
 	return clearErr

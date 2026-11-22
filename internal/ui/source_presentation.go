@@ -41,6 +41,27 @@ func (p *PageContext) sourceCreatorGroupTitle() string {
 	return p.Assets.Text.Home.Following
 }
 
+func (p *PageContext) sourceSearchHint() string {
+	if hint := strings.TrimSpace(p.sourcePresentation().Search.Hint); hint != "" {
+		return hint
+	}
+	return p.Assets.Text.Search.Hint
+}
+
+func (p *PageContext) sourceSearchCreatorLabel() string {
+	if label := strings.TrimSpace(p.sourcePresentation().Search.CreatorLabel); label != "" {
+		return label
+	}
+	return p.Assets.Text.Search.KindCreator
+}
+
+func (p *PageContext) sourceSearchSeriesLabel() string {
+	if label := strings.TrimSpace(p.sourcePresentation().Search.SeriesLabel); label != "" {
+		return label
+	}
+	return p.Assets.Text.Search.KindSeries
+}
+
 func (p *PageContext) sourceMembership() string {
 	if membership := strings.TrimSpace(p.sourcePresentation().Membership); membership != "" {
 		return membership

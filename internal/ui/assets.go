@@ -30,8 +30,21 @@ type labels struct {
 	Auth                                                                  authLabels
 	Activity                                                              accountActivityLabels
 	Home                                                                  homeLabels
+	Search                                                                searchLabels
 	Detail                                                                detailLabels
 	Playback                                                              playbackLabels
+}
+
+type searchLabels struct {
+	Eyebrow, Title, Hint, Placeholder                                 string
+	History, Suggestions, HotSearch                                   string
+	PopularHeading, ResultsHeading, NoResults, NoResultsHint          string
+	KindAll, KindVideo, KindCreator, KindSeries, KindLive             string
+	SortDefault, SortNewest, SortViews                                string
+	FiltersTitle, SortLabel, DurationLabel                            string
+	DurationAll, DurationShort, DurationMedium, DurationLong          string
+	ApplyFilters, Followers, VideoCount, CreatorVideos, DetailPending string
+	MoreFailed                                                        string
 }
 
 type playbackLabels struct {

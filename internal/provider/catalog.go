@@ -69,12 +69,19 @@ type SectionPresentation struct {
 	Courses  string `json:"courses,omitempty"`
 }
 
+type SearchPresentation struct {
+	Hint         string `json:"hint,omitempty"`
+	CreatorLabel string `json:"creatorLabel,omitempty"`
+	SeriesLabel  string `json:"seriesLabel,omitempty"`
+}
+
 type SourcePresentation struct {
 	CreatorMark       string              `json:"creatorMark,omitempty"`
 	CreatorGroupTitle string              `json:"creatorGroupTitle,omitempty"`
 	Membership        string              `json:"membership,omitempty"`
 	MobileApp         string              `json:"mobileApp,omitempty"`
 	Sections          SectionPresentation `json:"sections,omitzero"`
+	Search            SearchPresentation  `json:"search,omitzero"`
 }
 
 type VideoDetails struct {

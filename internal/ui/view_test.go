@@ -58,6 +58,10 @@ func newTestView(t *testing.T, options Options) *View {
 		options.Activity = app.NewAccountActivity(preferences, post, changed)
 		t.Cleanup(options.Activity.Close)
 	}
+	if options.Search == nil {
+		options.Search = app.NewCatalogSearch(nil, post, changed)
+		t.Cleanup(options.Search.Close)
+	}
 	return NewView(options)
 }
 

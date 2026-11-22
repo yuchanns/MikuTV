@@ -105,6 +105,13 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	library.RawScreen = true
 	library.Back = (*View).backFromLibraryManagement
 	library.Leave = pauseLibraryHistory
+	search := content(app.Search, provider.SearchCatalog)
+	search.Component, search.Sync = searchPage{}, syncSearch
+	search.RawScreen = true
+	search.Back = (*View).backFromSearch
+	search.Leave = func(v *View) {
+		v.search.editing = false
+	}
 	registrations := []Registration{
 		home,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.HomeAction}, Parent: app.Route{Page: app.Home},
@@ -151,7 +158,11 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.VideoCommentCompose}, Parent: app.Route{Page: app.VideoDetail},
 			Initial: focus(videoCommentEdit), Modal: true}, Component: videoCommentComposePage{}, ModalWidth: 930, ModalHeight: 494,
 			ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
-		content(app.Search, provider.SearchCatalog),
+		search,
+		{Policy: app.RouteSpec{Route: app.Route{Page: app.SearchFilters}, Parent: app.Route{Page: app.Search},
+			Initial: focus(searchFilterSortFocus(provider.SearchSortDefault)), RequiresEntry: true, Capability: provider.SearchCatalog, Modal: true},
+			Component: searchFiltersPage{}, ModalWidth: 840, ModalHeight: 498,
+			ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
 		content(app.Following, provider.BrowseFollowing),
 		content(app.Series, provider.BrowseSeries),
 		content(app.Live, provider.BrowseLive),

@@ -17,6 +17,7 @@ const (
 	VideoConfirm        Page = "videoConfirm"
 	VideoCommentCompose Page = "videoCommentCompose"
 	Search              Page = "search"
+	SearchFilters       Page = "searchFilters"
 	Following           Page = "following"
 	Series              Page = "series"
 	Live                Page = "live"

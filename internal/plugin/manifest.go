@@ -137,6 +137,9 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 	if manifest.Capabilities.Has(provider.EditFavoriteFolders) && !manifest.Capabilities.Has(provider.AccountFavorites.Capability()) {
 		return sourceManifest{}, fmt.Errorf("%w: %s requires favorite folders", ErrIncompatible, provider.EditFavoriteFolders)
 	}
+	if manifest.Capabilities.Has(provider.SearchSuggest) && !manifest.Capabilities.Has(provider.SearchCatalog) {
+		return sourceManifest{}, fmt.Errorf("%w: %s requires %s", ErrIncompatible, provider.SearchSuggest, provider.SearchCatalog)
+	}
 	for i, host := range manifest.Permissions.Network {
 		host = strings.ToLower(host)
 		if !validHostPattern(host) {

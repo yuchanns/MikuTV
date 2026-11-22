@@ -71,6 +71,16 @@ func (c *Catalog) AccountReader() provider.AccountReader {
 	return reader
 }
 
+func (c *Catalog) Searcher() provider.CatalogSearcher {
+	searcher, _ := c.session.(provider.CatalogSearcher)
+	return searcher
+}
+
+func (c *Catalog) SearchSuggester() provider.CatalogSearchSuggester {
+	suggester, _ := c.session.(provider.CatalogSearchSuggester)
+	return suggester
+}
+
 func (c *Catalog) ReadItem(ref provider.MediaRef, accept func(provider.MediaItem, error)) context.CancelFunc {
 	if c.session == nil {
 		accept(provider.MediaItem{}, &provider.Error{Code: provider.Unsupported})

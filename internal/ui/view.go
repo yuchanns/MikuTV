@@ -45,6 +45,7 @@ type navigationTrace struct {
 type Options struct {
 	State       *app.State
 	Catalog     *app.Catalog
+	Search      *app.CatalogSearch
 	Auth        *app.Auth
 	Activity    *app.AccountActivity
 	Pages       *Pages
@@ -57,6 +58,7 @@ type Options struct {
 type View struct {
 	State           *app.State
 	Catalog         *app.Catalog
+	Search          *app.CatalogSearch
 	Auth            *app.Auth
 	Activity        *app.AccountActivity
 	Playback        *app.Playback
@@ -86,6 +88,7 @@ type View struct {
 	home            catalogHome
 	homeStates      map[string]catalogHome
 	entryGeneration uint64
+	search          searchViewState
 	videoDetail     videoDetailState
 	player          playbackView
 	favorites       favoritesUI
@@ -98,7 +101,7 @@ type View struct {
 
 func NewView(options Options) *View {
 	v := &View{
-		State: options.State, Catalog: options.Catalog, Auth: options.Auth, Activity: options.Activity,
+		State: options.State, Catalog: options.Catalog, Search: options.Search, Auth: options.Auth, Activity: options.Activity,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Version: options.Version, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}
@@ -400,8 +403,23 @@ func (v *View) SyncEntry() {
 
 func (v *View) SyncAccountActivity() {
 	entry, _ := v.State.Current()
-	if v.Activity.Bind(entry, v.Auth.Accounts().CurrentID, v.Catalog.AccountReader()) {
+	owner := ""
+	if v.Auth != nil {
+		owner = v.Auth.Accounts().CurrentID
+	}
+	if v.Activity.Bind(entry, owner, v.Catalog.AccountReader()) {
 		v.favorites = favoritesUI{}
+	}
+	if v.Search != nil {
+		var searcher provider.CatalogSearcher
+		var suggester provider.CatalogSearchSuggester
+		if v.Catalog != nil {
+			searcher = v.Catalog.Searcher()
+			suggester = v.Catalog.SearchSuggester()
+		}
+		if v.Search.Bind(entry, owner, searcher, suggester) {
+			v.search = searchViewState{}
+		}
 	}
 	if sync := v.Pages.components[v.State.Route].Sync; sync != nil {
 		sync(v)
