@@ -36,6 +36,13 @@ type labels struct {
 	Creator                                                               creatorLabels
 	Detail                                                                detailLabels
 	Playback                                                              playbackLabels
+	Modal                                                                 modalLabels
+}
+
+type modalLabels struct {
+	CurrentPrefix, Current, ActiveNote, SwitchNote, ItemsCount string
+	HintSelect, HintSwitch, HintApply, HintConfirm, HintSave   string
+	HintOpen, HintClose                                        string
 }
 
 type followingLabels struct {

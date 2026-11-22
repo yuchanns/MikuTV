@@ -250,9 +250,9 @@ func (videoCommentComposePage) Render(c *ui.Context, p *PageContext) {
 	text, colors := p.Assets.Text.Detail, p.Theme.Colors
 	account := p.videoCommentAccount()
 	p.region(region, nil)
-	ui.Column(c).Fill().Children(func() {
-		ui.Text(c, draft.title).FillWidth().FontSize(36).FontWeight(500).MaxLines(1).Role(ui.RoleHeading).Level(2)
-		ui.Row(c).Gap(15).AlignItems(ui.Center).Margin(31, 0, 23, 0).Children(func() {
+	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		p.framelessHeader(c, "DISCUSSION \u00b7 COMPOSE", "comment", draft.title, "")
+		ui.Row(c).Gap(15).AlignItems(ui.Center).Margin(0, 0, 24, 0).Children(func() {
 			p.videoCommentAvatar(c, account.Name, "", 40, p.host.avatarImage, true)
 			ui.Text(c, account.Name).FontSize(20).TextColor(paint(colors.Text.Secondary))
 		})
@@ -268,15 +268,14 @@ func (videoCommentComposePage) Render(c *ui.Context, p *PageContext) {
 			p.drawVideoCommentPreview(c, draft, region)
 		}
 		ui.Text(c, fmt.Sprintf("%d / %d", ui.UTF16Len(draft.body), provider.VideoCommentLimit)).
-			AlignSelf(ui.End).Margin(5, 0, 0, 0).FontSize(16).TextColor(paint(colors.Text.Muted))
+			AlignSelf(ui.End).Margin(10, 0, 0, 0).FontSize(16).TextColor(paint(colors.Text.Muted))
 		if draft.failure != "" {
-			ui.Text(c, draft.failure).Margin(8, 0, 0, 0).FontSize(17).TextColor(paint(colors.Status.Warning.Foreground))
+			ui.Text(c, draft.failure).Margin(10, 0, 0, 0).FontSize(18).TextColor(paint(colors.Status.Warning.Foreground))
 		}
-		ui.Spacer(c).Grow(1)
-		ui.Row(c).Gap(16).AlignSelf(ui.End).Children(func() {
-			p.videoModalButton(c, text.EditComment, "", videoCommentEdit, region, p.editVideoCommentDraft)
+		ui.Row(c).Gap(16).Margin(36, 0, 0, 0).AlignSelf(ui.Start).Children(func() {
+			p.styledButton(c, text.EditComment, "", videoCommentEdit, region, p.editVideoCommentDraft, p.framelessButtonAppearance())
 			disabled := !draft.canSend() || p.host.discussionDetail().operation != nil
-			button := p.videoModalButton(c, text.PostComment, "send", videoCommentSend, region, p.postVideoComment).
+			button := p.styledButton(c, text.PostComment, "send", videoCommentSend, region, p.postVideoComment, p.framelessButtonAppearance()).
 				Disabled(disabled).DimDisabled(false)
 			if disabled {
 				button.Opacity(0.35)

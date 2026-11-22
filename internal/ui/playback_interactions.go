@@ -204,19 +204,17 @@ func (p *PageContext) drawFavoriteChooser(c *ui.Context, chooser *playerFavorite
 		actionEdges = focusEdges{app.Up: {Focus: playerFolderID(last.ID)}}
 	}
 	p.region(playerFavoritesArea, actionEdges)
-	height := float32(382 + min(5, len(chooser.folders))*100)
-	p.playbackModal(c, "player-favorites", 700, height, func() {
-		ui.Text(c, text.PickFavoriteFolders).FontSize(36).FontWeight(550)
-		ui.Text(c, p.host.player.current().item.Title).MaxLines(1).FontSize(20).
-			Margin(18, 0, 0, 0).TextColor(paint(colors.Text.Secondary))
+	modalText := p.Assets.Text.Modal
+	p.renderPlayerDrawer(c, "player-favorites", 620, func() {
+		p.drawerHeader(c, "COLLECTION \u00b7 SAVE", text.PickFavoriteFolders, "", p.host.player.current().item.Title)
 		switch {
 		case chooser.failure != "":
 			ui.Text(c, p.authError(chooser.failure)).FontSize(18).TextColor(paint(colors.Status.Error.Foreground))
 		case chooser.cancel != nil && !chooser.writing:
 			ui.Text(c, p.Assets.Text.LoadingTitle).FontSize(18).TextColor(paint(colors.Text.Secondary))
 		default:
-			ui.Scroll(c).FillWidth().MaxHeight(491).Margin(39, 0, 24, 0).TrackScroll(&chooser.scroll).Children(func() {
-				ui.Column(c).Gap(11).FillWidth().Children(func() {
+			ui.Scroll(c).FillWidth().Grow(1).Margin(0, 0, 18, 0).TrackScroll(&chooser.scroll).Children(func() {
+				ui.Column(c).Gap(10).FillWidth().Children(func() {
 					for _, folder := range chooser.folders {
 						p.drawFavoriteFolder(c, folder, chooser)
 					}
@@ -227,22 +225,22 @@ func (p *PageContext) drawFavoriteChooser(c *ui.Context, chooser *playerFavorite
 			p.styledButton(c, library.CreateFolder, "plus", playerFavoritesNew, playerFavoritesArea, func() {
 				p.openFavoriteDialog(favoriteDialog{mode: favoriteCreate, saved: func() { p.loadPlayerFavorites(true) }}, favoriteDialogName)
 			}, buttonAppearance{
-				height: 44, padding: 5, radius: 8, fontSize: 19, iconSize: 21,
-				foreground: paint(colors.Text.Secondary),
-			}).Disabled(chooser.writing)
+				height: 46, padding: 12, radius: 10, fontSize: 19, iconSize: 21,
+				foreground: paint(colors.Text.Secondary), focusShadow: true,
+			}).Margin(0, 0, 18, 0).Disabled(chooser.writing)
 		}
-		ui.Spacer(c).Grow(1)
-		ui.Row(c).FillWidth().Gap(6).Children(func() {
+		ui.Row(c).FillWidth().Gap(12).Children(func() {
 			if chooser.failure != "" {
-				p.videoModalButton(c, p.Assets.Text.Retry, "", playerFavoritesSave, playerFavoritesArea, func() { p.loadPlayerFavorites(false) })
+				p.styledButton(c, p.Assets.Text.Retry, "", playerFavoritesSave, playerFavoritesArea, func() { p.loadPlayerFavorites(false) }, p.drawerButtonAppearance())
 			} else {
-				p.videoModalButton(c, library.SaveFolder, "", playerFavoritesSave, playerFavoritesArea, p.savePlayerFavorites).
+				p.styledButton(c, library.SaveFolder, "", playerFavoritesSave, playerFavoritesArea, p.savePlayerFavorites, p.drawerButtonAppearance()).
 					Disabled(chooser.cancel != nil)
 			}
-			p.videoModalButton(c, p.Assets.Text.Detail.Reconsider, "", playerFavoritesBack, playerFavoritesArea, func() {
+			p.styledButton(c, p.Assets.Text.Detail.Reconsider, "", playerFavoritesBack, playerFavoritesArea, func() {
 				p.host.player.backFromContent(p.host)
-			}).Disabled(chooser.writing)
+			}, p.drawerButtonAppearance()).Disabled(chooser.writing)
 		})
+		p.drawerFooter(c, modalText.HintSelect, modalText.HintSave)
 	})
 }
 
@@ -287,14 +285,6 @@ func (p *PageContext) drawFavoriteFolder(c *ui.Context, folder provider.VideoFav
 			}
 		})
 	})
-}
-
-func (p *PageContext) playbackModal(c *ui.Context, key string, width, height float32, body func()) {
-	colors, d := p.Theme.Colors, p.uiColors()
-	ui.Box(c).Absolute().Left(0).Top(0).Fill().Background(paint(colors.Overlay.Scrim))
-	ui.Column(c.Key(key)).Absolute().Left((p.Width-width)/2).Top((p.Height-height)/2).Size(width, height).
-		Radius(30).Padding(50).Modal().Gradient(d.dialogStart, d.dialogEnd, 140).
-		Border(1, d.strongBorder).Shadow(0, 50, 100, 0, paint(colors.Overlay.Shadow)).Children(body)
 }
 
 var commentTimestamp = regexp.MustCompile(`\b(?:[0-9]{1,2}:)?[0-9]{1,3}:[0-5][0-9]\b`)

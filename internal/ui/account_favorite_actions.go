@@ -71,20 +71,12 @@ type favoriteDialog struct {
 	saved                     func()
 }
 
-func favoriteDialogHeight(v *View) float32 {
+func favoriteDialogPresentation(v *View) modalPresentation {
 	switch v.favorites.dialog.mode {
-	case favoriteCreate, favoriteEdit:
-		if v.favorites.dialog.errorText != "" {
-			return 524
-		}
-		return 520
-	case favoriteSettings:
-		if v.Activity.Folder().CanDelete {
-			return 394
-		}
-		return 326
+	case favoriteDelete, favoriteConfirmRemove:
+		return modalFrameless
 	default:
-		return 299
+		return modalDrawer
 	}
 }
 
@@ -348,12 +340,29 @@ func (favoriteDialogPage) Render(c *ui.Context, p *PageContext) {
 	case favoriteConfirmRemove:
 		title = text.Activity.RemoveSelected
 	}
+	if dialog.mode == favoriteDelete || dialog.mode == favoriteConfirmRemove {
+		note := text.Activity.DeleteFolderNote
+		if dialog.mode == favoriteConfirmRemove {
+			note = fmt.Sprintf(text.Activity.RemoveFavoritesNote, len(dialog.resources))
+		}
+		ui.Column(c).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+			p.framelessHeader(c, "COLLECTION \u00b7 CONFIRM", "trash", title, note)
+			if dialog.errorText != "" {
+				ui.Text(c, dialog.errorText).FillWidth().Margin(18, 0, 0, 0).
+					FontSize(18).LineHeight(1.6).TextColor(paint(p.Theme.Colors.Status.Warning.Foreground))
+			}
+			ui.Box(c).Height(38)
+			p.favoriteDialogButtons(c, dialog)
+		})
+		return
+	}
 	ui.Column(c).Fill().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
-		accountText(c, title, 36, paint(p.Theme.Colors.Text.Primary)).Height(50).FontWeight(500).LineHeight(1.4).
-			FillWidth().SingleLine().Role(ui.RoleHeading).Level(2)
+		p.drawerHeader(c, "COLLECTION", title, "", "")
 		p.favoriteDialogContent(c, dialog, folder)
-		ui.Spacer(c).Grow(1)
+		ui.Box(c).Height(28)
 		p.favoriteDialogButtons(c, dialog)
+		ui.Spacer(c).Grow(1)
+		p.drawerFooter(c, text.Modal.HintSelect, text.Modal.HintSave)
 	})
 }
 

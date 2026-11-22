@@ -407,17 +407,6 @@ const (
 	rightsActions             = "account-rights"
 )
 
-func accountDetailsHeight(v *View) float32 {
-	account, _ := currentAccount(v.Auth.Accounts())
-	if account.Card.Details == nil {
-		return 334
-	}
-	if v.accountDetailsPhone {
-		return 593
-	}
-	return 457
-}
-
 func (accountDetails) Render(c *ui.Context, p *PageContext) {
 	auth := p.host.Auth
 	snapshot := auth.Accounts()
@@ -429,33 +418,27 @@ func (accountDetails) Render(c *ui.Context, p *PageContext) {
 			p.State.Focus = app.CloseModal
 			p.host.reveal = true
 		}
-		ui.Text(c, card.Title).FontSize(36).FontWeight(500)
-		if card.Status != "" {
-			ui.Text(c, card.Status).FontSize(21).TextColor(p.accountCardStatusColor(card))
-		}
-		p.accountBenefits(c, card)
-		p.styledButton(c, p.Assets.Text.Close, "", app.CloseModal, rightsActions,
-			func() { p.State.Back() }, p.dialogButtonAppearance())
+		ui.Column(c.Key("account-rights-basic")).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+			p.framelessHeader(c, "ACCOUNT \u00b7 BENEFITS", "sparkles", card.Title, card.Status)
+			ui.Box(c).Height(18)
+			p.accountBenefits(c, card)
+			ui.Row(c).Margin(36, 0, 0, 0).Children(func() {
+				p.styledButton(c, p.Assets.Text.Close, "", app.CloseModal, rightsActions,
+					func() { p.State.Back() }, p.framelessButtonAppearance())
+			})
+		})
 		return
 	}
 
 	p.region(rightsActions, nil)
-	ui.Column(c.Key("account-rights-body")).Fill().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
-		ui.Text(c, details.Title).FillWidth().Height(50).FontSize(36).FontWeight(500)
-		ui.Box(c).Height(26)
-		ui.Row(c).Height(25).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, p.Assets.Icon("sparkles")).Size(23, 23).TextColor(paint(colors.Accent.Soft))
-			ui.Text(c, details.Kicker).FontSize(18).TextColor(paint(colors.Accent.Soft))
-		})
-		ui.Box(c).Height(21)
-		ui.Text(c, details.Body).FillWidth().Height(76).FontSize(21).LineHeight(1.8).
-			TextColor(paint(colors.Text.Secondary))
+	ui.Column(c.Key("account-rights-body")).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+		p.framelessHeader(c, details.Kicker, "sparkles", details.Title, details.Body)
 		if p.host.accountDetailsPhone {
-			ui.Box(c).Height(21)
-			ui.Column(c).FillWidth().Height(116).Padding(15, 20).Gap(20).Radius(14).
+			ui.Box(c).Height(24)
+			ui.Column(c).FillWidth().Padding(18, 22).Gap(16).Radius(14).
 				Border(1, paint(colors.Border.Subtle)).
 				Background(p.uiColors().subtleFill).Children(func() {
-				ui.Text(c, details.PhoneBody).FontSize(17).LineHeight(1.8).TextColor(paint(colors.Text.Secondary))
+				ui.Text(c, details.PhoneBody).FontSize(18).LineHeight(1.75).TextColor(paint(colors.Text.Secondary))
 				ui.Column(c).AlignSelf(ui.Start).Gap(5).Children(func() {
 					ui.Text(c, details.OfficialLabel).FontSize(18).TextColor(paint(colors.Accent.Soft))
 					ui.Box(c).FillWidth().Height(1).Background(paint(colors.Accent.Soft))
@@ -463,14 +446,10 @@ func (accountDetails) Render(c *ui.Context, p *PageContext) {
 			})
 		}
 
-		ui.Box(c).Height(32)
-		ui.Row(c).FillWidth().Height(56).Gap(12).AlignItems(ui.Center).Children(func() {
-			phone, refresh := p.dialogButtonAppearance(), p.dialogButtonAppearance()
-			phone.minWidth, phone.fontWeight = 192, 550
-			refresh.minWidth, refresh.fontWeight = 213, 550
+		ui.Row(c).FillWidth().Margin(40, 0, 0, 0).Gap(16).AlignItems(ui.Center).Children(func() {
 			p.styledButton(c, details.PhoneAction, "", rightsPhone, rightsActions, func() {
 				p.host.accountDetailsPhone = true
-			}, phone)
+			}, p.framelessButtonAppearance())
 			label := details.RefreshAction
 			if snapshot.Busy {
 				label = p.Assets.Text.Activity.RefreshingRights
@@ -482,25 +461,27 @@ func (accountDetails) Render(c *ui.Context, p *PageContext) {
 						p.host.notice = p.Assets.Text.Activity.RefreshedRights
 					}
 				})
-			}, refresh).AccessDisabled(snapshot.Busy)
+			}, p.framelessButtonAppearance()).AccessDisabled(snapshot.Busy)
 			if snapshot.Error != "" {
-				ui.Text(c, p.authError(snapshot.Error)).Grow(1).MinWidth(0).FontSize(16).
+				ui.Text(c, p.authError(snapshot.Error)).Grow(1).MinWidth(0).FontSize(17).
 					TextColor(paint(colors.Status.Error.Foreground))
 			}
 		})
-		ui.Box(c).Height(12)
+		ui.Box(c).Height(22)
 		focused := p.paintFocus() == app.CloseModal
 		foreground := paint(colors.Text.Secondary)
 		if focused {
 			foreground = paint(colors.Text.Primary)
 		}
-		close := ui.Button(c.Key(string(app.CloseModal)), "").Label(details.DismissAction).FillWidth().Height(57).Padding(0).
-			Border(0, ui.Transparent).Background(ui.Transparent).OnClick(func() { p.dispatch(func() { p.State.Back() }) })
+		close := ui.Button(c.Key(string(app.CloseModal)), "").Label(details.DismissAction).Height(48).Padding(0, 4).
+			Border(0, ui.Transparent).Background(ui.Transparent).AlignSelf(ui.Start).
+			OnClick(func() { p.dispatch(func() { p.State.Back() }) })
 		p.animateFocus(close, ui.Transparent, foreground)
 		p.bind(close, app.CloseModal, rightsActions)
 		close.Children(func() {
-			ui.Row(c).Fill().AlignItems(ui.Center).Children(func() {
-				link := ui.Text(c, details.DismissAction).FontSize(18).TextColor(foreground)
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, p.Assets.Icon("back")).Size(18, 18).TextColor(foreground)
+				link := ui.Text(c, details.DismissAction).FontSize(19).TextColor(foreground)
 				if focused {
 					link.Underline().UnderlineOffset(5)
 				}

@@ -83,6 +83,20 @@
     "ChapterHere": "\u5f53\u524d\u7ae0\u8282",
     "SeekTo": "\u8df3\u8f6c\u5230 %s"
   },
+  "Modal": {
+    "CurrentPrefix": "\u5f53\u524d \u00b7 %s",
+    "Current": "\u5f53\u524d",
+    "ActiveNote": "\u5f53\u524d\u6b63\u5728\u4f7f\u7528",
+    "SwitchNote": "\u6309\u786e\u8ba4\u5207\u6362",
+    "ItemsCount": "%d \u9879",
+    "HintSelect": "\u2191\u2193 \u9009\u62e9",
+    "HintSwitch": "\u2190\u2192 \u5207\u6362\u9009\u9879",
+    "HintApply": "\u786e\u8ba4\u5e94\u7528",
+    "HintConfirm": "\u786e\u8ba4\u5207\u6362",
+    "HintSave": "\u786e\u8ba4\u4fdd\u5b58",
+    "HintOpen": "\u786e\u8ba4\u67e5\u770b",
+    "HintClose": "\u8fd4\u56de\u5173\u95ed"
+  },
   "Search": {
     "Eyebrow": "A LITTLE CURIOSITY GOES A LONG WAY",
     "Title": "\u627e\u5230\u4f60\u7684\u4e0b\u4e00\u4efd\u70ed\u7231",

@@ -1,6 +1,7 @@
 package tvui
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -811,58 +812,68 @@ func (followingAllPage) Render(c *ui.Context, p *PageContext) {
 	}
 	const region = "following-all"
 	p.region(region, nil)
-	ui.Row(c).FillWidth().Gap(18).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).FontSize(35).FontWeight(600)
-		ui.Spacer(c).Grow(1)
-		p.button(c, text.Close, app.CloseModal, region, func() { p.State.Back() })
-	})
-	if len(items) == 0 {
-		ui.Column(c).Fill().Center().Gap(20).Children(func() {
-			emptyNote := text.Following.EmptyUpdates
-			if kind == followingAllLive {
-				emptyNote = text.Following.EmptyLive
-			}
-			p.emptyDescription(c, text.EmptyTitle, emptyNote)
-		})
-		return
+	meta := ""
+	if len(items) != 0 {
+		meta = fmt.Sprintf(text.Modal.ItemsCount, len(items))
 	}
-	list := &p.host.following.allList
-	totalRows := len(items)
-	if canLoadMore || loading {
-		totalRows++
+	eyebrow := "FOLLOWING \u00b7 UPDATES"
+	if kind == followingAllLive {
+		eyebrow = "FOLLOWING \u00b7 LIVE"
 	}
-	list.Key = func(index int) any {
-		if index >= len(items) {
-			return "more"
-		}
-		return items[index].Ref
-	}
-	ui.List(c.Key("following-all-list"), list, totalRows).FillWidth().Grow(1).
-		Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
-		rc := row.Context
-		if row.Index >= len(items) {
-			label := text.Activity.More
-			if loading {
-				label = text.LoadingTitle
-			}
-			p.button(rc, label, followingAllMoreFocus, region, func() {
-				if canLoadMore && loadMore != nil {
-					loadMore()
+	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		p.drawerHeader(c, eyebrow, title, meta, "")
+		if len(items) == 0 {
+			ui.Column(c).FillWidth().Grow(1).Center().Gap(20).Children(func() {
+				emptyNote := text.Following.EmptyUpdates
+				if kind == followingAllLive {
+					emptyNote = text.Following.EmptyLive
 				}
-			}).Margin(6, 0, 13, 0)
-			return
-		}
-		item := items[row.Index]
-		id := followingAllItemFocus(item.Ref)
-		label := item.Title
-		if item.Creator != nil && item.Creator.Name != "" {
-			label = item.Title + " \u00b7 " + item.Creator.Name
-		}
-		if kind != followingAllLive && p.canOpenVideoDetail(item.Ref) {
-			p.button(rc, label, id, region, func() { p.openVideoDetail(item) }).Margin(0, 0, 13, 0)
+				p.emptyDescription(c, text.EmptyTitle, emptyNote)
+			})
 		} else {
-			p.button(rc, label, id, region, func() { p.host.notice = text.Search.DetailPending }).Margin(0, 0, 13, 0)
+			list := &p.host.following.allList
+			totalRows := len(items)
+			if canLoadMore || loading {
+				totalRows++
+			}
+			list.Key = func(index int) any {
+				if index >= len(items) {
+					return "more"
+				}
+				return items[index].Ref
+			}
+			ui.List(c.Key("following-all-list"), list, totalRows).FillWidth().Grow(1).
+				Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
+				rc := row.Context
+				if row.Index >= len(items) {
+					label := text.Activity.More
+					if loading {
+						label = text.LoadingTitle
+					}
+					p.drawerOptionRow(rc, followingAllMoreFocus, region, label, "", false, func() {
+						if canLoadMore && loadMore != nil {
+							loadMore()
+						}
+					})
+					return
+				}
+				item := items[row.Index]
+				id := followingAllItemFocus(item.Ref)
+				sub := ""
+				if item.Creator != nil {
+					sub = item.Creator.Name
+				}
+				if kind != followingAllLive && p.canOpenVideoDetail(item.Ref) {
+					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.openVideoDetail(item) })
+				} else {
+					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.host.notice = text.Search.DetailPending })
+				}
+			})
 		}
-		_ = colors
+		ui.Row(c).Margin(16, 0, 0, 0).Children(func() {
+			p.styledButton(c, text.Close, "", app.CloseModal, region, func() { p.State.Back() }, p.drawerButtonAppearance())
+		})
+		p.drawerFooter(c, text.Modal.HintSelect, text.Modal.HintOpen)
 	})
+	_ = colors
 }

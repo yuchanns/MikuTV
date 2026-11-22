@@ -206,10 +206,15 @@ type accountNoticeDialog struct{}
 
 func (accountNoticeDialog) Render(c *ui.Context, p *PageContext) {
 	row, colors := p.host.openNotice, p.Theme.Colors
-	ui.Text(c, row.Title).FontSize(36).FontWeight(500).MaxLines(2)
-	ui.Scroll(c.Key("notice-content")).FillWidth().Grow(1).Children(func() {
-		ui.Text(c, row.Subtitle).FontSize(21).LineHeight(1.8).TextColor(paint(colors.Text.Secondary))
+	p.region(noticeFooter, nil)
+	ui.Column(c).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+		p.framelessHeader(c, "NOTIFICATION", "info", row.Title, "")
+		ui.Scroll(c.Key("notice-content")).FillWidth().MaxHeight(360).Children(func() {
+			ui.Text(c, row.Subtitle).FontSize(22).LineHeight(1.85).TextColor(paint(colors.Text.Secondary))
+		})
+		ui.Row(c).Margin(36, 0, 0, 0).Children(func() {
+			p.styledButton(c, p.Assets.Text.Close, "", app.CloseModal, noticeFooter,
+				func() { p.State.Back() }, p.framelessButtonAppearance())
+		})
 	})
-	p.styledButton(c, p.Assets.Text.Close, "", app.CloseModal, noticeFooter,
-		func() { p.State.Back() }, p.dialogButtonAppearance())
 }

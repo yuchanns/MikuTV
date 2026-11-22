@@ -1,6 +1,7 @@
 package tvui
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 	"unicode/utf8"
@@ -686,50 +687,56 @@ func (seriesAllPage) Render(c *ui.Context, p *PageContext) {
 	}
 	const region = "series-all"
 	p.region(region, nil)
-	ui.Row(c).FillWidth().Gap(18).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).FontSize(35).FontWeight(600)
-		ui.Spacer(c).Grow(1)
-		p.button(c, text.Close, app.CloseModal, region, func() { p.State.Back() })
-	})
-	if len(items) == 0 {
-		ui.Column(c).Fill().Center().Gap(20).Children(func() {
-			p.emptyDescription(c, text.EmptyTitle, text.EmptyNote)
-		})
-		return
+	meta := ""
+	if len(items) != 0 {
+		meta = fmt.Sprintf(text.Modal.ItemsCount, len(items))
 	}
-	list := &p.host.series.allList
-	totalRows := len(items)
-	if canLoadMore || loading {
-		totalRows++
+	eyebrow := "SERIES \u00b7 COLLECTION"
+	if kind == seriesAllTracked {
+		eyebrow = "SERIES \u00b7 TRACKING"
 	}
-	list.Key = func(index int) any {
-		if index >= len(items) {
-			return "more"
-		}
-		return items[index].Item.Ref
-	}
-	ui.List(c.Key("series-all-list"), list, totalRows).FillWidth().Grow(1).
-		Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
-		rc := row.Context
-		if row.Index >= len(items) {
-			label := text.Activity.More
-			if loading {
-				label = text.LoadingTitle
+	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		p.drawerHeader(c, eyebrow, title, meta, "")
+		if len(items) == 0 {
+			ui.Column(c).FillWidth().Grow(1).Center().Gap(20).Children(func() {
+				p.emptyDescription(c, text.EmptyTitle, text.EmptyNote)
+			})
+		} else {
+			list := &p.host.series.allList
+			totalRows := len(items)
+			if canLoadMore || loading {
+				totalRows++
 			}
-			p.button(rc, label, seriesAllMoreFocus, region, func() {
-				if canLoadMore && loadMore != nil {
-					loadMore()
+			list.Key = func(index int) any {
+				if index >= len(items) {
+					return "more"
 				}
-			}).Margin(6, 0, 13, 0)
-			return
+				return items[index].Item.Ref
+			}
+			ui.List(c.Key("series-all-list"), list, totalRows).FillWidth().Grow(1).
+				Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
+				rc := row.Context
+				if row.Index >= len(items) {
+					label := text.Activity.More
+					if loading {
+						label = text.LoadingTitle
+					}
+					p.drawerOptionRow(rc, seriesAllMoreFocus, region, label, "", false, func() {
+						if canLoadMore && loadMore != nil {
+							loadMore()
+						}
+					})
+					return
+				}
+				entry := items[row.Index]
+				p.drawerOptionRow(rc, seriesAllItemFocus(entry.Item.Ref), region, entry.Item.Title, entry.Status, false, func() {
+					p.openVideoDetail(entry.Item)
+				})
+			})
 		}
-		entry := items[row.Index]
-		label := entry.Item.Title
-		if entry.Status != "" {
-			label += " \u00b7 " + entry.Status
-		}
-		p.button(rc, label, seriesAllItemFocus(entry.Item.Ref), region, func() {
-			p.openVideoDetail(entry.Item)
-		}).Margin(0, 0, 13, 0)
+		ui.Row(c).Margin(16, 0, 0, 0).Children(func() {
+			p.styledButton(c, text.Close, "", app.CloseModal, region, func() { p.State.Back() }, p.drawerButtonAppearance())
+		})
+		p.drawerFooter(c, text.Modal.HintSelect, text.Modal.HintOpen)
 	})
 }

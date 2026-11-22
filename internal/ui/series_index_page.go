@@ -388,20 +388,6 @@ func (p *PageContext) openSeriesFilterModal(key string) {
 	}
 }
 
-func seriesIndexFilterModalHeight(v *View) float32 {
-	count := 4
-	if v.Series != nil {
-		for _, g := range v.Series.Index().FilterGroups {
-			if g.Key == v.series.filterKey {
-				count = len(g.Options)
-				break
-			}
-		}
-	}
-	h := float32(190 + min(count, 6)*66)
-	return min(max(h, 340), 620)
-}
-
 type seriesIndexFilterPage struct{}
 
 func (seriesIndexFilterPage) Render(c *ui.Context, p *PageContext) {
@@ -425,47 +411,30 @@ func (seriesIndexFilterPage) Render(c *ui.Context, p *PageContext) {
 		p.button(c, p.Assets.Text.Close, app.CloseModal, region, func() { p.State.Back() })
 		return
 	}
-	colors := p.Theme.Colors
-	ui.Text(c, group.Label).FontSize(36).FontWeight(550)
+	modalText := p.Assets.Text.Modal
 	curVal := snap.Filters[group.Key]
 	if curVal == "" && len(group.Options) != 0 {
 		curVal = group.Options[0].Value
 	}
-	list := &p.host.series.filterList
-	list.Key = func(index int) any { return group.Options[index].Value }
-	ui.List(c.Key("series-filter-options"), list, len(group.Options)).FillWidth().Grow(1).
-		Padding(0, 0, 12, 0).Rows(func(row ui.ListRow) {
-		rc := row.Context
-		opt := group.Options[row.Index]
-		id := seriesFilterOptionFocus(row.Index)
-		selected := opt.Value == curVal
-		focused := p.paintFocus() == id
-		bg, fg := ui.Transparent, paint(colors.Text.Secondary)
-		if selected {
-			bg, fg = withAlpha(colors.Text.Primary, 0x06), paint(colors.Accent.Soft)
-		}
-		if focused {
-			bg, fg = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
-		}
-		val := opt.Value
-		btn := ui.Button(rc.Key(string(id)), "").Label(opt.Label).FillWidth().Height(60).
-			Margin(0, 0, 6, 0).Padding(0, 18).Radius(10).Border(0, ui.Transparent).
-			Background(bg).TextColor(fg).
-			OnClick(func() {
-				p.dispatch(func() {
-					p.State.Back()
-					catalog.SetIndexFilter(group.Key, val)
-				})
-			})
-		p.animateFocus(btn, bg, fg)
-		p.bind(btn, id, region)
-		btn.Children(func() {
-			ui.Row(rc).Fill().AlignItems(ui.Center).Children(func() {
-				ui.Text(rc, opt.Label).Grow(1).FontSize(23).SingleLine()
-				if selected {
-					ui.Icon(rc, p.Assets.Icon("check")).Size(23, 23)
-				}
+	eyebrow := "FILTER"
+	if key := strings.ToUpper(strings.ReplaceAll(group.Key, "_", " ")); key != "" {
+		eyebrow = "FILTER \u00b7 " + key
+	}
+	meta := fmt.Sprintf(modalText.CurrentPrefix, seriesActiveFilterLabel(group, curVal))
+	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		p.drawerHeader(c, eyebrow, group.Label, meta, p.Assets.Text.Series.IndexNote)
+		list := &p.host.series.filterList
+		list.Key = func(index int) any { return group.Options[index].Value }
+		ui.List(c.Key("series-filter-options"), list, len(group.Options)).FillWidth().Grow(1).
+			Padding(0, 0, 12, 0).Rows(func(row ui.ListRow) {
+			rc := row.Context
+			opt := group.Options[row.Index]
+			val := opt.Value
+			p.drawerOptionRow(rc, seriesFilterOptionFocus(row.Index), region, opt.Label, "", opt.Value == curVal, func() {
+				p.State.Back()
+				catalog.SetIndexFilter(group.Key, val)
 			})
 		})
+		p.drawerFooter(c, modalText.HintSelect, modalText.HintApply)
 	})
 }

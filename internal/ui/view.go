@@ -265,66 +265,6 @@ func (v *View) renderScreen(c *ui.Context, page *PageContext) {
 	})
 }
 
-func (v *View) modalBlur(route app.Route, fromMedia bool) float32 {
-	if fromMedia && route.Page == app.SignInQR {
-		return 28
-	}
-	if route.Page == favoriteFolderDialog && v.Playback != nil && v.Playback.Active() {
-		return 28
-	}
-	return v.Pages.components[route].ModalBlur
-}
-
-func (v *View) renderModal(c *ui.Context, page *PageContext, fromMedia bool) {
-	page.left = focusDestination{}
-	registration := v.Pages.components[page.Location.Route]
-	page.Title, page.Node = registration.Title, registration.Policy.Route
-	width, height := registration.ModalWidth, registration.ModalHeight
-	if registration.ResolveModalHeight != nil {
-		height = registration.ResolveModalHeight(v)
-	}
-	if width == 0 {
-		width = 1100
-	}
-	if height == 0 {
-		height = 850
-	}
-	insets := registration.ModalInsets
-	if fromMedia && page.Location.Page == app.SignInQR {
-		height = 570
-		insets = [4]float32{52, 58, 48, 58}
-	}
-	if insets == ([4]float32{}) {
-		insets = [4]float32{45, 45, 45, 45}
-	}
-	colors := v.Theme.Colors
-	derived := deriveColors(v.Theme)
-	scrim := paint(colors.Overlay.Scrim)
-	blurred := v.modalBlur(page.Location.Route, fromMedia) != 0
-	panelWidth, panelHeight := min(width, page.Width-180), min(height, page.Height-150)
-	ui.Overlay(c, func() {
-		shadeKey := struct{ Shade app.Route }{page.Location.Route}
-		ui.Box(c.Key(shadeKey)).Absolute().Left(0).Top(0).Size(page.Width, page.Height).
-			Background(scrim).Transition(menuTransition)
-		panel := ui.Column(c.Key(page.Location.Route)).Absolute().
-			Left((page.Width-panelWidth)/2).Top((page.Height-panelHeight)/2).Size(panelWidth, panelHeight).
-			Modal().Transition(menuTransition).
-			Padding(insets[0], insets[1], insets[2], insets[3]).Gap(28).
-			Background(paint(colors.Surface.Panel)).Radius(30)
-		if registration.ModalInsets != ([4]float32{}) {
-			border := derived.dialogBorder
-			if fromMedia {
-				border = derived.strongBorder
-			}
-			panel.Background(ui.Transparent).Gradient(derived.dialogStart, derived.dialogEnd, 140).Border(1, border)
-		}
-		if blurred {
-			panel.Shadow(0, 50, 100, 0, paint(colors.Overlay.Shadow))
-		}
-		panel.Children(func() { registration.Component.Render(c, page) })
-	})
-}
-
 func (v *View) scrollFor(location app.Location, active bool) *ui.ScrollState {
 	key := scrollKey{v.State.CurrentEntry, location.Route}
 	scroll := v.scrolls[key]

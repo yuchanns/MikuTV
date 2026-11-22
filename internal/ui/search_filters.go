@@ -109,32 +109,42 @@ func (searchFiltersPage) Render(c *ui.Context, p *PageContext) {
 		app.Up: {Focus: searchFilterDurationFocus(draft.duration), Region: searchFilterDurRegion},
 	})
 
+	modalText := p.Assets.Text.Modal
 	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
-		ui.Text(c, text.FiltersTitle).FontSize(36).FontWeight(500).Role(ui.RoleHeading).Level(2)
-		ui.Text(c, text.SortLabel).Margin(30, 0, 18, 0).FontSize(21).FontWeight(400).TextColor(paint(colors.Text.Secondary))
-		ui.Row(c).Gap(13).Children(func() {
+		p.drawerHeader(c, "SEARCH \u00b7 REFINE", text.FiltersTitle, "", "")
+		ui.Row(c).FillWidth().Margin(0, 0, 16, 0).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, text.SortLabel).FontSize(16).LetterSpacing(1.5).TextColor(paint(colors.Text.Muted))
+			ui.Spacer(c).Grow(1)
+			ui.Text(c, "SORT").FontSize(13).LetterSpacing(2.2).TextColor(paint(colors.Text.Muted))
+		})
+		ui.Row(c).FillWidth().Gap(10).Children(func() {
 			for _, sort := range searchSortOptions {
 				p.searchFilterChip(c, p.searchSortLabel(sort), searchFilterSortFocus(sort), searchFilterSortRegion, draft.sort == sort, func() {
 					draft.sort = sort
 				})
 			}
 		})
-		ui.Text(c, text.DurationLabel).Margin(30, 0, 18, 0).FontSize(21).FontWeight(400).TextColor(paint(colors.Text.Secondary))
-		ui.Row(c).Gap(13).Children(func() {
+		ui.Row(c).FillWidth().Margin(34, 0, 16, 0).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, text.DurationLabel).FontSize(16).LetterSpacing(1.5).TextColor(paint(colors.Text.Muted))
+			ui.Spacer(c).Grow(1)
+			ui.Text(c, "DURATION").FontSize(13).LetterSpacing(2.2).TextColor(paint(colors.Text.Muted))
+		})
+		ui.Row(c).FillWidth().Gap(10).Children(func() {
 			for _, duration := range searchDurationOptions {
 				p.searchFilterChip(c, p.searchDurationLabel(duration), searchFilterDurationFocus(duration), searchFilterDurRegion, draft.duration == duration, func() {
 					draft.duration = duration
 				})
 			}
 		})
-		ui.Spacer(c).Grow(1)
-		ui.Row(c).Margin(32, 0, 0, 0).Gap(12).Children(func() {
+		ui.Row(c).Margin(40, 0, 0, 0).Gap(14).Children(func() {
 			p.styledButton(c, text.ApplyFilters, "", searchFilterApply, searchFilterActionRegion, func() {
 				applied := *draft
 				p.State.Back()
 				p.host.Search.ApplyFilters(applied.sort, applied.duration)
-			}, p.dialogButtonAppearance())
+			}, p.drawerButtonAppearance())
 		})
+		ui.Spacer(c).Grow(1)
+		p.drawerFooter(c, modalText.HintSwitch, modalText.HintApply)
 	})
 }
 
@@ -143,9 +153,9 @@ func (p *PageContext) searchFilterChip(c *ui.Context, label string, id app.Focus
 	focused := p.paintFocus() == id
 	background, ink, border := d.subtleFill, paint(colors.Text.Secondary), paint(colors.Border.Subtle)
 	if selected {
-		background = withAlpha(colors.Accent.Primary, 0x25)
+		background = withAlpha(colors.Accent.Primary, 0x20)
 		ink = paint(colors.Accent.Soft)
-		border = withAlpha(colors.Accent.Primary, 0x80)
+		border = withAlpha(colors.Accent.Soft, 0x58)
 	}
 	if focused {
 		background = paint(colors.Focus.Background)
@@ -153,9 +163,10 @@ func (p *PageContext) searchFilterChip(c *ui.Context, label string, id app.Focus
 		border = ui.Transparent
 	}
 	button := ui.Button(c.Key(string(id)), label).Label(label).Role(ui.RoleRadio).AccessSelected(selected).
-		Height(51).Padding(0, 20).Radius(26).FontSize(20).Center().Shrink(0).
+		Height(50).Padding(0, 17).Radius(13).FontSize(18).Center().Shrink(0).
 		Background(background).TextColor(ink).Border(1, border).
 		OnClick(func() { p.dispatch(action) })
+	p.addVideoFocusShadow(button, focused)
 	p.animateFocus(button, background, ink)
 	p.bind(button, id, region)
 }

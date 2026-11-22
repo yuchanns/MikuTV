@@ -224,66 +224,40 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 func (p *PageContext) drawPlaybackAccess(c *ui.Context, state app.PlaybackState, item playbackItem) {
 	v := p.host
 	dialog := p.playbackAccessDialogFor(state, item)
-	colors, d := p.Theme.Colors, p.uiColors()
-	width, height := float32(700), float32(300)
-	bodyTop, actionsTop := float32(22), float32(34)
-	bodySpacing := float32(1.65)
-	if dialog.workAccess {
-		width, height = 820, 393
-		bodyTop, actionsTop, bodySpacing = 21, 32, 1.82
-		if dialog.returnToDetail {
-			height += 63
-		}
-	}
-	if dialog.instructions != "" {
-		height += 90
-	}
+	colors := p.Theme.Colors
 	if p.active && !strings.HasPrefix(string(v.State.Focus), string(playerStatus)) {
 		v.State.Focus, v.reveal = playerStatus, true
 	}
 	p.region(playerPanelGroup, focusEdges{})
-	ui.Box(c.Key("access-scrim")).Absolute().Top(0).Left(0).Fill().Background(paint(colors.Overlay.Scrim))
-	ui.Column(c.Key("playback-access")).Absolute().Left((p.Width-width)/2).Top((p.Height-height)/2).
-		Size(width, height).Padding(50).Radius(30).Modal().
-		Gradient(d.dialogStart, d.dialogEnd, 140).
-		Border(1, d.strongBorder).Shadow(0, 50, 100, 0, paint(colors.Overlay.Shadow)).Children(func() {
-		ui.Text(c, dialog.title).FontSize(36).FontWeight(500).FillWidth().MaxLines(2)
-		if dialog.work != "" {
-			ui.Row(c).FillWidth().Margin(22, 0, 0, 0).Gap(12).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, p.Assets.Icon("lock")).Size(23, 23).TextColor(paint(colors.Accent.Soft))
-				ui.Text(c, dialog.work).FontSize(20).TextColor(paint(colors.Accent.Soft)).MaxLines(1)
-			})
-		}
-		if dialog.body != "" {
-			ui.Text(c, dialog.body).FillWidth().Margin(bodyTop, 0, 0, 0).FontSize(21).LineHeight(bodySpacing).
-				TextColor(paint(colors.Text.Secondary))
-		}
+	eyebrow := "PLAYBACK \u00b7 ACCESS"
+	icon := "lock"
+	if dialog.work != "" {
+		eyebrow = "MEMBERSHIP \u00b7 " + dialog.work
+	}
+	p.renderPlayerFrameless(c, "playback-access", 860, func() {
+		p.framelessHeader(c, eyebrow, icon, dialog.title, dialog.body)
 		if dialog.instructions != "" {
-			ui.Box(c).Margin(18, 0, 0, 0).FillWidth().Height(1).Background(withAlpha(colors.Text.Primary, 0x18))
-			ui.Text(c, dialog.instructions).FillWidth().Margin(16, 0, 0, 0).FontSize(19).
+			ui.Box(c).Margin(24, 0, 0, 0).FillWidth().Height(1).Background(withAlpha(colors.Text.Primary, 0x1a))
+			ui.Text(c, dialog.instructions).FillWidth().Margin(18, 0, 0, 0).FontSize(20).LineHeight(1.7).
 				TextColor(paint(colors.Text.Secondary))
 		}
-		ui.Row(c.Key("playback-access-actions")).FillWidth().Margin(actionsTop, 0, 0, 0).Gap(12).Wrap().Children(func() {
+		ui.Row(c.Key("playback-access-actions")).FillWidth().Margin(42, 0, 0, 0).Gap(16).Wrap().Children(func() {
 			for i, action := range dialog.actions {
 				id := playerStatus
 				if i > 0 {
 					id = app.FocusID(fmt.Sprintf("%s/%d", playerStatus, i))
 				}
-				style := p.dialogButtonAppearance()
-				style.fontWeight = 550
-				style.iconSize, style.iconGap = 22, 11
-				if i == 0 && p.paintFocus() != id {
-					style.background, style.foreground = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
-				}
+				style := p.framelessButtonAppearance()
 				p.styledButton(c, action.label, action.icon, id, playerPanelGroup, action.activate, style)
 			}
 		})
 		if dialog.returnToDetail {
 			style := buttonAppearance{
-				height: 44, radius: 9, fontSize: 18, foreground: paint(colors.Text.Secondary),
+				height: 46, padding: 12, radius: 10, fontSize: 19, iconSize: 19, iconGap: 10,
+				foreground: paint(colors.Text.Secondary),
 			}
-			p.styledButton(c, p.Assets.Text.Playback.Access.Return, "", playerStatus+"/detail", playerPanelGroup,
-				p.playbackDetail, style).Margin(19, 0, 0, 0)
+			p.styledButton(c, p.Assets.Text.Playback.Access.Return, "back", playerStatus+"/detail", playerPanelGroup,
+				p.playbackDetail, style).Margin(26, 0, 0, 0)
 		}
 	})
 }

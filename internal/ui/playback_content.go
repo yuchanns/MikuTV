@@ -611,10 +611,10 @@ func (p *PageContext) drawDanmakuComposer(c *ui.Context, draft *danmakuDraft) {
 	text, colors := p.Assets.Text.Playback, p.Theme.Colors
 	hasDraft := strings.TrimSpace(draft.body) != ""
 	p.region(danmakuRegion, focusEdges{})
-	p.playbackModal(c, "danmaku-compose", 700, 494, func() {
-		ui.Text(c, text.SendDanmaku).FontSize(36).FontWeight(550)
+	p.renderPlayerFrameless(c, "danmaku-compose", 820, func() {
+		p.framelessHeader(c, "DANMAKU", "comment", text.SendDanmaku, "")
 		if draft.edit {
-			input := ui.TextInput(c.Key("danmaku-input"), &draft.input).FillWidth().Height(105).Margin(28, 0, 0, 0).FontSize(28).
+			input := ui.TextInput(c.Key("danmaku-input"), &draft.input).FillWidth().Height(105).FontSize(28).
 				Label(text.SendDanmaku).Placeholder(text.DanmakuPlaceholder).MaxLength(provider.DanmakuLimit).
 				ReturnKey(ui.ReturnDone).OnTextKey(func(key ui.TextKey) bool {
 				if key.Key != ui.KeyEnter && key.Key != ui.KeyEscape {
@@ -639,7 +639,7 @@ func (p *PageContext) drawDanmakuComposer(c *ui.Context, draft *danmakuDraft) {
 			if !hasDraft {
 				body = text.DanmakuPlaceholder
 			}
-			preview := ui.Scroll(c.Key(string(danmakuPreview))).FillWidth().Height(105).Margin(28, 0, 0, 0).
+			preview := ui.Scroll(c.Key(string(danmakuPreview))).FillWidth().Height(105).
 				TrackScroll(&draft.preview)
 			preview.Children(func() {
 				ui.Text(c, body).FillWidth().FontSize(28).LineHeight(1.8).TextColor(paint(colors.Text.Primary))
@@ -648,7 +648,7 @@ func (p *PageContext) drawDanmakuComposer(c *ui.Context, draft *danmakuDraft) {
 				p.bindDraftPreview(preview, danmakuPreview, danmakuRegion, &draft.preview, danmakuEdit, 52)
 			}
 		}
-		ui.Row(c).Gap(12).Margin(25, 0, 0, 0).Children(func() {
+		ui.Row(c).Gap(12).Margin(28, 0, 0, 0).Children(func() {
 			for _, option := range []struct {
 				mode  provider.DanmakuMode
 				label string
@@ -656,26 +656,26 @@ func (p *PageContext) drawDanmakuComposer(c *ui.Context, draft *danmakuDraft) {
 				{provider.DanmakuScroll, text.ScrollMode}, {provider.DanmakuTop, text.TopMode}, {provider.DanmakuBottom, text.BottomMode},
 			} {
 				id := app.FocusID("player/danmaku-mode/" + option.mode)
-				style := p.dialogButtonAppearance()
-				style.height, style.radius = 49, 25
-				style.padding += 6
+				style := p.framelessButtonAppearance()
+				style.height, style.radius, style.padding, style.fontSize = 50, 13, 24, 19
 				selected := draft.mode == option.mode
 				if selected {
-					style.background, style.foreground = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+					style.background = withAlpha(colors.Accent.Primary, 0x22)
+					style.foreground = paint(colors.Accent.Soft)
+					style.border = withAlpha(colors.Accent.Soft, 0x58)
 				}
 				p.styledButton(c, option.label, "", id, danmakuRegion, func() { draft.mode = option.mode }, style).AccessSelected(selected)
 			}
 		})
 		if draft.failure != "" {
-			ui.Text(c, p.authError(draft.failure)).FontSize(16).TextColor(paint(colors.Status.Error.Foreground))
+			ui.Text(c, p.authError(draft.failure)).Margin(16, 0, 0, 0).FontSize(18).TextColor(paint(colors.Status.Error.Foreground))
 		}
-		ui.Spacer(c).Grow(1)
-		ui.Row(c).Gap(8).AlignSelf(ui.Start).Translate(0, 3).Children(func() {
-			p.videoModalButton(c, p.Assets.Text.Detail.EditComment, "", danmakuEdit, danmakuRegion, func() {
+		ui.Row(c).Gap(16).Margin(36, 0, 0, 0).AlignSelf(ui.Start).Children(func() {
+			p.styledButton(c, p.Assets.Text.Detail.EditComment, "", danmakuEdit, danmakuRegion, func() {
 				draft.edit, draft.input = true, draft.body
 				p.State.Focus, p.host.reveal = danmakuInput, true
-			})
-			p.videoModalButton(c, text.Send, "send", danmakuSend, danmakuRegion, func() { p.sendDanmaku(draft) }).
+			}, p.framelessButtonAppearance())
+			p.styledButton(c, text.Send, "send", danmakuSend, danmakuRegion, func() { p.sendDanmaku(draft) }, p.framelessButtonAppearance()).
 				Disabled(draft.cancel != nil || draft.edit || !hasDraft)
 		})
 	})

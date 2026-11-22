@@ -41,13 +41,12 @@ type Registration struct {
 	TransparentCanvas     bool
 	PreserveFocusUnderlay bool
 	Transition            *ui.ElementTransition
-	ScreenInsets          *[4]float32
-	ModalWidth            float32
-	ModalHeight           float32
-	ResolveModalHeight    func(*View) float32
-	ModalInsets           [4]float32
-	ModalBlur             float32
-	Sync                  func(*View)
+	ScreenInsets             *[4]float32
+	ModalPresentation        modalPresentation
+	ResolveModalPresentation func(*View) modalPresentation
+	ModalWidth               float32
+	ModalBlur                float32
+	Sync                     func(*View)
 	Leave                 func(*View)
 	Back                  func(*View) bool
 	HandleKey             func(*View, ui.InputEvent, string) bool
@@ -147,7 +146,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		home,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.HomeAction}, Parent: app.Route{Page: app.Home},
 			Initial: focus(app.CloseModal), RequiresEntry: true, Modal: true},
-			Component: catalogActionPage{}, ModalWidth: 990, ModalHeight: 620,
+			Component: catalogActionPage{}, ModalPresentation: modalDrawer, ModalWidth: 680,
 			Leave: func(v *View) {
 				if v.State.Page != app.VideoDetail {
 					v.home.action = catalogAction{}
@@ -183,20 +182,19 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				}
 			}},
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.VideoConfirm}, Parent: app.Route{Page: app.VideoDetail},
-			Initial: focus(videoConfirmAccept), Modal: true}, Component: videoConfirmPage{}, ModalWidth: 700,
-			ModalHeight: 299, ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
+			Initial: focus(videoConfirmAccept), Modal: true}, Component: videoConfirmPage{},
+			ModalPresentation: modalFrameless, ModalWidth: 780},
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.VideoCommentCompose}, Parent: app.Route{Page: app.VideoDetail},
-			Initial: focus(videoCommentEdit), Modal: true}, Component: videoCommentComposePage{}, ModalWidth: 930, ModalHeight: 494,
-			ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
+			Initial: focus(videoCommentEdit), Modal: true}, Component: videoCommentComposePage{},
+			ModalPresentation: modalFrameless, ModalWidth: 880},
 		search,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.SearchFilters}, Parent: app.Route{Page: app.Search},
 			Initial: focus(searchFilterSortFocus(provider.SearchSortDefault)), RequiresEntry: true, Capability: provider.SearchCatalog, Modal: true},
-			Component: searchFiltersPage{}, ModalWidth: 840, ModalHeight: 498,
-			ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
+			Component: searchFiltersPage{}, ModalPresentation: modalDrawer, ModalWidth: 660},
 		following,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.FollowingAll}, Parent: app.Route{Page: app.Following},
 			Initial: focus(app.CloseModal), RequiresEntry: true, Capability: provider.BrowseFollowing, Modal: true},
-			Component: followingAllPage{}, ModalWidth: 990, ModalHeight: 680,
+			Component: followingAllPage{}, ModalPresentation: modalDrawer, ModalWidth: 680,
 			Leave: func(v *View) {
 				if v.State.Page != app.VideoDetail {
 					v.following.allSection = ""
@@ -206,7 +204,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		series,
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.SeriesAll}, Parent: app.Route{Page: app.Series},
 			Initial: focus(app.CloseModal), RequiresEntry: true, Capability: provider.BrowseSeries, Modal: true},
-			Component: seriesAllPage{}, ModalWidth: 990, ModalHeight: 680,
+			Component: seriesAllPage{}, ModalPresentation: modalDrawer, ModalWidth: 680,
 			Leave: func(v *View) {
 				if v.State.Page != app.VideoDetail {
 					v.series.allSection = ""
@@ -218,8 +216,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Component: seriesIndexPage{}, RawScreen: true, Sync: syncSeriesIndex, Back: (*View).backFromSeriesIndex},
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.SeriesIndexFilter}, Parent: app.Route{Page: app.SeriesIndex},
 			Initial: focus(seriesFilterOptionFocus(0)), RequiresEntry: true, Capability: provider.BrowseSeries, Modal: true},
-			Component: seriesIndexFilterPage{}, ModalWidth: 700, ResolveModalHeight: seriesIndexFilterModalHeight,
-			ModalInsets: [4]float32{50, 50, 50, 50}, ModalBlur: 28},
+			Component: seriesIndexFilterPage{}, ModalPresentation: modalDrawer, ModalWidth: 560},
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.SeriesCalendar}, Parent: app.Route{Page: app.Series},
 			Initial: focus(seriesCalendarDayFocus(0)), ContentFocus: seriesCalendarDayFocus(0), RequiresEntry: true, Capability: provider.BrowseSeries},
 			Component: seriesCalendarPage{}, RawScreen: true, Sync: syncSeriesCalendar, Back: (*View).backFromSeriesCalendar,
@@ -255,19 +252,16 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			RequiresEntry: true, Capability: provider.AccountNotifications.Capability()}, Component: accountMessagesPage{}, Sync: syncAccountMessages,
 			ScreenInsets: &[4]float32{}},
 		Registration{Policy: authModal(noticePage, app.AccountMessages, app.CloseModal), Component: accountNoticeDialog{},
-			ModalWidth: 760, ModalHeight: 405, ModalInsets: [4]float32{50, 50, 50, 50},
+			ModalPresentation: modalFrameless, ModalWidth: 820,
 			Leave: func(v *View) { v.openNotice = provider.AccountRow{} }},
-		Registration{Policy: authModal(app.AccountDetails, app.Account, rightsPhone), Component: accountDetails{}, ModalWidth: 820,
-			ModalInsets: [4]float32{51, 51, 51, 51}, ResolveModalHeight: accountDetailsHeight,
+		Registration{Policy: authModal(app.AccountDetails, app.Account, rightsPhone), Component: accountDetails{},
+			ModalPresentation: modalFrameless, ModalWidth: 860,
 			Leave: func(v *View) { v.accountDetailsPhone = false }},
-		Registration{Policy: authModal(app.AccountPicker, app.Account, app.AccountAdd), Component: accountPicker{}, ModalWidth: 700, ModalHeight: 460,
-			ModalInsets: [4]float32{50, 50, 50, 50},
-			ResolveModalHeight: func(v *View) float32 {
-				return 382 + 70*float32(max(0, len(v.Auth.Accounts().Accounts)-1))
-			},
+		Registration{Policy: authModal(app.AccountPicker, app.Account, app.AccountAdd), Component: accountPicker{},
+			ModalPresentation: modalDrawer, ModalWidth: 620,
 			Leave: func(v *View) { v.Auth.CancelAccountSelection() }},
-		Registration{Policy: authModal(app.SignInQR, app.Account, app.QRAction), Component: qrSignIn{}, ModalWidth: 760, ModalHeight: 584,
-			ModalInsets: [4]float32{59, 58, 53, 58},
+		Registration{Policy: authModal(app.SignInQR, app.Account, app.QRAction), Component: qrSignIn{},
+			ModalPresentation: modalFrameless, ModalWidth: 820,
 			Leave: func(v *View) {
 				v.Auth.CancelSignIn()
 				v.qrPayload, v.qrImage = "", nil
@@ -278,8 +272,8 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				}
 				v.player.content.afterLogin = nil
 			}},
-		Registration{Policy: authModal(app.SignOut, app.Account, app.CloseModal), Component: signOutDialog{}, ModalWidth: 700, ModalHeight: 290,
-			ModalInsets: [4]float32{50, 50, 50, 50}},
+		Registration{Policy: authModal(app.SignOut, app.Account, app.CloseModal), Component: signOutDialog{},
+			ModalPresentation: modalFrameless, ModalWidth: 760},
 	)
 	for _, section := range libraryTabs {
 		tab := Registration{
@@ -301,8 +295,8 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	}, Registration{
 		Policy: app.RouteSpec{Route: app.Route{Page: favoriteFolderDialog}, Initial: focus(app.CloseModal),
 			Modal: true, RequiresEntry: true, Capability: provider.EditFavoriteFolders},
-		Component: favoriteDialogPage{}, ModalWidth: 700, ResolveModalHeight: favoriteDialogHeight,
-		ModalInsets: [4]float32{50, 50, 50, 50}, Back: func(v *View) bool { return v.favorites.dialog.pending },
+		Component: favoriteDialogPage{}, ResolveModalPresentation: favoriteDialogPresentation, ModalWidth: 620,
+		Back:  func(v *View) bool { return v.favorites.dialog.pending },
 		Leave: func(v *View) { v.favorites.dialog = favoriteDialog{} },
 	})
 	settings := map[string]Component{
@@ -321,8 +315,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	}
 	registrations = append(registrations, Registration{
 		Policy:    app.RouteSpec{Route: app.Route{Page: app.Licenses, Section: "about"}, Parent: app.Route{Page: app.Settings, Section: "about"}, Modal: true, Initial: focus(app.LicenseText)},
-		Component: licensesPage{}, Title: assets.Text.Licenses, ModalWidth: 1050, ModalHeight: 706,
-		ModalInsets: [4]float32{50, 50, 50, 50},
+		Component: licensesPage{}, Title: assets.Text.Licenses, ModalPresentation: modalDrawer, ModalWidth: 880,
 	})
 	registrations = append(registrations, additional...)
 	p := &Pages{components: make(map[app.Route]Registration)}

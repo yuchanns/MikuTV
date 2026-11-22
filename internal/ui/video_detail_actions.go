@@ -299,20 +299,17 @@ func (videoConfirmPage) Render(c *ui.Context, p *PageContext) {
 	}
 	selected := *action
 	p.region(region, nil)
-	ui.Column(c).FillWidth().Children(func() {
-		ui.Text(c, heading).FontSize(36).FontWeight(500).LineHeight(1.3).Translate(0, 4).Role(ui.RoleHeading).Level(2)
-		if note != "" {
-			ui.Text(c, note).FillWidth().Margin(18, 0, 0, 0).FontSize(21).LineHeight(1.8).Translate(0, 4).
-				TextColor(paint(colors.Text.Secondary))
-		}
-		ui.Row(c).Gap(12).Margin(38, 0, 0, 0).Children(func() {
-			p.videoModalButton(c, acceptLabel, icon, videoConfirmAccept, region, func() {
+	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		p.framelessHeader(c, "ACTION \u00b7 CONFIRM", icon, heading, note)
+		ui.Row(c).Gap(16).Margin(40, 0, 0, 0).Children(func() {
+			p.styledButton(c, acceptLabel, icon, videoConfirmAccept, region, func() {
 				p.State.Back()
 				p.performVideoCustomAction(selected)
-			})
-			p.videoModalButton(c, closeLabel, "", app.CloseModal, region, func() { p.State.Back() })
+			}, p.framelessButtonAppearance())
+			p.styledButton(c, closeLabel, "", app.CloseModal, region, func() { p.State.Back() }, p.framelessButtonAppearance())
 		})
 	})
+	_ = colors
 }
 
 func (p *PageContext) videoModalButton(c *ui.Context, label, icon string, id app.FocusID, region string, action func()) ui.Element {

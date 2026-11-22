@@ -1,6 +1,8 @@
 package tvui
 
 import (
+	"fmt"
+
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
 	"github.com/yuchanns/MikuTV/internal/provider"
@@ -25,26 +27,36 @@ func (catalogActionPage) Render(c *ui.Context, p *PageContext) {
 	text := p.Assets.Text
 	const region = "catalog-action"
 	p.region(region, nil)
-	ui.Row(c).FillWidth().Gap(18).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, action.title).FontSize(35).FontWeight(600)
-		ui.Spacer(c).Grow(1)
-		p.button(c, text.Close, app.CloseModal, region, func() { p.State.Back() })
-	})
+	meta := ""
 	if len(action.items) != 0 {
-		action.list.Key = func(index int) any { return action.items[index].Ref }
-		ui.List(c.Key("shelf-results"), &action.list, len(action.items)).FillWidth().Grow(1).
-			Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
-			c, item := row.Context, action.items[row.Index]
-			if p.canOpenVideoDetail(item.Ref) {
-				id := catalogCardFocus("shelf-results", item.Ref)
-				p.button(c, item.Title, id, region, func() { p.openVideoDetail(item) }).Margin(0, 0, 13, 0)
-			} else {
-				ui.Text(c, item.Title).FontSize(22).Padding(14, 27).Margin(0, 0, 13, 0)
-			}
-		})
-		return
+		meta = fmt.Sprintf(text.Modal.ItemsCount, len(action.items))
 	}
-	ui.Column(c).Fill().Center().Gap(20).Children(func() {
-		p.emptyDescription(c, text.EmptyTitle, text.EmptyNote)
+	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		p.drawerHeader(c, "COLLECTION", action.title, meta, "")
+		if len(action.items) != 0 {
+			action.list.Key = func(index int) any { return action.items[index].Ref }
+			ui.List(c.Key("shelf-results"), &action.list, len(action.items)).FillWidth().Grow(1).
+				Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
+				rc, item := row.Context, action.items[row.Index]
+				sub := ""
+				if item.Creator != nil {
+					sub = item.Creator.Name
+				}
+				if p.canOpenVideoDetail(item.Ref) {
+					id := catalogCardFocus("shelf-results", item.Ref)
+					p.drawerOptionRow(rc, id, region, item.Title, sub, false, func() { p.openVideoDetail(item) })
+				} else {
+					ui.Text(rc, item.Title).FontSize(22).Padding(14, 22).Margin(0, 0, 8, 0)
+				}
+			})
+		} else {
+			ui.Column(c).FillWidth().Grow(1).Center().Gap(20).Children(func() {
+				p.emptyDescription(c, text.EmptyTitle, text.EmptyNote)
+			})
+		}
+		ui.Row(c).Margin(16, 0, 0, 0).Children(func() {
+			p.styledButton(c, text.Close, "", app.CloseModal, region, func() { p.State.Back() }, p.drawerButtonAppearance())
+		})
+		p.drawerFooter(c, text.Modal.HintSelect, text.Modal.HintOpen)
 	})
 }
