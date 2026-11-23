@@ -19,7 +19,11 @@ import (
 	tvui "github.com/yuchanns/MikuTV/internal/ui"
 )
 
-var appVersion = "0.1.0"
+var (
+	appVersion = "0.1.0"
+	appBuild   = ""
+	appCommit  = ""
+)
 
 func main() {
 	executable, err := os.Executable()
@@ -30,6 +34,11 @@ func main() {
 		os.DirFS(filepath.Join(filepath.Dir(executable), "assets", "plugins")), appVersion)
 	for _, err := range failures {
 		log.Print(err)
+	}
+	aboutDeps, err := app.LoadBundledDependencies(filepath.Join(filepath.Dir(executable), "assets", "licenses.json"))
+	if err != nil {
+		log.Printf("bundled licenses unavailable: %v", err)
+		aboutDeps = app.RuntimeDependencies()
 	}
 	mygo.App.WhenReady(func() {
 		assets, err := tvui.LoadAssets()
@@ -52,6 +61,7 @@ func main() {
 			log.Fatal(err)
 		}
 		var entries []app.Entry
+		var aboutPlugins []app.AboutPlugin
 		sourcesByID := make(map[string]*plugin.Source)
 		entrySource := make(map[string]string)
 		stores := make(map[string]*plugin.Storage)
@@ -71,6 +81,16 @@ func main() {
 			entrySource[entry.ID] = entry.SourceID
 			stores[entry.ID] = store
 			entries = append(entries, entry)
+			aboutPlugins = append(aboutPlugins, app.AboutPlugin{
+				ID:           info.ID,
+				Name:         info.Name,
+				Kind:         string(info.Kind),
+				Version:      info.Version,
+				Bundled:      source.Bundled(),
+				SourceCommit: source.SourceCommit(),
+				License:      info.License,
+				LicenseText:  source.LicenseText(),
+			})
 			assets.PrepareArtwork(entry.Artwork, source.Cover())
 			assets.PrepareAccountArtwork(entry.ID, source.AuthArtwork())
 		}
@@ -111,7 +131,8 @@ func main() {
 		}, func() { view.PromptSignIn() })
 		auth.SetCleaner(preferences)
 		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, PrivateMessages: privateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, Pages: pages, Assets: assets,
-			Preferences: preferences, Theme: theme.Default(), Version: appVersion})
+			Preferences: preferences, Theme: theme.Default(), Version: appVersion,
+			About: app.AboutInfo{Version: appVersion, Build: appBuild, Commit: appCommit, Plugins: aboutPlugins, Dependencies: aboutDeps}})
 		view.Trace = os.Getenv("MIKUTV_NAV_TRACE") == "1"
 		if view.Trace {
 			log.SetFlags(log.LstdFlags | log.Lmicroseconds)

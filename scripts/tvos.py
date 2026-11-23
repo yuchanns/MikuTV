@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -85,8 +86,16 @@ def build():
     if APP.exists():
         shutil.rmtree(APP)
     APP.mkdir(parents=True)
+    commit = ""
+    try:
+        commit = output(["git", "rev-parse", "--short=12", "HEAD"])
+    except subprocess.CalledProcessError:
+        commit = ""
+    ldflags = f"-s -w -X main.appVersion={APP_VERSION} -X main.appBuild={number}"
+    if commit:
+        ldflags += f" -X main.appCommit={commit}"
     run(["go", "build", "-trimpath", "-tags=tvos,mygo_noinspector",
-         f"-ldflags=-s -w -X main.appVersion={APP_VERSION}",
+         f"-ldflags={ldflags}",
          "-o", str(APP / "MikuTV"), "."], env=environment)
     info = {
         "CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "MikuTV",
@@ -106,7 +115,98 @@ def build():
     run(["xcrun", "--sdk", "appletvos", "layerutil", "-c", "-l", "1",
          "-o", str(APP / "Assets.car"), str(icon)])
     bundle_plugins()
+    bundle_licenses(environment)
     print(APP)
+
+
+def detect_license_id(text):
+    spdx = re.search(r"(?im)^\s*(?://\s*)?SPDX-License-Identifier:\s*([^\r\n]+?)\s*$", text)
+    if spdx:
+        return spdx.group(1).strip()
+    if "Apache License" in text and "Version 2.0" in text:
+        return "Apache-2.0"
+    if "Permission is hereby granted, free of charge" in text:
+        return "MIT"
+    if "Redistribution and use in source and binary forms" in text:
+        if "Neither the name of" in text:
+            return "BSD-3-Clause"
+        return "BSD-2-Clause"
+    if "Permission to use, copy, modify, and/or distribute this software" in text:
+        return "ISC"
+    if "Mozilla Public License Version 2.0" in text:
+        return "MPL-2.0"
+    return ""
+
+
+def read_module_license(module_dir):
+    if not module_dir.is_dir():
+        raise RuntimeError(f"Module directory not found for license collection: {module_dir}")
+    entries = {child.name.lower(): child for child in module_dir.iterdir() if child.is_file()}
+    primary = next(
+        (entries[name] for name in ("license", "license.txt", "license.md", "copying", "copying.txt", "copying.md") if name in entries),
+        None,
+    )
+    notice = next(
+        (entries[name] for name in ("notice", "notice.txt", "notice.md") if name in entries),
+        None,
+    )
+    parts = []
+    for path in (primary, notice):
+        if path is not None:
+            body = path.read_text(encoding="utf-8").replace("\r\n", "\n").strip()
+            if body:
+                parts.append(body)
+    if not parts:
+        raise RuntimeError(f"Missing LICENSE/NOTICE file in module directory {module_dir}")
+    return "\n\n".join(parts)
+
+
+def collect_go_licenses(build_env=None):
+    environment = dict(build_env) if build_env is not None else os.environ.copy()
+    if build_env is None:
+        environment.update(
+            GOOS="ios", GOARCH="arm64", CGO_ENABLED="1", GOWORK="off", GOFLAGS="-mod=vendor",
+        )
+    fmt = "{{with .Module}}{{if not .Main}}{{.Path}}\t{{.Version}}\t{{.Indirect}}\t{{.Dir}}{{end}}{{end}}"
+    raw = subprocess.check_output(
+        ["go", "list", "-tags=tvos,mygo_noinspector", "-deps", "-f", fmt, "."],
+        cwd=ROOT, env=environment, text=True,
+    )
+    seen = {}
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        mod_path = fields[0].strip()
+        version = fields[1].strip() if len(fields) > 1 else ""
+        indirect = (fields[2].strip() == "true") if len(fields) > 2 else False
+        mod_dir = fields[3].strip() if len(fields) > 3 else ""
+        if mod_path and mod_path not in seen:
+            seen[mod_path] = (version, indirect, mod_dir)
+    records = []
+    for mod_path in sorted(seen, key=str.lower):
+        version, indirect, mod_dir = seen[mod_path]
+        license_dir = ROOT / "vendor" / mod_path
+        if not license_dir.is_dir() and mod_dir:
+            license_dir = Path(mod_dir)
+        license_text = read_module_license(license_dir)
+        entry = {
+            "module": mod_path,
+            "version": version,
+            "license": detect_license_id(license_text),
+            "licenseText": license_text,
+        }
+        if indirect:
+            entry["indirect"] = True
+        records.append(entry)
+    return records
+
+
+def bundle_licenses(build_env):
+    destination = APP / "assets/licenses.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    records = collect_go_licenses(build_env)
+    destination.write_text(json.dumps(records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def bundle_plugins():
@@ -161,6 +261,12 @@ def package():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["prepare", "build", "package"])
+    parser.add_argument("action", choices=["prepare", "build", "package", "licenses"])
     args = parser.parse_args()
-    {"prepare": prepare, "build": build, "package": package}[args.action]()
+    actions = {
+        "prepare": prepare,
+        "build": build,
+        "package": package,
+        "licenses": lambda: print(json.dumps(collect_go_licenses(), ensure_ascii=False, indent=2)),
+    }
+    actions[args.action]()

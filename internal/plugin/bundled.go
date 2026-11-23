@@ -98,5 +98,7 @@ func openBundled(ctx context.Context, assets fs.FS, record BundleRecord) (*Sourc
 	if manifest.ID != record.ID || manifest.Version != record.Version {
 		return nil, fmt.Errorf("package identity does not match its receipt")
 	}
+	source.bundled = true
+	source.sourceCommit = record.SourceCommit
 	return source, nil
 }

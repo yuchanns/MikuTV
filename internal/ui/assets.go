@@ -40,7 +40,18 @@ type labels struct {
 	PlaybackPrefs                                                         playbackSettingsLabels
 	Danmaku                                                               danmakuSettingsLabels
 	Privacy                                                               privacySettingsLabels
+	About                                                                 aboutLabels
 	Modal                                                                 modalLabels
+}
+
+type aboutLabels struct {
+	Plugins, NoPlugins, PluginsMore, Bundled, External string
+	KindSource, KindTheme                              string
+	ProjectHome, ProjectBody                           string
+	LicenseSummary                                     string
+	LicenseBuildHeader, LicensePluginsHeader           string
+	LicenseDepsHeader, LicenseFullHeader               string
+	LicenseNoPlugins, LicenseDeclaredNone              string
 }
 
 type privacySettingsLabels struct {

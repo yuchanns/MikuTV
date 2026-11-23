@@ -414,6 +414,10 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Policy:    app.RouteSpec{Route: app.Route{Page: app.Licenses, Section: "about"}, Parent: app.Route{Page: app.Settings, Section: "about"}, Modal: true, Initial: focus(app.LicenseText)},
 			Component: licensesPage{}, Title: assets.Text.Licenses, ModalPresentation: modalDrawer, ModalWidth: 880,
 		},
+		Registration{
+			Policy:    app.RouteSpec{Route: app.Route{Page: app.AboutProject, Section: "about"}, Parent: app.Route{Page: app.Settings, Section: "about"}, Modal: true, Initial: focus(app.CloseModal)},
+			Component: aboutProjectPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
+		},
 	)
 	registrations = append(registrations, additional...)
 	p := &Pages{components: make(map[app.Route]Registration)}

@@ -43,15 +43,17 @@ const (
 	SignInQR            Page = "signInQR"
 	SignOut             Page = "signOut"
 	Licenses            Page = "licenses"
+	AboutProject        Page = "aboutProject"
 )
 
 type FocusID string
 
 const (
-	ManagePlugins FocusID = "entries/manage"
+	ManagePlugins      FocusID = "entries/manage"
 	ContentAction      FocusID = "content/entries"
 	ShowLicenses       FocusID = "about/licenses"
 	ShowPrivacyDetails FocusID = "about/privacy-details"
+	ShowProjectHome    FocusID = "about/project"
 	LicenseText        FocusID = "licenses/text"
 	CloseModal    FocusID = "modal/close"
 	AccountAction FocusID = "account/action"

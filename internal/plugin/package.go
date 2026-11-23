@@ -15,6 +15,7 @@ import (
 	"path"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/MoeForge/moejs"
 	"github.com/yuchanns/MikuTV/internal/provider"
@@ -62,17 +63,23 @@ var operations = map[provider.Capability][]string{
 }
 
 type Source struct {
-	manifest    sourceManifest
-	cover       []byte
-	authArtwork []byte
-	module      *moejs.Module
-	digest      [sha256.Size]byte
+	manifest     sourceManifest
+	cover        []byte
+	authArtwork  []byte
+	module       *moejs.Module
+	digest       [sha256.Size]byte
+	bundled      bool
+	sourceCommit string
+	licenseText  string
 }
 
 func (s *Source) Manifest() Manifest        { return s.manifest.Manifest }
 func (s *Source) Cover() []byte             { return s.cover }
 func (s *Source) AuthArtwork() []byte       { return s.authArtwork }
 func (s *Source) Digest() [sha256.Size]byte { return s.digest }
+func (s *Source) Bundled() bool             { return s.bundled }
+func (s *Source) SourceCommit() string      { return s.sourceCommit }
+func (s *Source) LicenseText() string       { return s.licenseText }
 func (s *Source) Capabilities() provider.Capabilities {
 	return append(provider.Capabilities(nil), s.manifest.Capabilities...)
 }
@@ -137,7 +144,32 @@ func openPackage(ctx context.Context, input io.ReaderAt, size int64, digest [sha
 			return nil, err
 		}
 	}
-	return &Source{manifest: manifest, cover: cover, authArtwork: authArtwork, module: module, digest: digest}, nil
+	licenseText := readPluginLicenseText(files)
+	return &Source{
+		manifest: manifest, cover: cover, authArtwork: authArtwork,
+		module: module, digest: digest, licenseText: licenseText,
+	}, nil
+}
+
+const maxPluginLicenseBytes = 64 << 10
+
+func readPluginLicenseText(files *packageArchive) string {
+	candidates := [...]string{"license", "license.txt", "license.md", "notice", "notice.txt"}
+	for _, want := range candidates {
+		for name, file := range files.files {
+			if strings.ToLower(name) != want || file.UncompressedSize64 > maxPluginLicenseBytes {
+				continue
+			}
+			data, err := files.read(name)
+			if err != nil || !utf8.Valid(data) {
+				continue
+			}
+			if trimmed := strings.TrimSpace(string(data)); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
 }
 
 func packagePath(name string) bool {

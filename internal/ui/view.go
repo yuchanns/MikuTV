@@ -60,6 +60,7 @@ type Options struct {
 	Preferences      app.PreferencesStore
 	Theme            theme.Theme
 	Version          string
+	About            app.AboutInfo
 }
 
 type View struct {
@@ -81,7 +82,10 @@ type View struct {
 	Preferences     app.PreferencesStore
 	Theme           theme.Theme
 	Version         string
+	About           app.AboutInfo
 	Trace           bool
+	projectQRURL    string
+	projectQRImage  ui.ImageSource
 	lastNavigation  navigationTrace
 	native          ui.Theme
 	focus           focusController
@@ -136,7 +140,7 @@ func NewView(options Options) *View {
 	v := &View{
 		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
-		Version: options.Version, scrolls: make(map[scrollKey]*ui.ScrollState),
+		Version: options.Version, About: options.About.Normalized(options.Version), scrolls: make(map[scrollKey]*ui.ScrollState),
 	}
 	v.SetTheme(options.Theme)
 	if v.Auth != nil && v.Catalog != nil {

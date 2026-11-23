@@ -35,6 +35,7 @@ type Manifest struct {
 	Version       string `json:"version"`
 	APIVersion    int    `json:"apiVersion"`
 	MinAppVersion string `json:"minAppVersion"`
+	License       string `json:"license,omitempty"`
 	Artwork       struct {
 		Cover string `json:"cover,omitempty"`
 	} `json:"artwork,omitempty"`
