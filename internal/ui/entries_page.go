@@ -11,7 +11,7 @@ type entriesPage struct{}
 
 func (entriesPage) Render(c *ui.Context, p *PageContext) {
 	width := p.Width - 186
-	p.region("entries", focusEdges{})
+	p.region("entries", focusEdges{app.Left: p.left})
 	text := p.Assets.Text
 	note := text.EntriesNote
 	if entry, ok := p.State.Current(); ok {
@@ -20,8 +20,17 @@ func (entriesPage) Render(c *ui.Context, p *PageContext) {
 	p.heading(c, text.EntriesTitle, note)
 	entries := p.State.Entries()
 	if len(entries) == 0 {
-		p.empty(c, text.EmptyEntries, text.EmptyEntryNote, text.Manage, app.ManagePlugins, "entries", func() {
-			p.State.Navigate(app.Route{Page: app.Settings, Section: "plugins"})
+		colors := p.Theme.Colors
+		ui.Column(c).FillWidth().Height(530).Center().Gap(22).Children(func() {
+			ui.Icon(c, p.Assets.Icon("plug")).Size(64, 64).TextColor(paint(colors.Accent.Soft))
+			ui.Text(c, text.EmptyEntries).FontSize(36).FontWeight(550)
+			ui.Text(c, text.EmptyEntryNote).FontSize(22).TextColor(paint(colors.Text.Muted))
+			p.actionButton(c, text.Manage, "plug", app.ManagePlugins, "entries", func() {
+				p.host.pluginsUI.view = pluginsViewInstalled
+				p.host.pluginsUI.selectedInstalledID = ""
+				p.host.pluginsUI.selectedCatalogRepo = ""
+				p.State.Navigate(app.Route{Page: app.Settings, Section: "plugins"})
+			}).Margin(10, 0, 0, 0).AlignSelf(ui.Center)
 		})
 		return
 	}

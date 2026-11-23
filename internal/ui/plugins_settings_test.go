@@ -749,3 +749,174 @@ func TestPluginsUpdateWorkflowCheckExpandedPermissionsFailPreserveRetryAndHotRel
 		t.Fatalf("expected empty staging directory, got %d files", len(staging))
 	}
 }
+
+func TestPluginsRemoveUninstallDisableEmptyEntriesAndReEnable(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	miniEntry := app.Entry{
+		ID: "sample-source", SourceID: "sample-source", Name: "SampleSource Source", Description: "Built-in",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog},
+	}
+	state, err := app.NewState([]app.Entry{miniEntry}, "sample-source", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mediaZip := buildUIPluginZip(t, "media", "Demo Media", "1.0.0", []string{"api.demo.example"})
+	mediaItem := plugin.CatalogItem{
+		Repository:    "demo/media-source",
+		Permissions:   []string{"api.demo.example"},
+		Release:       plugin.ReleaseAsset{ReleaseID: 1, TagName: "v1.0.0", AssetID: 101, AssetName: "plugin.zip", SHA256: fmt.Sprintf("%x", sha256.Sum256(mediaZip))},
+		Manifest:      plugin.Manifest{ID: "media", Name: "Demo Media", Description: "External", Kind: plugin.SourceKind, Version: "1.0.0", APIVersion: 1, MinAppVersion: "0.1.0", License: "MIT"},
+		Compatibility: plugin.Compatibility{Compatible: true, Code: plugin.CompatibleOK},
+	}
+	fetcher := &uiPluginFetcher{
+		resolved: map[string]plugin.CatalogItem{"demo/media-source": mediaItem},
+		assets:   map[int64][]byte{101: mediaZip},
+	}
+	queue := make(chan func(), 64)
+	drain := func(cond func() bool) {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		for !cond() {
+			select {
+			case fn := <-queue:
+				fn()
+			case <-deadline:
+				t.Fatal("timed out waiting for async callback")
+			}
+		}
+	}
+
+	pkgRoot := filepath.Join(t.TempDir(), "plugins")
+	pkgStore := plugin.NewPackageStore(pkgRoot)
+	pluginCat := app.NewPluginCatalog(
+		[]app.InstalledPlugin{{
+			ID: "sample-source", Name: "SampleSource Source", Kind: plugin.SourceKind, Version: "0.1.0", Bundled: true, Enabled: true,
+		}},
+		fetcher,
+		nil,
+		func(fn func()) { queue <- fn },
+		func() {},
+	)
+	t.Cleanup(pluginCat.Close)
+
+	entriesByID := map[string]app.Entry{"sample-source": miniEntry}
+	var view *View
+	var lastRemovedClearData *bool
+	removeEntry := func(id string) {
+		cur := state.Entries()
+		next := make([]app.Entry, 0, len(cur))
+		for _, e := range cur {
+			if e.ID != id {
+				next = append(next, e)
+			}
+		}
+		state.UpdateEntries(next)
+	}
+	pluginCat.SetInstaller(pkgStore, "0.1.0", func(src *plugin.Source, receipt plugin.InstalledReceipt) error {
+		info := src.Manifest()
+		e := app.Entry{ID: info.ID, SourceID: info.ID, Name: info.Name, Description: info.Description, Artwork: info.ID, Capabilities: src.Capabilities()}
+		entriesByID[e.ID] = e
+		state.UpdateEntries(append(append([]app.Entry(nil), state.Entries()...), e))
+		return nil
+	})
+	pluginCat.SetLifecycleHooks(app.PluginLifecycleHooks{
+		DisableSource: func(id string) { removeEntry(id) },
+		EnableSource: func(id string) error {
+			e := entriesByID[id]
+			state.UpdateEntries(append(append([]app.Entry(nil), state.Entries()...), e))
+			return nil
+		},
+		RemoveSource: func(id string, clearData bool) {
+			cd := clearData
+			lastRemovedClearData = &cd
+			delete(entriesByID, id)
+			removeEntry(id)
+		},
+	})
+
+	view = newTestView(t, Options{
+		State: state, PluginCatalog: pluginCat, Pages: pages, Assets: assets, Theme: theme.Default(), Version: "0.1.0",
+	})
+
+	// Install external media plugin.
+	installed := false
+	pluginCat.Install(mediaItem, func(out app.PluginInstallOutcome) {
+		if out.Err != nil {
+			t.Fatal(out.Err)
+		}
+		installed = true
+	})
+	drain(func() bool { return installed })
+
+	state.Navigate(app.Route{Page: app.Settings, Section: "plugins"})
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	tester.Frame()
+
+	// 1. Open external media detail -> click Remove -> opens PluginRemoveDialog -> Confirm uninstalls preserving data!
+	view.State.Focus = pluginsInstalledFocus("media")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	view.State.Focus = pluginsDetailRemove
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.PluginRemoveDialog || state.Focus != pluginRemoveConfirmBtn {
+		t.Fatalf("expected PluginRemoveDialog focused on confirm, got page=%v focus=%q", state.Page, state.Focus)
+	}
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.Settings || lastRemovedClearData == nil || *lastRemovedClearData {
+		t.Fatalf("expected clean uninstall keeping account/settings data, got page=%v clearData=%v", state.Page, lastRemovedClearData)
+	}
+	if _, ok := pluginCat.FindInstalled("media"); ok || len(state.Entries()) != 1 {
+		t.Fatalf("removed external plugin still present: entries=%+v", state.Entries())
+	}
+
+	// 2. Open bundled sample-source detail (current entry) -> toggle Enable -> opens PluginDisableDialog -> Confirm!
+	view.State.Focus = pluginsInstalledFocus("sample-source")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	view.State.Focus = pluginsDetailToggle
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.PluginDisableDialog || state.Focus != pluginDisableConfirmBtn {
+		t.Fatalf("expected PluginDisableDialog focused on confirm, got page=%v focus=%q", state.Page, state.Focus)
+	}
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+
+	// Disabling the sole/current entry MUST route to Entries empty state focused on [管理插件]!
+	if state.Page != app.Entries || state.CurrentEntry != "" || len(state.Entries()) != 0 || state.Focus != app.ManagePlugins {
+		t.Fatalf("expected empty Entries focused on ManagePlugins after disabling current/last entry, got page=%v current=%q entries=%d focus=%q",
+			state.Page, state.CurrentEntry, len(state.Entries()), state.Focus)
+	}
+
+	// 3. Click [管理插件] -> opens Settings/plugins -> open sample-source -> re-enable -> entry restored!
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.Settings || state.Section != "plugins" {
+		t.Fatalf("ManagePlugins did not open Settings/plugins: %+v", state.Route)
+	}
+	view.State.Focus = pluginsInstalledFocus("sample-source")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	view.State.Focus = pluginsDetailToggle
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if inst, _ := pluginCat.FindInstalled("sample-source"); !inst.Enabled || len(state.Entries()) != 1 {
+		t.Fatalf("re-enable bundled plugin failed: inst=%+v entries=%d", inst, len(state.Entries()))
+	}
+}

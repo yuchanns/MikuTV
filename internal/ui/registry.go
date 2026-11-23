@@ -475,6 +475,22 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				}
 			},
 		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.PluginDisableDialog, Section: "plugins"},
+				Parent: app.Route{Page: app.Settings, Section: "plugins"},
+				Modal:  true, Initial: focus(pluginDisableConfirmBtn),
+			},
+			Component: pluginDisableDialogPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
+		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.PluginRemoveDialog, Section: "plugins"},
+				Parent: app.Route{Page: app.Settings, Section: "plugins"},
+				Modal:  true, Initial: focus(pluginRemoveConfirmBtn),
+			},
+			Component: pluginRemoveDialogPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
+		},
 	)
 	registrations = append(registrations, additional...)
 	p := &Pages{components: make(map[app.Route]Registration)}

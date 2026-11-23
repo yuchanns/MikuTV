@@ -157,6 +157,20 @@ func main() {
 			return entry, aboutPl, installedPl, nil
 		}
 
+		pluginCatalogBase := os.Getenv("MIKUTV_PLUGIN_CATALOG_BASE_URL")
+		packageStore := platform.NewPluginPackageStore()
+		if pluginCatalogBase != "" {
+			packageStore = platform.NewPluginPackageStoreNamed("plugins-override")
+		}
+		disabledBundledList, err := packageStore.LoadDisabledBundled()
+		if err != nil {
+			log.Printf("load disabled bundled plugins: %v", err)
+		}
+		disabledBundled := make(map[string]bool, len(disabledBundledList))
+		for _, id := range disabledBundledList {
+			disabledBundled[strings.ToLower(strings.TrimSpace(id))] = true
+		}
+
 		mountedIDs := make(map[string]bool)
 		for _, source := range sources {
 			entry, aboutPl, installedPl, err := mountSource(source, nil)
@@ -164,16 +178,15 @@ func main() {
 				log.Fatalf("open plugin %s storage: %v", source.Manifest().ID, err)
 			}
 			mountedIDs[strings.ToLower(entry.ID)] = true
-			entries = append(entries, entry)
+			if disabledBundled[strings.ToLower(entry.ID)] {
+				installedPl.Enabled = false
+			} else {
+				entries = append(entries, entry)
+			}
 			aboutPlugins = append(aboutPlugins, aboutPl)
 			installedPlugins = append(installedPlugins, installedPl)
 		}
 
-		pluginCatalogBase := os.Getenv("MIKUTV_PLUGIN_CATALOG_BASE_URL")
-		packageStore := platform.NewPluginPackageStore()
-		if pluginCatalogBase != "" {
-			packageStore = platform.NewPluginPackageStoreNamed("plugins-override")
-		}
 		externalPackages, externalFailures := packageStore.LoadAll(context.Background(), appVersion)
 		for _, err := range externalFailures {
 			log.Printf("external plugin load: %v", err)
@@ -281,22 +294,40 @@ func main() {
 		pluginCatalog.SetInstaller(packageStore, appVersion, func(source *plugin.Source, receipt plugin.InstalledReceipt) error {
 			return upsertRuntimeSource(source, receipt, false)
 		})
+		var auth *app.Auth
+		stopActiveSourceIfCurrent := func(pluginID string) {
+			if !strings.EqualFold(state.CurrentEntry, pluginID) {
+				return
+			}
+			if view != nil && view.Playback != nil {
+				view.Playback.Close()
+			}
+			liveChat.Close()
+			live.Close()
+			series.Close()
+			following.Close()
+			search.Close()
+			privateMessages.Close()
+			activity.Close()
+			catalog.Close()
+			if auth != nil {
+				auth.Close()
+			}
+		}
+		removeEntryByID := func(pluginID string) {
+			current := state.Entries()
+			next := make([]app.Entry, 0, len(current))
+			for _, existing := range current {
+				if strings.EqualFold(existing.ID, pluginID) {
+					continue
+				}
+				next = append(next, existing)
+			}
+			state.UpdateEntries(next)
+		}
 		pluginCatalog.SetUpdateHooks(app.PluginUpdateHooks{
 			BeforeSourceUpdate: func(pluginID string) {
-				if !strings.EqualFold(state.CurrentEntry, pluginID) {
-					return
-				}
-				if view != nil && view.Playback != nil {
-					view.Playback.Close()
-				}
-				liveChat.Close()
-				live.Close()
-				series.Close()
-				following.Close()
-				search.Close()
-				privateMessages.Close()
-				activity.Close()
-				catalog.Close()
+				stopActiveSourceIfCurrent(pluginID)
 			},
 			ApplySourceUpdate: func(source *plugin.Source, receipt plugin.InstalledReceipt) error {
 				if err := upsertRuntimeSource(source, receipt, true); err != nil {
@@ -311,7 +342,78 @@ func main() {
 				return plugin.ErrIncompatible
 			},
 		})
-		auth := app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
+		pluginCatalog.SetLifecycleHooks(app.PluginLifecycleHooks{
+			DisableSource: func(pluginID string) {
+				stopActiveSourceIfCurrent(pluginID)
+				removeEntryByID(pluginID)
+				if view != nil {
+					view.SyncEntry()
+				}
+			},
+			EnableSource: func(pluginID string) error {
+				sourcesMu.RLock()
+				src := sourcesByID[pluginID]
+				sourcesMu.RUnlock()
+				if src == nil {
+					return plugin.ErrIncompatible
+				}
+				info := src.Manifest()
+				entry := app.Entry{
+					ID: info.ID, SourceID: info.ID, Name: info.Name,
+					Description: info.Description, Artwork: info.ID,
+					Capabilities: src.Capabilities(), Auth: src.AuthPresentation(),
+					Presentation: src.Presentation(),
+				}
+				current := state.Entries()
+				for _, existing := range current {
+					if strings.EqualFold(existing.ID, entry.ID) {
+						return nil
+					}
+				}
+				var next []app.Entry
+				if src.Bundled() {
+					next = append([]app.Entry{entry}, current...)
+				} else {
+					next = append(append([]app.Entry(nil), current...), entry)
+				}
+				state.UpdateEntries(next)
+				return nil
+			},
+			RemoveSource: func(pluginID string, clearData bool) {
+				stopActiveSourceIfCurrent(pluginID)
+				sourcesMu.Lock()
+				delete(sourcesByID, pluginID)
+				delete(entrySource, pluginID)
+				if clearData {
+					delete(stores, pluginID)
+				}
+				sourcesMu.Unlock()
+				removeEntryByID(pluginID)
+				if view != nil {
+					nextAbout := make([]app.AboutPlugin, 0, len(view.About.Plugins))
+					for _, pl := range view.About.Plugins {
+						if strings.EqualFold(pl.ID, pluginID) {
+							continue
+						}
+						nextAbout = append(nextAbout, pl)
+					}
+					view.About.Plugins = nextAbout
+				}
+				if clearData {
+					_ = preferences.ClearEntry(pluginID)
+					_ = preferences.ClearPluginStorage(pluginID, pluginID)
+					if credentials != nil {
+						_ = credentials.Save(pluginID, pluginID, nil)
+					}
+				}
+				if view != nil {
+					view.SyncEntry()
+				}
+			},
+			DisableTheme: func(string) {},
+			RemoveTheme:  func(string) {},
+		})
+		auth = app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
 			catalog.Reload()
 			activity.Close()
 			privateMessages.Close()

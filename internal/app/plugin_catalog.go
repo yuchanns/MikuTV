@@ -87,6 +87,17 @@ type PluginUpdateHooks struct {
 	ApplyThemeUpdate   func(receipt plugin.InstalledReceipt, data []byte) error
 }
 
+// PluginLifecycleHooks dispatches disable, enable, and uninstall callbacks by
+// plugin kind so theme removal/disable never clears content-source sessions or
+// account data.
+type PluginLifecycleHooks struct {
+	DisableSource func(pluginID string)
+	EnableSource  func(pluginID string) error
+	RemoveSource  func(pluginID string, clearData bool)
+	DisableTheme  func(pluginID string)
+	RemoveTheme   func(pluginID string)
+}
+
 type PluginCatalogCacheData struct {
 	CachedAt   int64                `json:"cachedAt"`
 	ETag       string               `json:"etag,omitempty"`
@@ -125,14 +136,15 @@ type PluginCatalogSnapshot struct {
 }
 
 type PluginCatalog struct {
-	fetcher     PluginCatalogFetcher
-	cache       PluginCatalogCache
-	pkgStore    *plugin.PackageStore
-	appVersion  string
-	onMounted   func(*plugin.Source, plugin.InstalledReceipt) error
-	updateHooks PluginUpdateHooks
-	post        func(func())
-	invalidate  func()
+	fetcher        PluginCatalogFetcher
+	cache          PluginCatalogCache
+	pkgStore       *plugin.PackageStore
+	appVersion     string
+	onMounted      func(*plugin.Source, plugin.InstalledReceipt) error
+	updateHooks    PluginUpdateHooks
+	lifecycleHooks PluginLifecycleHooks
+	post           func(func())
+	invalidate     func()
 
 	mu                sync.Mutex
 	cacheMu           sync.Mutex
@@ -177,6 +189,12 @@ func (c *PluginCatalog) SetUpdateHooks(hooks PluginUpdateHooks) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.updateHooks = hooks
+}
+
+func (c *PluginCatalog) SetLifecycleHooks(hooks PluginLifecycleHooks) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lifecycleHooks = hooks
 }
 
 func NewPluginCatalog(
@@ -1104,6 +1122,149 @@ func (c *PluginCatalog) finishUpdate(gen uint64, outcome PluginUpdateOutcome, on
 		}
 		c.notify()
 	})
+}
+
+// SetEnabled enables or disables an installed plugin (including bundled
+// content sources), persists the change, and invokes kind-specific lifecycle hooks.
+func (c *PluginCatalog) SetEnabled(pluginID string, enabled bool) error {
+	c.mu.Lock()
+	idx := -1
+	for i, item := range c.installed {
+		if strings.EqualFold(item.ID, pluginID) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		c.mu.Unlock()
+		return fmt.Errorf("plugin %q is not installed", pluginID)
+	}
+	item := c.installed[idx]
+	if item.Enabled == enabled {
+		c.mu.Unlock()
+		return nil
+	}
+	store := c.pkgStore
+	hooks := c.lifecycleHooks
+	c.mu.Unlock()
+
+	if store != nil {
+		var err error
+		if item.Bundled {
+			err = store.SetBundledEnabled(item.ID, enabled)
+		} else {
+			_, err = store.SetExternalEnabled(item.ID, enabled)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	if err := dispatchPluginToggle(hooks, item.Kind, item.ID, enabled); err != nil {
+		// Roll back persisted toggle state if re-enabling failed.
+		if store != nil {
+			if item.Bundled {
+				_ = store.SetBundledEnabled(item.ID, !enabled)
+			} else {
+				_, _ = store.SetExternalEnabled(item.ID, !enabled)
+			}
+		}
+		return err
+	}
+
+	c.mu.Lock()
+	for i := range c.installed {
+		if strings.EqualFold(c.installed[i].ID, item.ID) {
+			c.installed[i].Enabled = enabled
+			break
+		}
+	}
+	c.mu.Unlock()
+	c.notify()
+	return nil
+}
+
+// Remove uninstalls an externally installed plugin, deletes its persisted
+// package and receipt, and dispatches kind-specific teardown. Bundled plugins
+// cannot be uninstalled and must use SetEnabled(id, false) instead.
+func (c *PluginCatalog) Remove(pluginID string, clearData bool) error {
+	c.mu.Lock()
+	idx := -1
+	for i, item := range c.installed {
+		if strings.EqualFold(item.ID, pluginID) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		c.mu.Unlock()
+		return fmt.Errorf("plugin %q is not installed", pluginID)
+	}
+	item := c.installed[idx]
+	if item.Bundled {
+		c.mu.Unlock()
+		return fmt.Errorf("%w: bundled plugin cannot be uninstalled", plugin.ErrIncompatible)
+	}
+	store := c.pkgStore
+	hooks := c.lifecycleHooks
+	c.mu.Unlock()
+
+	if store != nil {
+		if _, err := store.Remove(item.ID); err != nil {
+			return err
+		}
+	}
+
+	c.mu.Lock()
+	next := make([]InstalledPlugin, 0, len(c.installed)-1)
+	for _, existing := range c.installed {
+		if strings.EqualFold(existing.ID, item.ID) {
+			continue
+		}
+		next = append(next, existing)
+	}
+	c.installed = next
+	c.mu.Unlock()
+
+	dispatchPluginRemove(hooks, item.Kind, item.ID, clearData)
+	c.notify()
+	return nil
+}
+
+func dispatchPluginToggle(hooks PluginLifecycleHooks, kind plugin.Kind, pluginID string, enabled bool) error {
+	switch kind {
+	case plugin.SourceKind:
+		if enabled {
+			if hooks.EnableSource != nil {
+				return hooks.EnableSource(pluginID)
+			}
+			return nil
+		}
+		if hooks.DisableSource != nil {
+			hooks.DisableSource(pluginID)
+		}
+		return nil
+	case plugin.ThemeKind:
+		if !enabled && hooks.DisableTheme != nil {
+			hooks.DisableTheme(pluginID)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported kind %q", plugin.ErrIncompatible, kind)
+	}
+}
+
+func dispatchPluginRemove(hooks PluginLifecycleHooks, kind plugin.Kind, pluginID string, clearData bool) {
+	switch kind {
+	case plugin.SourceKind:
+		if hooks.RemoveSource != nil {
+			hooks.RemoveSource(pluginID, clearData)
+		}
+	case plugin.ThemeKind:
+		if hooks.RemoveTheme != nil {
+			hooks.RemoveTheme(pluginID)
+		}
+	}
 }
 
 func (c *PluginCatalog) applyFetchErrorLocked(err error) {

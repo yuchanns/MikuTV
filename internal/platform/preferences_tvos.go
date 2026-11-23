@@ -416,6 +416,15 @@ func (p *Preferences) SavePluginStorage(pluginID, entryID string, data []byte) e
 	return saveErr
 }
 
+func (p *Preferences) ClearPluginStorage(pluginID, entryID string) error {
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		p.defaults.Send(objc.RegisterName("removeObjectForKey:"), nsStringObj(pluginStorageKey(pluginID, entryID)))
+	})
+	return nil
+}
+
 func pluginStorageKey(pluginID, entryID string) string {
 	scope := "pluginStorage." + pluginID
 	if pluginID == entryID {

@@ -36,6 +36,7 @@ const (
 	pluginsDetailToggle  app.FocusID = "settings/plugins/detail-toggle"
 	pluginsDetailVersion app.FocusID = "settings/plugins/detail-version"
 	pluginsDetailSource  app.FocusID = "settings/plugins/detail-source"
+	pluginsDetailRemove  app.FocusID = "settings/plugins/detail-remove"
 	pluginsDetailCompat  app.FocusID = "settings/plugins/detail-compat"
 	pluginsDetailInstall app.FocusID = "settings/plugins/detail-install"
 
@@ -64,6 +65,7 @@ type pluginsSettingsUI struct {
 	repo                 pluginRepoDraft
 	install              pluginInstallState
 	update               pluginUpdateState
+	pendingAction        app.InstalledPlugin
 }
 
 func syncPluginsSettings(v *View) {
@@ -590,11 +592,18 @@ func (p *PageContext) renderInstalledPluginDetail(c *ui.Context, item app.Instal
 	ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
 
 	toggleNote := l.EnableReadyNote
-	if p.State != nil && p.State.CurrentEntry == item.ID {
+	if !item.Enabled {
+		toggleNote = l.EnableDisabledNote
+	} else if p.State != nil && p.State.CurrentEntry == item.ID {
 		toggleNote = l.EnableCurrentNote
 	}
+	instItem := item
 	p.danmakuToggleRow(c, pluginsDetailToggle, "plug", l.EnableLabel, toggleNote, item.Enabled, func() {
-		v.showSettingsFeedback(l.ToggleDeferred)
+		if instItem.Enabled {
+			v.openPluginDisableDialog(instItem)
+		} else {
+			v.enablePlugin(instItem)
+		}
 	})
 
 	versionIcon := "info"
@@ -614,7 +623,6 @@ func (p *PageContext) renderInstalledPluginDetail(c *ui.Context, item app.Instal
 			versionNote = l.CheckSingleUpdateNote
 		}
 	}
-	instItem := item
 	p.pluginRow(c, pluginsDetailVersion, "content", versionIcon, l.VersionLabel, versionNote, item.Version, func() {
 		v.openPluginUpdateDialog(instItem)
 	})
@@ -624,6 +632,12 @@ func (p *PageContext) renderInstalledPluginDetail(c *ui.Context, item app.Instal
 		repo = l.BuiltinRepo
 	}
 	p.pluginRow(c, pluginsDetailSource, "content", "repository", l.SourceLabel, "", repo, func() {})
+
+	if !item.Bundled {
+		p.pluginRow(c, pluginsDetailRemove, "content", "trash", l.RemoveLabel, l.RemoveNote, "", func() {
+			v.openPluginRemoveDialog(instItem)
+		})
+	}
 }
 
 func (p *PageContext) renderCatalogPluginDetail(c *ui.Context, item plugin.CatalogItem) {

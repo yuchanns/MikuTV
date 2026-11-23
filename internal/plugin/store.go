@@ -77,6 +77,151 @@ func (s *PackageStore) receiptsPath() string {
 	return filepath.Join(s.root, "receipts.json")
 }
 
+func (s *PackageStore) statePath() string {
+	return filepath.Join(s.root, "state.json")
+}
+
+type packageStoreState struct {
+	DisabledBundled []string `json:"disabledBundled,omitempty"`
+}
+
+func (s *PackageStore) loadStateLocked() (packageStoreState, error) {
+	raw, err := os.ReadFile(s.statePath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return packageStoreState{}, nil
+		}
+		return packageStoreState{}, err
+	}
+	var st packageStoreState
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return packageStoreState{}, fmt.Errorf("decode plugin store state: %w", err)
+	}
+	return st, nil
+}
+
+func (s *PackageStore) saveStateLocked(st packageStoreState) error {
+	if err := os.MkdirAll(s.root, 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(st, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := s.statePath() + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, s.statePath())
+}
+
+func (s *PackageStore) LoadDisabledBundled() ([]string, error) {
+	if s == nil || s.root == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.loadStateLocked()
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), st.DisabledBundled...), nil
+}
+
+func (s *PackageStore) SetBundledEnabled(id string, enabled bool) error {
+	if s == nil || s.root == "" {
+		return nil
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("plugin id is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	next := make([]string, 0, len(st.DisabledBundled)+1)
+	found := false
+	for _, existing := range st.DisabledBundled {
+		if strings.EqualFold(existing, id) {
+			found = true
+			if !enabled {
+				next = append(next, existing)
+			}
+			continue
+		}
+		next = append(next, existing)
+	}
+	if !enabled && !found {
+		next = append(next, id)
+	}
+	st.DisabledBundled = next
+	return s.saveStateLocked(st)
+}
+
+func (s *PackageStore) SetExternalEnabled(id string, enabled bool) (InstalledReceipt, error) {
+	if s == nil || s.root == "" {
+		return InstalledReceipt{}, fmt.Errorf("plugin package store is unavailable")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	receipts, err := s.loadReceiptsLocked()
+	if err != nil {
+		return InstalledReceipt{}, err
+	}
+	idx := -1
+	for i, r := range receipts {
+		if strings.EqualFold(r.ID, id) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return InstalledReceipt{}, os.ErrNotExist
+	}
+	updated := append([]InstalledReceipt(nil), receipts...)
+	updated[idx].Enabled = enabled
+	if err := s.saveReceiptsLocked(updated); err != nil {
+		return InstalledReceipt{}, err
+	}
+	return updated[idx], nil
+}
+
+// Remove deletes an externally installed plugin's receipt atomically first,
+// then removes its stored package directory from disk.
+func (s *PackageStore) Remove(id string) (InstalledReceipt, error) {
+	if s == nil || s.root == "" {
+		return InstalledReceipt{}, fmt.Errorf("plugin package store is unavailable")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	receipts, err := s.loadReceiptsLocked()
+	if err != nil {
+		return InstalledReceipt{}, err
+	}
+	idx := -1
+	for i, r := range receipts {
+		if strings.EqualFold(r.ID, id) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return InstalledReceipt{}, os.ErrNotExist
+	}
+	removed := receipts[idx]
+	updated := make([]InstalledReceipt, 0, len(receipts)-1)
+	updated = append(updated, receipts[:idx]...)
+	updated = append(updated, receipts[idx+1:]...)
+	if err := s.saveReceiptsLocked(updated); err != nil {
+		return InstalledReceipt{}, err
+	}
+	_ = os.RemoveAll(filepath.Dir(s.packageZipPath(removed.ID)))
+	return removed, nil
+}
+
 func (s *PackageStore) stagingDir() string {
 	return filepath.Join(s.root, ".staging")
 }

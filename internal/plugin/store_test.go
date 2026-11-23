@@ -278,3 +278,71 @@ func TestPackageStoreStageUpdatePreservesOriginalOnFailureAndBlocksKindChange(t 
 		t.Fatalf("LoadAll after update failed: loaded=%+v failures=%v", loaded, failures)
 	}
 }
+
+func TestPackageStoreDisableBundledExternalAndRemove(t *testing.T) {
+	root := t.TempDir()
+	store := NewPackageStore(root)
+
+	// 1. Bundled disable/re-enable persistence in state.json.
+	if err := store.SetBundledEnabled("sample-source", false); err != nil {
+		t.Fatalf("disable bundled: %v", err)
+	}
+	disabled, err := store.LoadDisabledBundled()
+	if err != nil || len(disabled) != 1 || disabled[0] != "sample-source" {
+		t.Fatalf("expected sample-source disabled, got %+v err=%v", disabled, err)
+	}
+	if err := store.SetBundledEnabled("sample-source", true); err != nil {
+		t.Fatalf("re-enable bundled: %v", err)
+	}
+	disabled, err = store.LoadDisabledBundled()
+	if err != nil || len(disabled) != 0 {
+		t.Fatalf("expected empty disabled list after re-enable, got %+v err=%v", disabled, err)
+	}
+
+	// 2. External enable/disable persistence & clean removal without affecting sibling plugins.
+	zipA := buildTestPluginZip(t, map[string]string{
+		"plugin.json": `{"id":"src-a","name":"Source A","kind":"source","version":"1.0.0","apiVersion":1,"minAppVersion":"0.1.0","main":"index.js","capabilities":["catalog.browse"]}`,
+		"index.js":    `export function browse() { return { collections: [] }; }`,
+	})
+	zipB := buildTestPluginZip(t, map[string]string{
+		"plugin.json": `{"id":"src-b","name":"Source B","kind":"source","version":"1.0.0","apiVersion":1,"minAppVersion":"0.1.0","main":"index.js","capabilities":["catalog.browse"]}`,
+		"index.js":    `export function browse() { return { collections: [] }; }`,
+	})
+	itemA := CatalogItem{
+		Repository: "demo/src-a",
+		Release:    ReleaseAsset{ReleaseID: 1, TagName: "v1.0.0", AssetID: 10, SHA256: fmt.Sprintf("%x", sha256.Sum256(zipA))},
+		Manifest:   Manifest{ID: "src-a", Name: "Source A", Kind: SourceKind, Version: "1.0.0"},
+	}
+	itemB := CatalogItem{
+		Repository: "demo/src-b",
+		Release:    ReleaseAsset{ReleaseID: 2, TagName: "v1.0.0", AssetID: 20, SHA256: fmt.Sprintf("%x", sha256.Sum256(zipB))},
+		Manifest:   Manifest{ID: "src-b", Name: "Source B", Kind: SourceKind, Version: "1.0.0"},
+	}
+	if _, _, err := store.StageAndInstall(context.Background(), zipA, itemA, "0.1.0", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.StageAndInstall(context.Background(), zipB, itemB, "0.1.0", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	recA, err := store.SetExternalEnabled("src-a", false)
+	if err != nil || recA.Enabled {
+		t.Fatalf("disable src-a failed: rec=%+v err=%v", recA, err)
+	}
+	loaded, failures := store.LoadAll(context.Background(), "0.1.0")
+	if len(failures) != 0 || len(loaded) != 2 || loaded[0].Receipt.Enabled || !loaded[1].Receipt.Enabled {
+		t.Fatalf("expected src-a disabled and src-b enabled on reload: %+v failures=%v", loaded, failures)
+	}
+
+	removed, err := store.Remove("src-a")
+	if err != nil || removed.ID != "src-a" {
+		t.Fatalf("Remove src-a failed: removed=%+v err=%v", removed, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "packages", "src-a")); !os.IsNotExist(err) {
+		t.Fatalf("expected src-a package dir removed, stat err=%v", err)
+	}
+	loaded, failures = store.LoadAll(context.Background(), "0.1.0")
+	if len(failures) != 0 || len(loaded) != 1 || loaded[0].Receipt.ID != "src-b" {
+		t.Fatalf("expected only src-b remaining after remove, got loaded=%+v failures=%v", loaded, failures)
+	}
+}

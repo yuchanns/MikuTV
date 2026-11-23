@@ -38,6 +38,8 @@ const (
 	PluginRepoInput       Page = "pluginRepoInput"
 	PluginInstallDialog   Page = "pluginInstallDialog"
 	PluginUpdateDialog    Page = "pluginUpdateDialog"
+	PluginDisableDialog   Page = "pluginDisableDialog"
+	PluginRemoveDialog    Page = "pluginRemoveDialog"
 	Account               Page = "account"
 	AccountDetails        Page = "accountDetails"
 	AccountMessages       Page = "accountMessages"

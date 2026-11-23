@@ -79,6 +79,8 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		{Page: app.PluginRepoInput, Section: "plugins"},
 		{Page: app.PluginInstallDialog, Section: "plugins"},
 		{Page: app.PluginUpdateDialog, Section: "plugins"},
+		{Page: app.PluginDisableDialog, Section: "plugins"},
+		{Page: app.PluginRemoveDialog, Section: "plugins"},
 		{Page: app.PrivacyConfirm, Section: "privacy"},
 		{Page: app.PrivacyDetails, Section: "about"},
 		{Page: app.AboutProject, Section: "about"},

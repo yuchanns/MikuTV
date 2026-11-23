@@ -98,6 +98,13 @@ type pluginLabels struct {
 	UpdatePendingTitle, UpdatePendingBody           string
 	UpdateFailedTitle, UpdateFailedPreserved        string
 	UpdateErrKindChanged, UpdateSuccessToast        string
+	EnableDisabledNote, RemoveLabel, RemoveNote     string
+	DisableDialogTitle, DisableDialogBody           string
+	DisableCurrentNote, DisableConfirmAction        string
+	RemoveDialogTitle, RemoveDialogBody             string
+	RemoveConfirmAction                             string
+	EnabledToast, DisabledToast, RemovedToast       string
+	ToggleFailedToast, RemoveFailedToast            string
 }
 
 type topShelfLabels struct {
