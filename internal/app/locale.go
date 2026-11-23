@@ -337,19 +337,22 @@ func (l *LocaleSettings) UpdateLocale(pkg *plugin.LocalePackage) error {
 	return nil
 }
 
-// DisableLocale falls back cleanly to Follow System if the active locale plugin is disabled.
+// DisableLocale falls back cleanly when the active locale plugin is disabled.
 func (l *LocaleSettings) DisableLocale(pluginID string) {
 	if l == nil {
 		return
 	}
 	l.mu.Lock()
 	changed := false
+	persisted := LocaleModeSystem
 	if strings.EqualFold(l.selection, pluginID) || strings.EqualFold(l.activeID, pluginID) {
 		l.selection = LocaleModeSystem
 		nextID, nextTag := l.resolveLocked()
 		if strings.EqualFold(nextID, pluginID) {
 			nextID, nextTag = LocaleBuiltinEN, LocaleBuiltinEN
+			l.selection = LocaleBuiltinEN
 		}
+		persisted = l.selection
 		l.activeID, l.activeTag = nextID, nextTag
 		changed = true
 	}
@@ -362,7 +365,7 @@ func (l *LocaleSettings) DisableLocale(pluginID string) {
 
 	if changed {
 		if store != nil {
-			_ = store.SaveLanguagePreference(LocaleModeSystem)
+			_ = store.SaveLanguagePreference(persisted)
 		}
 		if onLocale != nil {
 			onLocale(tag, payload)

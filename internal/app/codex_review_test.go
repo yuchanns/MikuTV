@@ -364,6 +364,53 @@ func TestChooseAudioTrackClearsSwitchingOnTimeout(t *testing.T) {
 	waitUntil(t, drain, func() bool { return !p.state.Switching && p.audioCancel == nil })
 }
 
+type blockingInlinePlaybackSession struct {
+	provider.Session
+	started chan struct{}
+}
+
+func (b *blockingInlinePlaybackSession) Browse(context.Context, provider.BrowseRequest) (provider.CollectionPage, error) {
+	return provider.CollectionPage{}, nil
+}
+
+func (b *blockingInlinePlaybackSession) Item(context.Context, provider.MediaRef) (provider.MediaItem, error) {
+	return provider.MediaItem{}, nil
+}
+
+func (b *blockingInlinePlaybackSession) ResolvePlayback(ctx context.Context, _ provider.PlaybackRequest) (provider.Playback, error) {
+	close(b.started)
+	<-ctx.Done()
+	return provider.Playback{}, ctx.Err()
+}
+
+func TestStartInlinePreviewTimeoutTransitionsToFailed(t *testing.T) {
+	queue := make(chan func(), 32)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+
+	sess := &blockingInlinePlaybackSession{started: make(chan struct{})}
+	cat := &Catalog{session: sess}
+	p := NewPlayback(cat, player.Engine{Open: func(string, float64) bool { return true }}, nil, func(fn func()) { queue <- fn }, func() {})
+	target := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "src", Kind: provider.Video, ID: "v1"}}
+	p.StartInlinePreview(target)
+	<-sess.started
+
+	if !p.inlineActive || !p.inlineState.Loading || p.inlineCancel == nil {
+		t.Fatalf("expected active loading preview before timeout, got active=%v state=%+v", p.inlineActive, p.inlineState)
+	}
+	// Simulate the 12s deadline expiring without StopInlinePreview superseding inlineRequest.
+	p.inlineCancel()
+	waitUntil(t, drain, func() bool { return !p.inlineActive && !p.inlineState.Loading && p.inlineState.Failed && p.inlineCancel == nil })
+}
+
 type fakePrivateReader struct {
 	list func(context.Context, provider.PrivateConversationsRequest) (provider.PrivateConversationsPage, error)
 	read func(context.Context, provider.PrivateMessagesRequest) (provider.PrivateMessagesPage, error)

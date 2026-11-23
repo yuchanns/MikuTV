@@ -86,3 +86,23 @@ func TestLocaleSettingsFollowSystemAutoMatchesInstalledPlugin(t *testing.T) {
 		t.Fatalf("expected en fallback after removing locale-ja, got %q", got)
 	}
 }
+
+func TestLocaleSettingsDisableSystemMatchedPackPersistsFallback(t *testing.T) {
+	store := plugin.NewPackageStore(filepath.Join(t.TempDir(), "plugins"))
+	jaPkg := makeTestLocalePackage(t, "locale-ja", "ja", "日本語")
+	ls := NewLocaleSettings(store, []*plugin.LocalePackage{jaPkg}, []string{"ja-JP", "en-US"}, nil, nil, nil)
+	if got := ls.ActiveTag(); got != "ja" {
+		t.Fatalf("expected initial system match ja, got %q", got)
+	}
+
+	// Disabling the system-matched pack must fall back to built-in en AND persist en so restart stays disabled.
+	ls.DisableLocale("locale-ja")
+	if got := ls.ActiveTag(); got != LocaleBuiltinEN {
+		t.Fatalf("expected en after DisableLocale, got %q", got)
+	}
+
+	restarted := NewLocaleSettings(store, []*plugin.LocalePackage{jaPkg}, []string{"ja-JP", "en-US"}, nil, nil, nil)
+	if got := restarted.ActiveTag(); got != LocaleBuiltinEN {
+		t.Fatalf("disabled locale pack reactivated after restart: got %q, want %q", got, LocaleBuiltinEN)
+	}
+}

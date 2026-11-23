@@ -1215,8 +1215,9 @@ func (p *Playback) StartInlinePreview(target provider.PlaybackTarget) {
 			result.Plan.Restriction == "" && !result.Plan.LiveEnded {
 			media, err = player.OpenMedia(ctx, result)
 		}
+		ctxErr := ctx.Err()
 		p.post(func() {
-			if !p.inlineActive || p.active || p.inlineRequest != reqID || ctx.Err() != nil {
+			if !p.inlineActive || p.active || p.inlineRequest != reqID {
 				if media != nil {
 					media.Close()
 				}
@@ -1224,6 +1225,9 @@ func (p *Playback) StartInlinePreview(target provider.PlaybackTarget) {
 			}
 			cancel()
 			p.inlineCancel = nil
+			if err == nil && ctxErr != nil {
+				err = ctxErr
+			}
 			if err != nil || media == nil {
 				if media != nil {
 					media.Close()
