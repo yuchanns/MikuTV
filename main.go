@@ -99,11 +99,17 @@ func main() {
 				Description: info.Description, Artwork: info.ID,
 				Capabilities: source.Capabilities(), Auth: source.AuthPresentation(),
 				Presentation: source.Presentation()}
-			store, err := plugin.NewStorage(preferences.LoadPluginStorage(entry.SourceID, entry.ID), func(data []byte) error {
-				return preferences.SavePluginStorage(entry.SourceID, entry.ID, data)
-			})
-			if err != nil {
-				return app.Entry{}, app.AboutPlugin{}, app.InstalledPlugin{}, err
+			sourcesMu.RLock()
+			store := stores[entry.ID]
+			sourcesMu.RUnlock()
+			if store == nil {
+				var err error
+				store, err = plugin.NewStorage(preferences.LoadPluginStorage(entry.SourceID, entry.ID), func(data []byte) error {
+					return preferences.SavePluginStorage(entry.SourceID, entry.ID, data)
+				})
+				if err != nil {
+					return app.Entry{}, app.AboutPlugin{}, app.InstalledPlugin{}, err
+				}
 			}
 			sourcesMu.Lock()
 			sourcesByID[entry.SourceID] = source
@@ -143,6 +149,8 @@ func main() {
 				installedPl.AssetID = receipt.AssetID
 				installedPl.SHA256 = receipt.SHA256
 				installedPl.Enabled = receipt.Enabled
+				installedPl.InstalledAt = receipt.InstalledAt
+				installedPl.UpdatedAt = receipt.UpdatedAt
 				installedPl.Permissions = append([]string(nil), receipt.Permissions...)
 				aboutPl.Bundled = false
 			}
@@ -230,7 +238,7 @@ func main() {
 			invalidate,
 		)
 		var view *tvui.View
-		pluginCatalog.SetInstaller(packageStore, appVersion, func(source *plugin.Source, receipt plugin.InstalledReceipt) error {
+		upsertRuntimeSource := func(source *plugin.Source, receipt plugin.InstalledReceipt, bumpGeneration bool) error {
 			entry, aboutPl, _, err := mountSource(source, &receipt)
 			if err != nil {
 				return err
@@ -241,6 +249,9 @@ func main() {
 				replaced := false
 				for _, existing := range current {
 					if strings.EqualFold(existing.ID, entry.ID) {
+						if bumpGeneration {
+							entry.Generation = existing.Generation + 1
+						}
 						next = append(next, entry)
 						replaced = true
 					} else {
@@ -266,6 +277,39 @@ func main() {
 				}
 			}
 			return nil
+		}
+		pluginCatalog.SetInstaller(packageStore, appVersion, func(source *plugin.Source, receipt plugin.InstalledReceipt) error {
+			return upsertRuntimeSource(source, receipt, false)
+		})
+		pluginCatalog.SetUpdateHooks(app.PluginUpdateHooks{
+			BeforeSourceUpdate: func(pluginID string) {
+				if !strings.EqualFold(state.CurrentEntry, pluginID) {
+					return
+				}
+				if view != nil && view.Playback != nil {
+					view.Playback.Close()
+				}
+				liveChat.Close()
+				live.Close()
+				series.Close()
+				following.Close()
+				search.Close()
+				privateMessages.Close()
+				activity.Close()
+				catalog.Close()
+			},
+			ApplySourceUpdate: func(source *plugin.Source, receipt plugin.InstalledReceipt) error {
+				if err := upsertRuntimeSource(source, receipt, true); err != nil {
+					return err
+				}
+				if view != nil && strings.EqualFold(state.CurrentEntry, receipt.ID) {
+					view.SyncEntry()
+				}
+				return nil
+			},
+			ApplyThemeUpdate: func(plugin.InstalledReceipt, []byte) error {
+				return plugin.ErrIncompatible
+			},
 		})
 		auth := app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
 			catalog.Reload()

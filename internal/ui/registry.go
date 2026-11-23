@@ -462,6 +462,19 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				}
 			},
 		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.PluginUpdateDialog, Section: "plugins"},
+				Parent: app.Route{Page: app.Settings, Section: "plugins"},
+				Modal:  true, Initial: focus(pluginUpdateConfirmBtn),
+			},
+			Component: pluginUpdateDialogPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
+			Leave: func(v *View) {
+				if v.PluginCatalog != nil {
+					v.PluginCatalog.CancelUpdate()
+				}
+			},
+		},
 	)
 	registrations = append(registrations, additional...)
 	p := &Pages{components: make(map[app.Route]Registration)}

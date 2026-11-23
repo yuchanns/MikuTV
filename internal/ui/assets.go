@@ -89,6 +89,15 @@ type pluginLabels struct {
 	InstallDone, InstallAlreadyInstalled            string
 	InstallErrDigest, InstallErrConflict            string
 	InstallErrIncompatible, InstallErrNetwork       string
+	CheckingUpdates, UpdatesBuiltinOnly             string
+	UpdatesFound, UpdatesCheckFailed                string
+	UpdateAvailableTag, UpdateAvailableNote         string
+	CheckSingleUpdateNote, UpdateDialogTitle        string
+	UpdateAddedPermission, UpdateNoNewPermissions   string
+	UpdateConfirmAllowAction, UpdateConfirmAction   string
+	UpdatePendingTitle, UpdatePendingBody           string
+	UpdateFailedTitle, UpdateFailedPreserved        string
+	UpdateErrKindChanged, UpdateSuccessToast        string
 }
 
 type topShelfLabels struct {

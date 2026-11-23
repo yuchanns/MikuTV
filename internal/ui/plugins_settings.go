@@ -63,6 +63,7 @@ type pluginsSettingsUI struct {
 	returnFocus          app.FocusID
 	repo                 pluginRepoDraft
 	install              pluginInstallState
+	update               pluginUpdateState
 }
 
 func syncPluginsSettings(v *View) {
@@ -234,11 +235,12 @@ func (p *PageContext) renderPluginsInstalled(c *ui.Context) {
 			p.State.Focus, v.reveal = pluginsDetailToggle, true
 		})
 	}
-	p.pluginRow(c, pluginsCheckUpdatesBtn, "content", "refresh", l.CheckUpdates, "", "", func() {
-		if v.PluginCatalog != nil {
-			v.PluginCatalog.Refresh()
-		}
-		v.showSettingsFeedback(l.UpdatesUpToDate)
+	checkLabel := l.CheckUpdates
+	if v.PluginCatalog != nil && v.PluginCatalog.Snapshot().CheckingUpdates {
+		checkLabel = l.CheckingUpdates
+	}
+	p.pluginRow(c, pluginsCheckUpdatesBtn, "content", "refresh", checkLabel, "", "", func() {
+		v.checkPluginUpdates()
 	})
 }
 
@@ -595,11 +597,27 @@ func (p *PageContext) renderInstalledPluginDetail(c *ui.Context, item app.Instal
 		v.showSettingsFeedback(l.ToggleDeferred)
 	})
 
-	versionNote := l.LatestVersionNote
-	if item.Bundled {
-		versionNote = l.BuiltinUpdateNote
+	versionIcon := "info"
+	versionNote := l.BuiltinUpdateNote
+	if !item.Bundled {
+		versionIcon = "refresh"
+		switch {
+		case v.PluginCatalog != nil && v.PluginCatalog.Snapshot().CheckingUpdates:
+			versionNote = l.CheckingUpdates
+		case item.AvailableUpdate != nil && item.AvailableUpdate.IncompatibleKind:
+			versionNote = l.UpdateErrKindChanged
+		case item.AvailableUpdate != nil && !item.AvailableUpdate.Item.Compatibility.Compatible:
+			versionNote = p.compatibilityDetailNote(item.AvailableUpdate.Item.Compatibility)
+		case item.AvailableUpdate != nil:
+			versionNote = fmt.Sprintf(l.UpdateAvailableNote, item.AvailableUpdate.Item.Manifest.Version)
+		default:
+			versionNote = l.CheckSingleUpdateNote
+		}
 	}
-	p.pluginRow(c, pluginsDetailVersion, "content", "info", l.VersionLabel, versionNote, item.Version, func() {})
+	instItem := item
+	p.pluginRow(c, pluginsDetailVersion, "content", versionIcon, l.VersionLabel, versionNote, item.Version, func() {
+		v.openPluginUpdateDialog(instItem)
+	})
 
 	repo := item.Repository
 	if item.Bundled || repo == "" {
@@ -819,6 +837,9 @@ func (p *PageContext) installedPluginSubtitle(item app.InstalledPlugin) string {
 	}
 	if item.Version != "" {
 		parts = append(parts, item.Version)
+	}
+	if !item.Bundled && item.AvailableUpdate != nil && item.AvailableUpdate.Applicable() {
+		parts = append(parts, l.UpdateAvailableTag)
 	}
 	return strings.Join(parts, " \u00b7 ")
 }

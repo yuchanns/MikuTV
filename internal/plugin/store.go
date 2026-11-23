@@ -25,8 +25,31 @@ type InstalledReceipt struct {
 	SHA256      string   `json:"sha256"`
 	Enabled     bool     `json:"enabled"`
 	InstalledAt int64    `json:"installedAt"`
+	UpdatedAt   int64    `json:"updatedAt,omitempty"`
 	License     string   `json:"license,omitempty"`
 	Permissions []string `json:"permissions,omitempty"`
+}
+
+// AddedPermissions returns normalized network domains present in incoming that
+// were not previously approved in existing.
+func AddedPermissions(existing, incoming []string) []string {
+	known := make(map[string]bool, len(existing))
+	for _, host := range existing {
+		if norm := strings.ToLower(strings.TrimSpace(host)); norm != "" {
+			known[norm] = true
+		}
+	}
+	seen := make(map[string]bool, len(incoming))
+	var added []string
+	for _, host := range incoming {
+		norm := strings.ToLower(strings.TrimSpace(host))
+		if norm == "" || known[norm] || seen[norm] {
+			continue
+		}
+		seen[norm] = true
+		added = append(added, norm)
+	}
+	return added
 }
 
 type InstalledPackage struct {
@@ -289,4 +312,176 @@ func (s *PackageStore) StageAndInstall(
 		return nil, InstalledReceipt{}, err
 	}
 	return src, receipt, nil
+}
+
+// StageAndUpdate validates a downloaded update archive in staging without
+// executing JS, enforcing pinned SHA-256, same repository, same plugin ID,
+// unchanged kind, tag/version alignment, and host compatibility before
+// atomically replacing the stored package. On any failure or cancellation,
+// the original package and receipt remain completely intact.
+func (s *PackageStore) StageAndUpdate(
+	ctx context.Context,
+	data []byte,
+	existing InstalledReceipt,
+	target CatalogItem,
+	appVersion string,
+) (*Source, InstalledReceipt, error) {
+	if s == nil || s.root == "" {
+		return nil, InstalledReceipt{}, fmt.Errorf("plugin package store is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, InstalledReceipt{}, err
+	}
+	if strings.TrimSpace(existing.ID) == "" || strings.TrimSpace(existing.Repository) == "" {
+		return nil, InstalledReceipt{}, fmt.Errorf("invalid installed receipt for update")
+	}
+	if !strings.EqualFold(strings.TrimSpace(existing.Repository), strings.TrimSpace(target.Repository)) {
+		return nil, InstalledReceipt{}, fmt.Errorf("%w: update repository %q does not match %q", ErrSourceConflict, target.Repository, existing.Repository)
+	}
+	if err := os.MkdirAll(s.stagingDir(), 0o755); err != nil {
+		return nil, InstalledReceipt{}, err
+	}
+	stagedFile, err := os.CreateTemp(s.stagingDir(), "update-*.zip")
+	if err != nil {
+		return nil, InstalledReceipt{}, err
+	}
+	stagedPath := stagedFile.Name()
+	cleanupStaged := true
+	defer func() {
+		if cleanupStaged {
+			_ = os.Remove(stagedPath)
+		}
+	}()
+	if _, err := stagedFile.Write(data); err != nil {
+		_ = stagedFile.Close()
+		return nil, InstalledReceipt{}, err
+	}
+	if err := stagedFile.Close(); err != nil {
+		return nil, InstalledReceipt{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, InstalledReceipt{}, err
+	}
+
+	digest := sha256.Sum256(data)
+	digestHex := fmt.Sprintf("%x", digest)
+	if expected := strings.ToLower(strings.TrimSpace(target.Release.SHA256)); expected != "" && digestHex != expected {
+		return nil, InstalledReceipt{}, fmt.Errorf("%w: got %s want %s", ErrDigestMismatch, digestHex, expected)
+	}
+
+	// Inspect header first to authoritatively block kind changes before kind-specific validation.
+	inspected, err := InspectPackage(data, appVersion)
+	if err != nil {
+		return nil, InstalledReceipt{}, err
+	}
+	if !strings.EqualFold(inspected.Manifest.ID, existing.ID) {
+		return nil, InstalledReceipt{}, fmt.Errorf("%w: package id %q does not match installed %q", ErrSourceConflict, inspected.Manifest.ID, existing.ID)
+	}
+	if inspected.Manifest.Kind != existing.Kind {
+		return nil, InstalledReceipt{}, fmt.Errorf("%w: %s -> %s", ErrKindChanged, existing.Kind, inspected.Manifest.Kind)
+	}
+	if target.Manifest.Version != "" && inspected.Manifest.Version != target.Manifest.Version {
+		return nil, InstalledReceipt{}, fmt.Errorf("package version %q does not match pinned %q", inspected.Manifest.Version, target.Manifest.Version)
+	}
+	if !ReleaseVersionMatches(target.Release.TagName, inspected.Manifest.Version) {
+		return nil, InstalledReceipt{}, fmt.Errorf("%w: release %q vs manifest %q", ErrVersionTagMismatch, target.Release.TagName, inspected.Manifest.Version)
+	}
+	if !inspected.Compatibility.Compatible {
+		return nil, InstalledReceipt{}, fmt.Errorf("%w: %s", ErrIncompatible, inspected.Compatibility.Code)
+	}
+
+	var src *Source
+	var perms []string
+	switch existing.Kind {
+	case SourceKind:
+		opened, err := Open(ctx, data, appVersion)
+		if err != nil {
+			return nil, InstalledReceipt{}, err
+		}
+		src = opened
+		perms = append([]string(nil), opened.manifest.Permissions.Network...)
+	default:
+		return nil, InstalledReceipt{}, fmt.Errorf("%w: unsupported kind %q", ErrIncompatible, existing.Kind)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, InstalledReceipt{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	receipts, err := s.loadReceiptsLocked()
+	if err != nil {
+		return nil, InstalledReceipt{}, err
+	}
+	idx := -1
+	for i, r := range receipts {
+		if strings.EqualFold(r.ID, existing.ID) {
+			if !strings.EqualFold(r.Repository, existing.Repository) {
+				return nil, InstalledReceipt{}, fmt.Errorf("%w: %s", ErrSourceConflict, existing.ID)
+			}
+			if r.Kind != existing.Kind {
+				return nil, InstalledReceipt{}, fmt.Errorf("%w: %s -> %s", ErrKindChanged, r.Kind, existing.Kind)
+			}
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil, InstalledReceipt{}, fmt.Errorf("installed plugin %s not found in receipts", existing.ID)
+	}
+
+	destPath := s.packageZipPath(existing.ID)
+	destDir := filepath.Dir(destPath)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return nil, InstalledReceipt{}, err
+	}
+	backupPath := destPath + ".bak"
+	hadBackup := false
+	if _, err := os.Stat(destPath); err == nil {
+		_ = os.Remove(backupPath)
+		if err := os.Rename(destPath, backupPath); err != nil {
+			return nil, InstalledReceipt{}, err
+		}
+		hadBackup = true
+	}
+	if err := os.Rename(stagedPath, destPath); err != nil {
+		if hadBackup {
+			_ = os.Rename(backupPath, destPath)
+		}
+		return nil, InstalledReceipt{}, err
+	}
+	cleanupStaged = false
+
+	prev := receipts[idx]
+	nextReceipt := InstalledReceipt{
+		ID:          inspected.Manifest.ID,
+		Name:        inspected.Manifest.Name,
+		Description: inspected.Manifest.Description,
+		Kind:        inspected.Manifest.Kind,
+		Version:     inspected.Manifest.Version,
+		Repository:  prev.Repository,
+		ReleaseID:   target.Release.ReleaseID,
+		TagName:     target.Release.TagName,
+		AssetID:     target.Release.AssetID,
+		SHA256:      digestHex,
+		Enabled:     prev.Enabled,
+		InstalledAt: prev.InstalledAt,
+		UpdatedAt:   time.Now().Unix(),
+		License:     inspected.Manifest.License,
+		Permissions: perms,
+	}
+	updated := append([]InstalledReceipt(nil), receipts...)
+	updated[idx] = nextReceipt
+	if err := s.saveReceiptsLocked(updated); err != nil {
+		_ = os.Remove(destPath)
+		if hadBackup {
+			_ = os.Rename(backupPath, destPath)
+		}
+		return nil, InstalledReceipt{}, err
+	}
+	if hadBackup {
+		_ = os.Remove(backupPath)
+	}
+	return src, nextReceipt, nil
 }

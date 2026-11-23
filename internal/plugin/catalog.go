@@ -34,6 +34,7 @@ var (
 	ErrVersionTagMismatch = errors.New("release tag does not match manifest version")
 	ErrDigestMismatch     = errors.New("downloaded archive digest mismatch")
 	ErrSourceConflict     = errors.New("plugin id is already bound to another source")
+	ErrKindChanged        = errors.New("plugin update cannot change kind")
 )
 
 func ParseRepository(raw string) (string, bool) {
@@ -99,6 +100,17 @@ func ReleaseVersionMatches(tagName, manifestVersion string) bool {
 	}
 	tag = strings.TrimPrefix(strings.TrimPrefix(tag, "v"), "V")
 	return tag == ver
+}
+
+// CompareVersions compares semantic versions candidate vs current.
+// Returns +1 if candidate > current, 0 if equal, -1 if candidate < current.
+func CompareVersions(current, candidate string) int {
+	cur := strings.TrimPrefix(strings.TrimSpace(current), "v")
+	cand := strings.TrimPrefix(strings.TrimSpace(candidate), "v")
+	if !validVersion(cur) || !validVersion(cand) {
+		return 0
+	}
+	return semver.Compare("v"+cand, "v"+cur)
 }
 
 type CompatibilityCode string

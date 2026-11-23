@@ -545,3 +545,207 @@ func TestPluginsInstallWorkflowRepoConfirmFailRetrySuccessAndEntries(t *testing.
 			state.Route, state.Focus)
 	}
 }
+
+func TestPluginsUpdateWorkflowCheckExpandedPermissionsFailPreserveRetryAndHotReload(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := app.NewState([]app.Entry{{
+		ID: "sample-source", SourceID: "sample-source", Name: "SampleSource Source", Description: "Built-in",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog},
+	}}, "sample-source", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v1Zip := buildUIPluginZip(t, "media", "Demo Media", "1.0.0", []string{"api.demo.example"})
+	v1SHA := fmt.Sprintf("%x", sha256.Sum256(v1Zip))
+	v1Item := plugin.CatalogItem{
+		Repository:    "demo/media-source",
+		Permissions:   []string{"api.demo.example"},
+		Release:       plugin.ReleaseAsset{ReleaseID: 1, TagName: "v1.0.0", AssetID: 101, AssetName: "plugin.zip", SHA256: v1SHA},
+		Manifest:      plugin.Manifest{ID: "media", Name: "Demo Media", Description: "v1", Kind: plugin.SourceKind, Version: "1.0.0", APIVersion: 1, MinAppVersion: "0.1.0", License: "MIT"},
+		Compatibility: plugin.Compatibility{Compatible: true, Code: plugin.CompatibleOK},
+	}
+
+	v2Zip := buildUIPluginZip(t, "media", "Demo Media", "1.1.0", []string{"api.demo.example", "images.demo.example"})
+	v2SHA := fmt.Sprintf("%x", sha256.Sum256(v2Zip))
+	v2Item := plugin.CatalogItem{
+		Repository:    "demo/media-source",
+		Permissions:   []string{"api.demo.example", "images.demo.example"},
+		Release:       plugin.ReleaseAsset{ReleaseID: 2, TagName: "v1.1.0", AssetID: 102, AssetName: "plugin.zip", SHA256: v2SHA},
+		Manifest:      plugin.Manifest{ID: "media", Name: "Demo Media", Description: "v2", Kind: plugin.SourceKind, Version: "1.1.0", APIVersion: 1, MinAppVersion: "0.1.0", License: "MIT"},
+		Compatibility: plugin.Compatibility{Compatible: true, Code: plugin.CompatibleOK},
+	}
+
+	fetcher := &uiPluginFetcher{
+		resolved: map[string]plugin.CatalogItem{"demo/media-source": v1Item},
+		assets:   map[int64][]byte{101: v1Zip, 102: v2Zip},
+	}
+	queue := make(chan func(), 64)
+	drain := func(cond func() bool) {
+		t.Helper()
+		deadline := time.After(3 * time.Second)
+		for !cond() {
+			select {
+			case fn := <-queue:
+				fn()
+			case <-deadline:
+				t.Fatal("timed out waiting for async update state")
+			}
+		}
+	}
+
+	pkgRoot := filepath.Join(t.TempDir(), "plugins")
+	pkgStore := plugin.NewPackageStore(pkgRoot)
+	pluginCat := app.NewPluginCatalog(
+		[]app.InstalledPlugin{{
+			ID: "sample-source", Name: "SampleSource Source", Kind: plugin.SourceKind, Version: "0.1.0", Bundled: true, Enabled: true,
+		}},
+		fetcher,
+		nil,
+		func(fn func()) { queue <- fn },
+		func() {},
+	)
+	t.Cleanup(pluginCat.Close)
+
+	var view *View
+	var stoppedSourceID string
+	var appliedGen uint64
+	pluginCat.SetInstaller(pkgStore, "0.1.0", func(src *plugin.Source, receipt plugin.InstalledReceipt) error {
+		info := src.Manifest()
+		next := append(append([]app.Entry(nil), state.Entries()...), app.Entry{
+			ID: info.ID, SourceID: info.ID, Name: info.Name, Description: info.Description,
+			Artwork: info.ID, Capabilities: src.Capabilities(),
+		})
+		state.UpdateEntries(next)
+		view.About.Plugins = append(view.About.Plugins, app.AboutPlugin{
+			ID: info.ID, Name: info.Name, Kind: string(info.Kind), Version: info.Version, License: info.License,
+		})
+		return nil
+	})
+	pluginCat.SetUpdateHooks(app.PluginUpdateHooks{
+		BeforeSourceUpdate: func(pluginID string) { stoppedSourceID = pluginID },
+		ApplySourceUpdate: func(src *plugin.Source, receipt plugin.InstalledReceipt) error {
+			info := src.Manifest()
+			cur := state.Entries()
+			next := make([]app.Entry, len(cur))
+			for i, e := range cur {
+				if e.ID == info.ID {
+					e.Description = info.Description
+					e.Generation++
+					appliedGen = e.Generation
+				}
+				next[i] = e
+			}
+			state.UpdateEntries(next)
+			for i := range view.About.Plugins {
+				if view.About.Plugins[i].ID == info.ID {
+					view.About.Plugins[i].Version = info.Version
+				}
+			}
+			return nil
+		},
+	})
+
+	view = newTestView(t, Options{
+		State:         state,
+		PluginCatalog: pluginCat,
+		Pages:         pages,
+		Assets:        assets,
+		Theme:         theme.Default(),
+		Version:       "0.1.0",
+		About: app.AboutInfo{
+			Version: "0.1.0",
+			Plugins: []app.AboutPlugin{{ID: "sample-source", Name: "SampleSource Source", Kind: "source", Version: "0.1.0", Bundled: true}},
+		},
+	})
+
+	// Install v1 first.
+	installed := false
+	pluginCat.Install(v1Item, func(out app.PluginInstallOutcome) {
+		if out.Err != nil {
+			t.Fatalf("install v1: %v", out.Err)
+		}
+		installed = true
+	})
+	drain(func() bool { return installed })
+
+	// Publish v2 with expanded permissions on mock server and trigger Check Updates from UI.
+	fetcher.mu.Lock()
+	fetcher.resolved["demo/media-source"] = v2Item
+	fetcher.mu.Unlock()
+
+	state.Navigate(app.Route{Page: app.Settings, Section: "plugins"})
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	tester.Frame()
+
+	view.State.Focus = pluginsCheckUpdatesBtn
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	drain(func() bool {
+		inst, ok := pluginCat.FindInstalled("media")
+		return ok && inst.AvailableUpdate != nil
+	})
+	tester.Frame()
+
+	// Open media detail -> click Version row -> opens PluginUpdateDialog in confirm phase with expanded permission.
+	view.State.Focus = pluginsInstalledFocus("media")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if view.pluginsUI.selectedInstalledID != "media" {
+		t.Fatalf("expected installed detail for media, got %q", view.pluginsUI.selectedInstalledID)
+	}
+	view.State.Focus = pluginsDetailVersion
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.PluginUpdateDialog || view.pluginsUI.update.phase != pluginUpdateConfirm || !view.pluginsUI.update.offer.HasPermissionExpansion() {
+		t.Fatalf("expected update confirm modal with permission expansion, got page=%v phase=%v", state.Page, view.pluginsUI.update.phase)
+	}
+
+	// Simulate network failure -> preserves v1.0.0, does NOT stop source, focuses Retry.
+	fetcher.mu.Lock()
+	fetcher.downloadErr = errors.New("connection dropped")
+	fetcher.mu.Unlock()
+	view.State.Focus = pluginUpdateConfirmBtn
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	drain(func() bool { return view.pluginsUI.update.phase == pluginUpdateError })
+	tester.Frame()
+	if state.Focus != pluginUpdateRetryBtn || stoppedSourceID != "" {
+		t.Fatalf("expected retry focus without stopping source, got focus=%q stopped=%q", state.Focus, stoppedSourceID)
+	}
+	if cur, _ := pluginCat.FindInstalled("media"); cur.Version != "1.0.0" {
+		t.Fatalf("failed update altered installed version: %+v", cur)
+	}
+
+	// Clear network failure and press Retry -> updates cleanly to 1.1.0, bumps Generation, closes modal to detail!
+	fetcher.mu.Lock()
+	fetcher.downloadErr = nil
+	fetcher.mu.Unlock()
+	tester.Key(0, ui.KeyEnter)
+	drain(func() bool {
+		cur, ok := pluginCat.FindInstalled("media")
+		return ok && cur.Version == "1.1.0"
+	})
+	tester.Frame()
+	if state.Page != app.Settings || state.Focus != pluginsDetailVersion {
+		t.Fatalf("expected return to detail version row after update, got page=%v focus=%q", state.Page, state.Focus)
+	}
+	if stoppedSourceID != "media" || appliedGen == 0 {
+		t.Fatalf("expected source stop hook and bumped entry generation, got stopped=%q gen=%d", stoppedSourceID, appliedGen)
+	}
+	if view.About.Plugins[1].Version != "1.1.0" {
+		t.Fatalf("expected About.Plugins updated to 1.1.0, got %+v", view.About.Plugins)
+	}
+	if staging, err := os.ReadDir(filepath.Join(pkgRoot, ".staging")); err == nil && len(staging) != 0 {
+		t.Fatalf("expected empty staging directory, got %d files", len(staging))
+	}
+}

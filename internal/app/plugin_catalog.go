@@ -26,23 +26,43 @@ const (
 	PluginCatalogFailed
 )
 
+type PluginUpdateOffer struct {
+	Item               plugin.CatalogItem
+	AddedPermissions   []string
+	IncompatibleKind   bool
+	IncompatibleReason plugin.CompatibilityCode
+	RequiredAppVersion string
+	CheckedAt          time.Time
+}
+
+func (o *PluginUpdateOffer) HasPermissionExpansion() bool {
+	return o != nil && len(o.AddedPermissions) > 0
+}
+
+func (o *PluginUpdateOffer) Applicable() bool {
+	return o != nil && !o.IncompatibleKind && o.Item.Compatibility.Compatible
+}
+
 type InstalledPlugin struct {
-	ID           string
-	Name         string
-	Description  string
-	Kind         plugin.Kind
-	Version      string
-	Repository   string
-	ReleaseID    int64
-	TagName      string
-	AssetID      int64
-	SHA256       string
-	Bundled      bool
-	Enabled      bool
-	License      string
-	SourceCommit string
-	Permissions  []string
-	Capabilities provider.Capabilities
+	ID              string
+	Name            string
+	Description     string
+	Kind            plugin.Kind
+	Version         string
+	Repository      string
+	ReleaseID       int64
+	TagName         string
+	AssetID         int64
+	SHA256          string
+	Bundled         bool
+	Enabled         bool
+	InstalledAt     int64
+	UpdatedAt       int64
+	License         string
+	SourceCommit    string
+	Permissions     []string
+	Capabilities    provider.Capabilities
+	AvailableUpdate *PluginUpdateOffer
 }
 
 type PluginInstallOutcome struct {
@@ -50,6 +70,21 @@ type PluginInstallOutcome struct {
 	Err       error
 	Canceled  bool
 	Retryable bool
+}
+
+type PluginUpdateOutcome struct {
+	Receipt   plugin.InstalledReceipt
+	Err       error
+	Canceled  bool
+	Retryable bool
+}
+
+// PluginUpdateHooks dispatches post-commit lifecycle actions by plugin kind so
+// theme updates never pass through content-source playback/session teardown.
+type PluginUpdateHooks struct {
+	BeforeSourceUpdate func(pluginID string)
+	ApplySourceUpdate  func(src *plugin.Source, receipt plugin.InstalledReceipt) error
+	ApplyThemeUpdate   func(receipt plugin.InstalledReceipt, data []byte) error
 }
 
 type PluginCatalogCacheData struct {
@@ -76,6 +111,8 @@ type PluginCatalogFetcher interface {
 type PluginCatalogSnapshot struct {
 	Status           PluginCatalogStatus
 	LoadingMore      bool
+	CheckingUpdates  bool
+	UpdatesCheckedAt time.Time
 	HasCache         bool
 	CachedAt         time.Time
 	RateLimitResetAt time.Time
@@ -88,33 +125,40 @@ type PluginCatalogSnapshot struct {
 }
 
 type PluginCatalog struct {
-	fetcher    PluginCatalogFetcher
-	cache      PluginCatalogCache
-	pkgStore   *plugin.PackageStore
-	appVersion string
-	onMounted  func(*plugin.Source, plugin.InstalledReceipt) error
-	post       func(func())
-	invalidate func()
+	fetcher     PluginCatalogFetcher
+	cache       PluginCatalogCache
+	pkgStore    *plugin.PackageStore
+	appVersion  string
+	onMounted   func(*plugin.Source, plugin.InstalledReceipt) error
+	updateHooks PluginUpdateHooks
+	post        func(func())
+	invalidate  func()
 
-	mu               sync.Mutex
-	cacheMu          sync.Mutex
-	installed        []InstalledPlugin
-	status           PluginCatalogStatus
-	loadingMore      bool
-	items            []plugin.CatalogItem
-	etag             string
-	cachedAt         int64
-	page             int
-	totalCount       int
-	hasMore          bool
-	rateLimitResetAt time.Time
-	lastErr          string
-	gen              uint64
-	cancel           context.CancelFunc
-	resolveGen       uint64
-	resolveCancel    context.CancelFunc
-	installGen       uint64
-	installCancel    context.CancelFunc
+	mu                sync.Mutex
+	cacheMu           sync.Mutex
+	installed         []InstalledPlugin
+	status            PluginCatalogStatus
+	loadingMore       bool
+	checkingUpdates   bool
+	updatesCheckedAt  time.Time
+	items             []plugin.CatalogItem
+	etag              string
+	cachedAt          int64
+	page              int
+	totalCount        int
+	hasMore           bool
+	rateLimitResetAt  time.Time
+	lastErr           string
+	gen               uint64
+	cancel            context.CancelFunc
+	resolveGen        uint64
+	resolveCancel     context.CancelFunc
+	installGen        uint64
+	installCancel     context.CancelFunc
+	updateCheckGen    uint64
+	updateCheckCancel context.CancelFunc
+	updateGen         uint64
+	updateCancel      context.CancelFunc
 }
 
 func (c *PluginCatalog) SetInstaller(
@@ -127,6 +171,12 @@ func (c *PluginCatalog) SetInstaller(
 	c.pkgStore = store
 	c.appVersion = appVersion
 	c.onMounted = onMounted
+}
+
+func (c *PluginCatalog) SetUpdateHooks(hooks PluginUpdateHooks) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.updateHooks = hooks
 }
 
 func NewPluginCatalog(
@@ -170,16 +220,32 @@ func (c *PluginCatalog) Snapshot() PluginCatalogSnapshot {
 	return PluginCatalogSnapshot{
 		Status:           c.status,
 		LoadingMore:      c.loadingMore,
+		CheckingUpdates:  c.checkingUpdates,
+		UpdatesCheckedAt: c.updatesCheckedAt,
 		HasCache:         len(c.items) > 0,
 		CachedAt:         cachedAt,
 		RateLimitResetAt: c.rateLimitResetAt,
 		Page:             c.page,
 		TotalCount:       c.totalCount,
 		HasMore:          c.hasMore,
-		Installed:        append([]InstalledPlugin(nil), c.installed...),
+		Installed:        cloneInstalledPlugins(c.installed),
 		Items:            append([]plugin.CatalogItem(nil), c.items...),
 		Error:            c.lastErr,
 	}
+}
+
+func cloneInstalledPlugins(src []InstalledPlugin) []InstalledPlugin {
+	out := make([]InstalledPlugin, len(src))
+	for i, item := range src {
+		item.Permissions = append([]string(nil), item.Permissions...)
+		if item.AvailableUpdate != nil {
+			offer := *item.AvailableUpdate
+			offer.AddedPermissions = append([]string(nil), offer.AddedPermissions...)
+			item.AvailableUpdate = &offer
+		}
+		out[i] = item
+	}
+	return out
 }
 
 func (c *PluginCatalog) FindInstalled(id string) (InstalledPlugin, bool) {
@@ -386,13 +452,20 @@ func (c *PluginCatalog) Close() {
 	cancel := c.cancel
 	resolveCancel := c.resolveCancel
 	installCancel := c.installCancel
+	updateCheckCancel := c.updateCheckCancel
+	updateCancel := c.updateCancel
 	c.cancel = nil
 	c.resolveCancel = nil
 	c.installCancel = nil
+	c.updateCheckCancel = nil
+	c.updateCancel = nil
 	c.gen++
 	c.resolveGen++
 	c.installGen++
+	c.updateCheckGen++
+	c.updateGen++
 	c.loadingMore = false
+	c.checkingUpdates = false
 	if c.status == PluginCatalogLoading {
 		if len(c.items) > 0 {
 			c.status = PluginCatalogReady
@@ -409,6 +482,12 @@ func (c *PluginCatalog) Close() {
 	}
 	if installCancel != nil {
 		installCancel()
+	}
+	if updateCheckCancel != nil {
+		updateCheckCancel()
+	}
+	if updateCancel != nil {
+		updateCancel()
 	}
 }
 
@@ -615,6 +694,8 @@ func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInsta
 				SHA256:       receipt.SHA256,
 				Bundled:      false,
 				Enabled:      receipt.Enabled,
+				InstalledAt:  receipt.InstalledAt,
+				UpdatedAt:    receipt.UpdatedAt,
 				License:      receipt.License,
 				Permissions:  append([]string(nil), receipt.Permissions...),
 				Capabilities: src.Capabilities(),
@@ -648,6 +729,375 @@ func (c *PluginCatalog) finishInstall(gen uint64, outcome PluginInstallOutcome, 
 			return
 		}
 		c.installCancel = nil
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(outcome)
+		}
+		c.notify()
+	})
+}
+
+func (c *PluginCatalog) CancelUpdateCheck() {
+	c.mu.Lock()
+	cancel := c.updateCheckCancel
+	c.updateCheckCancel = nil
+	c.updateCheckGen++
+	c.checkingUpdates = false
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (c *PluginCatalog) CancelUpdate() {
+	c.mu.Lock()
+	cancel := c.updateCancel
+	c.updateCancel = nil
+	c.updateGen++
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func evaluatePluginUpdate(inst InstalledPlugin, resolved plugin.CatalogItem, now time.Time) *PluginUpdateOffer {
+	if plugin.CompareVersions(inst.Version, resolved.Manifest.Version) <= 0 {
+		return nil
+	}
+	offer := &PluginUpdateOffer{
+		Item:               resolved,
+		AddedPermissions:   plugin.AddedPermissions(inst.Permissions, resolved.Permissions),
+		IncompatibleKind:   resolved.Manifest.Kind != inst.Kind,
+		IncompatibleReason: resolved.Compatibility.Code,
+		RequiredAppVersion: resolved.Compatibility.RequiredAppVersion,
+		CheckedAt:          now,
+	}
+	return offer
+}
+
+// CheckUpdates checks official Releases from each non-bundled plugin's original
+// repository and records any newer version offer without changing installed state.
+func (c *PluginCatalog) CheckUpdates(onDone func(found int, checked int, err error)) {
+	c.checkUpdatesFor("", func(found, checked int, _ *PluginUpdateOffer, err error) {
+		if onDone != nil {
+			onDone(found, checked, err)
+		}
+	})
+}
+
+// CheckPluginUpdate checks a single non-bundled installed plugin against its
+// recorded original repository.
+func (c *PluginCatalog) CheckPluginUpdate(pluginID string, onDone func(*PluginUpdateOffer, error)) {
+	c.checkUpdatesFor(pluginID, func(_, _ int, offer *PluginUpdateOffer, err error) {
+		if onDone != nil {
+			onDone(offer, err)
+		}
+	})
+}
+
+func (c *PluginCatalog) checkUpdatesFor(onlyID string, onDone func(found int, checked int, single *PluginUpdateOffer, err error)) {
+	c.mu.Lock()
+	if c.fetcher == nil {
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(0, 0, nil, errors.New("plugin catalog unavailable"))
+		}
+		return
+	}
+	var targets []InstalledPlugin
+	for _, inst := range c.installed {
+		if inst.Bundled || strings.TrimSpace(inst.Repository) == "" {
+			continue
+		}
+		if onlyID != "" && !strings.EqualFold(inst.ID, onlyID) {
+			continue
+		}
+		targets = append(targets, inst)
+	}
+	if len(targets) == 0 {
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(0, 0, nil, nil)
+		}
+		return
+	}
+	if c.updateCheckCancel != nil {
+		c.updateCheckCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	c.updateCheckCancel = cancel
+	c.updateCheckGen++
+	gen := c.updateCheckGen
+	c.checkingUpdates = true
+	c.mu.Unlock()
+	c.notify()
+
+	go func() {
+		defer cancel()
+		type checkResult struct {
+			id    string
+			offer *PluginUpdateOffer
+			err   error
+		}
+		results := make([]checkResult, len(targets))
+		now := time.Now()
+		for i, inst := range targets {
+			if ctx.Err() != nil {
+				return
+			}
+			resolved, err := c.fetcher.ResolveRepository(ctx, inst.Repository)
+			if err != nil {
+				results[i] = checkResult{id: inst.ID, err: err}
+				continue
+			}
+			if !strings.EqualFold(resolved.Manifest.ID, inst.ID) {
+				results[i] = checkResult{id: inst.ID, err: fmt.Errorf("%w: %s", plugin.ErrSourceConflict, resolved.Manifest.ID)}
+				continue
+			}
+			results[i] = checkResult{
+				id:    inst.ID,
+				offer: evaluatePluginUpdate(inst, resolved, now),
+			}
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		c.post(func() {
+			c.mu.Lock()
+			if c.updateCheckGen != gen {
+				c.mu.Unlock()
+				return
+			}
+			c.updateCheckCancel = nil
+			c.checkingUpdates = false
+			c.updatesCheckedAt = now
+
+			var firstErr error
+			found := 0
+			var singleOffer *PluginUpdateOffer
+			for _, res := range results {
+				if res.err != nil {
+					if firstErr == nil {
+						firstErr = res.err
+					}
+					continue
+				}
+				for i := range c.installed {
+					if strings.EqualFold(c.installed[i].ID, res.id) {
+						c.installed[i].AvailableUpdate = res.offer
+						if res.offer != nil {
+							found++
+							if onlyID != "" && strings.EqualFold(res.id, onlyID) {
+								copied := *res.offer
+								copied.AddedPermissions = append([]string(nil), res.offer.AddedPermissions...)
+								singleOffer = &copied
+							}
+						}
+						break
+					}
+				}
+			}
+			c.mu.Unlock()
+			if onDone != nil {
+				onDone(found, len(targets), singleOffer, firstErr)
+			}
+			c.notify()
+		})
+	}()
+}
+
+// Update downloads and applies the pinned update offer for an installed external
+// plugin. On failure or cancellation, the existing package and runtime remain intact.
+func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone func(PluginUpdateOutcome)) {
+	c.mu.Lock()
+	var existing InstalledPlugin
+	found := false
+	for _, inst := range c.installed {
+		if strings.EqualFold(inst.ID, pluginID) {
+			existing = inst
+			found = true
+			break
+		}
+	}
+	if !found || existing.Bundled {
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(PluginUpdateOutcome{Err: plugin.ErrIncompatible, Retryable: false})
+		}
+		return
+	}
+	if offer.IncompatibleKind || offer.Item.Manifest.Kind != existing.Kind {
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(PluginUpdateOutcome{Err: plugin.ErrKindChanged, Retryable: false})
+		}
+		return
+	}
+	if !offer.Item.Compatibility.Compatible {
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(PluginUpdateOutcome{Err: plugin.ErrIncompatible, Retryable: false})
+		}
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(existing.Repository), strings.TrimSpace(offer.Item.Repository)) {
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(PluginUpdateOutcome{Err: plugin.ErrSourceConflict, Retryable: false})
+		}
+		return
+	}
+	if c.fetcher == nil || c.pkgStore == nil {
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(PluginUpdateOutcome{Err: errors.New("plugin updater unavailable"), Retryable: false})
+		}
+		return
+	}
+	if c.updateCancel != nil {
+		c.updateCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	c.updateCancel = cancel
+	c.updateGen++
+	gen := c.updateGen
+	store := c.pkgStore
+	appVersion := c.appVersion
+	hooks := c.updateHooks
+	existingReceipt := plugin.InstalledReceipt{
+		ID:          existing.ID,
+		Name:        existing.Name,
+		Description: existing.Description,
+		Kind:        existing.Kind,
+		Version:     existing.Version,
+		Repository:  existing.Repository,
+		ReleaseID:   existing.ReleaseID,
+		TagName:     existing.TagName,
+		AssetID:     existing.AssetID,
+		SHA256:      existing.SHA256,
+		Enabled:     existing.Enabled,
+		InstalledAt: existing.InstalledAt,
+		UpdatedAt:   existing.UpdatedAt,
+		License:     existing.License,
+		Permissions: append([]string(nil), existing.Permissions...),
+	}
+	c.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		data, _, err := c.fetcher.DownloadAsset(ctx, offer.Item.Release)
+		if err != nil {
+			canceled := errors.Is(err, context.Canceled) || ctx.Err() != nil
+			c.finishUpdate(gen, PluginUpdateOutcome{
+				Err:       err,
+				Canceled:  canceled,
+				Retryable: !errors.Is(err, plugin.ErrDigestMismatch) && !canceled,
+			}, onDone)
+			return
+		}
+		src, receipt, err := store.StageAndUpdate(ctx, data, existingReceipt, offer.Item, appVersion)
+		if err != nil {
+			canceled := errors.Is(err, context.Canceled) || ctx.Err() != nil
+			retryable := !errors.Is(err, plugin.ErrKindChanged) &&
+				!errors.Is(err, plugin.ErrIncompatible) &&
+				!errors.Is(err, plugin.ErrSourceConflict) &&
+				!errors.Is(err, plugin.ErrDigestMismatch) &&
+				!errors.Is(err, plugin.ErrVersionTagMismatch) &&
+				!canceled
+			c.finishUpdate(gen, PluginUpdateOutcome{
+				Err:       err,
+				Canceled:  canceled,
+				Retryable: retryable,
+			}, onDone)
+			return
+		}
+
+		c.post(func() {
+			c.mu.Lock()
+			if c.updateGen != gen {
+				c.mu.Unlock()
+				return
+			}
+			c.updateCancel = nil
+			c.mu.Unlock()
+
+			if err := dispatchPackageUpdate(hooks, receipt, src, data); err != nil {
+				if onDone != nil {
+					onDone(PluginUpdateOutcome{Err: err, Retryable: false})
+				}
+				c.notify()
+				return
+			}
+
+			c.mu.Lock()
+			for i, item := range c.installed {
+				if strings.EqualFold(item.ID, receipt.ID) {
+					updated := InstalledPlugin{
+						ID:              receipt.ID,
+						Name:            receipt.Name,
+						Description:     receipt.Description,
+						Kind:            receipt.Kind,
+						Version:         receipt.Version,
+						Repository:      receipt.Repository,
+						ReleaseID:       receipt.ReleaseID,
+						TagName:         receipt.TagName,
+						AssetID:         receipt.AssetID,
+						SHA256:          receipt.SHA256,
+						Bundled:         false,
+						Enabled:         receipt.Enabled,
+						InstalledAt:     receipt.InstalledAt,
+						UpdatedAt:       receipt.UpdatedAt,
+						License:         receipt.License,
+						Permissions:     append([]string(nil), receipt.Permissions...),
+						AvailableUpdate: nil,
+					}
+					if src != nil {
+						updated.Capabilities = src.Capabilities()
+					}
+					c.installed[i] = updated
+					break
+				}
+			}
+			c.mu.Unlock()
+
+			if onDone != nil {
+				onDone(PluginUpdateOutcome{Receipt: receipt})
+			}
+			c.notify()
+		})
+	}()
+}
+
+// dispatchPackageUpdate routes committed package updates strictly by plugin kind
+// so theme updates never trigger content-source playback/session teardown.
+func dispatchPackageUpdate(hooks PluginUpdateHooks, receipt plugin.InstalledReceipt, src *plugin.Source, data []byte) error {
+	switch receipt.Kind {
+	case plugin.SourceKind:
+		if hooks.BeforeSourceUpdate != nil {
+			hooks.BeforeSourceUpdate(receipt.ID)
+		}
+		if hooks.ApplySourceUpdate != nil {
+			return hooks.ApplySourceUpdate(src, receipt)
+		}
+		return nil
+	case plugin.ThemeKind:
+		if hooks.ApplyThemeUpdate != nil {
+			return hooks.ApplyThemeUpdate(receipt, data)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported kind %q", plugin.ErrIncompatible, receipt.Kind)
+	}
+}
+
+func (c *PluginCatalog) finishUpdate(gen uint64, outcome PluginUpdateOutcome, onDone func(PluginUpdateOutcome)) {
+	c.post(func() {
+		c.mu.Lock()
+		if c.updateGen != gen {
+			c.mu.Unlock()
+			return
+		}
+		c.updateCancel = nil
 		c.mu.Unlock()
 		if onDone != nil {
 			onDone(outcome)

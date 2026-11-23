@@ -146,3 +146,135 @@ func assertStagingEmpty(t *testing.T, root string) {
 		t.Fatalf("staging dir not cleaned up: %d entries left", len(entries))
 	}
 }
+
+func TestPackageStoreStageUpdatePreservesOriginalOnFailureAndBlocksKindChange(t *testing.T) {
+	if CompareVersions("1.0.0", "1.1.0") <= 0 || CompareVersions("1.1.0", "1.1.0") != 0 || CompareVersions("1.2.0", "1.1.0") >= 0 {
+		t.Fatal("CompareVersions returned unexpected ordering")
+	}
+	added := AddedPermissions([]string{"api.video.example"}, []string{"API.video.example", "images.video.example", "images.video.example"})
+	if len(added) != 1 || added[0] != "images.video.example" {
+		t.Fatalf("unexpected AddedPermissions: %+v", added)
+	}
+
+	root := t.TempDir()
+	store := NewPackageStore(root)
+
+	v1Zip := buildTestPluginZip(t, map[string]string{
+		"plugin.json": `{
+			"id": "demo-video",
+			"name": "Demo Video",
+			"description": "v1",
+			"kind": "source",
+			"version": "1.0.0",
+			"apiVersion": 1,
+			"minAppVersion": "0.1.0",
+			"main": "index.js",
+			"permissions": {"network": ["api.video.example"]},
+			"capabilities": ["catalog.browse"]
+		}`,
+		"index.js": `export function browse() { return { collections: [] }; }`,
+	})
+	v1SHA := fmt.Sprintf("%x", sha256.Sum256(v1Zip))
+	v1Item := CatalogItem{
+		Repository: "demo/video-source",
+		Release:    ReleaseAsset{ReleaseID: 1, TagName: "v1.0.0", AssetID: 11, AssetName: "plugin.zip", SHA256: v1SHA},
+		Manifest:   Manifest{ID: "demo-video", Name: "Demo Video", Kind: SourceKind, Version: "1.0.0", APIVersion: 1, MinAppVersion: "0.1.0"},
+	}
+	_, receiptV1, err := store.StageAndInstall(context.Background(), v1Zip, v1Item, "0.1.0", nil)
+	if err != nil {
+		t.Fatalf("install v1: %v", err)
+	}
+
+	verifyOriginalIntact := func() {
+		t.Helper()
+		loaded, failures := store.LoadAll(context.Background(), "0.1.0")
+		if len(failures) != 0 || len(loaded) != 1 || loaded[0].Receipt.Version != "1.0.0" || loaded[0].Receipt.SHA256 != v1SHA {
+			t.Fatalf("original v1 package was damaged: loaded=%+v failures=%v", loaded, failures)
+		}
+		assertStagingEmpty(t, root)
+	}
+
+	// 1. Kind change (source -> theme) is strictly forbidden and preserves v1!
+	kindChangeZip := buildTestPluginZip(t, map[string]string{
+		"plugin.json": `{
+			"id": "demo-video",
+			"name": "Demo Video Theme",
+			"kind": "theme",
+			"version": "1.1.0",
+			"apiVersion": 1,
+			"minAppVersion": "0.1.0",
+			"theme": "theme.json"
+		}`,
+		"theme.json": `{"schemaVersion":1}`,
+	})
+	kindChangeItem := CatalogItem{
+		Repository: "demo/video-source",
+		Release:    ReleaseAsset{ReleaseID: 2, TagName: "v1.1.0", AssetID: 12, AssetName: "plugin.zip", SHA256: fmt.Sprintf("%x", sha256.Sum256(kindChangeZip))},
+		Manifest:   Manifest{ID: "demo-video", Name: "Demo Video Theme", Kind: ThemeKind, Version: "1.1.0"},
+	}
+	if _, _, err := store.StageAndUpdate(context.Background(), kindChangeZip, receiptV1, kindChangeItem, "0.1.0"); !errors.Is(err, ErrKindChanged) {
+		t.Fatalf("expected ErrKindChanged, got %v", err)
+	}
+	verifyOriginalIntact()
+
+	// 2. Digest mismatch preserves v1!
+	v2Zip := buildTestPluginZip(t, map[string]string{
+		"plugin.json": `{
+			"id": "demo-video",
+			"name": "Demo Video",
+			"description": "v2 with expanded permissions",
+			"kind": "source",
+			"version": "1.1.0",
+			"apiVersion": 1,
+			"minAppVersion": "0.1.0",
+			"main": "index.js",
+			"permissions": {"network": ["api.video.example", "images.video.example"]},
+			"capabilities": ["catalog.browse"]
+		}`,
+		"index.js": `export function browse() { return { collections: [] }; }`,
+	})
+	v2SHA := fmt.Sprintf("%x", sha256.Sum256(v2Zip))
+	v2Item := CatalogItem{
+		Repository:  "demo/video-source",
+		Release:     ReleaseAsset{ReleaseID: 3, TagName: "v1.1.0", AssetID: 13, AssetName: "plugin.zip", SHA256: v2SHA},
+		Manifest:    Manifest{ID: "demo-video", Name: "Demo Video", Kind: SourceKind, Version: "1.1.0", APIVersion: 1, MinAppVersion: "0.1.0"},
+		Permissions: []string{"api.video.example", "images.video.example"},
+	}
+	badDigest := v2Item
+	badDigest.Release.SHA256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	if _, _, err := store.StageAndUpdate(context.Background(), v2Zip, receiptV1, badDigest, "0.1.0"); !errors.Is(err, ErrDigestMismatch) {
+		t.Fatalf("expected ErrDigestMismatch, got %v", err)
+	}
+	verifyOriginalIntact()
+
+	// 3. Repository hijack preserves v1!
+	badRepo := v2Item
+	badRepo.Repository = "other/video-fork"
+	if _, _, err := store.StageAndUpdate(context.Background(), v2Zip, receiptV1, badRepo, "0.1.0"); !errors.Is(err, ErrSourceConflict) {
+		t.Fatalf("expected ErrSourceConflict, got %v", err)
+	}
+	verifyOriginalIntact()
+
+	// 4. Valid update replaces atomically, preserves InstalledAt/Enabled, records UpdatedAt and new SHA256!
+	srcV2, receiptV2, err := store.StageAndUpdate(context.Background(), v2Zip, receiptV1, v2Item, "0.1.0")
+	if err != nil {
+		t.Fatalf("StageAndUpdate valid v2: %v", err)
+	}
+	if srcV2.Manifest().Version != "1.1.0" || receiptV2.SHA256 != v2SHA || receiptV2.ReleaseID != 3 || receiptV2.AssetID != 13 {
+		t.Fatalf("unexpected v2 receipt: %+v", receiptV2)
+	}
+	if receiptV2.InstalledAt != receiptV1.InstalledAt || !receiptV2.Enabled || receiptV2.UpdatedAt == 0 {
+		t.Fatalf("expected InstalledAt/Enabled preserved and UpdatedAt recorded: %+v", receiptV2)
+	}
+	if len(receiptV2.Permissions) != 2 {
+		t.Fatalf("expected updated permissions persisted, got %+v", receiptV2.Permissions)
+	}
+	assertStagingEmpty(t, root)
+	if _, err := os.Stat(filepath.Join(root, "packages", "demo-video", "plugin.zip.bak")); !os.IsNotExist(err) {
+		t.Fatalf("expected backup file cleaned up, stat err=%v", err)
+	}
+	loaded, failures := store.LoadAll(context.Background(), "0.1.0")
+	if len(failures) != 0 || len(loaded) != 1 || loaded[0].Receipt.Version != "1.1.0" || loaded[0].Receipt.SHA256 != v2SHA {
+		t.Fatalf("LoadAll after update failed: loaded=%+v failures=%v", loaded, failures)
+	}
+}
