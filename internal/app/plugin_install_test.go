@@ -214,3 +214,126 @@ func TestPluginCatalogInstallResolveConflictCancelAndMount(t *testing.T) {
 		t.Fatalf("expected ErrSourceConflict, got %v", err)
 	}
 }
+
+func TestPluginCatalogCancelAfterCommitReconcilesRuntime(t *testing.T) {
+	v1Zip := makeAppTestZip(t, map[string]string{
+		"plugin.json": `{
+			"id": "race-media",
+			"name": "Race Media",
+			"description": "Videos",
+			"kind": "source",
+			"version": "1.0.0",
+			"apiVersion": 1,
+			"minAppVersion": "0.1.0",
+			"main": "index.js",
+			"permissions": {"network": ["media.example.com"]},
+			"capabilities": ["catalog.browse"]
+		}`,
+		"index.js": `export function browse() { return { collections: [] }; }`,
+	})
+	v1SHA := fmt.Sprintf("%x", sha256.Sum256(v1Zip))
+	v2Zip := makeAppTestZip(t, map[string]string{
+		"plugin.json": `{
+			"id": "race-media",
+			"name": "Race Media",
+			"description": "Videos v2",
+			"kind": "source",
+			"version": "1.1.0",
+			"apiVersion": 1,
+			"minAppVersion": "0.1.0",
+			"main": "index.js",
+			"permissions": {"network": ["media.example.com"]},
+			"capabilities": ["catalog.browse"]
+		}`,
+		"index.js": `export function browse() { return { collections: [] }; }`,
+	})
+	v2SHA := fmt.Sprintf("%x", sha256.Sum256(v2Zip))
+
+	itemV1 := plugin.CatalogItem{
+		Repository: "example/race-media",
+		Manifest: plugin.Manifest{
+			ID: "race-media", Name: "Race Media", Kind: plugin.SourceKind, Version: "1.0.0",
+			APIVersion: 1, MinAppVersion: "0.1.0",
+		},
+		Release: plugin.ReleaseAsset{
+			ReleaseID: 1, TagName: "v1.0.0", AssetID: 10, AssetName: "plugin.zip",
+			DownloadURL: "https://example.invalid/race-v1.zip", SHA256: v1SHA,
+		},
+		Compatibility: plugin.Compatibility{Compatible: true, Code: plugin.CompatibleOK},
+	}
+	itemV2 := plugin.CatalogItem{
+		Repository: "example/race-media",
+		Manifest: plugin.Manifest{
+			ID: "race-media", Name: "Race Media", Kind: plugin.SourceKind, Version: "1.1.0",
+			APIVersion: 1, MinAppVersion: "0.1.0",
+		},
+		Release: plugin.ReleaseAsset{
+			ReleaseID: 2, TagName: "v1.1.0", AssetID: 20, AssetName: "plugin.zip",
+			DownloadURL: "https://example.invalid/race-v2.zip", SHA256: v2SHA,
+		},
+		Compatibility: plugin.Compatibility{Compatible: true, Code: plugin.CompatibleOK},
+	}
+
+	fetcher := &installTestFetcher{
+		resolved: map[string]plugin.CatalogItem{"example/race-media": itemV1},
+		zips: map[string][]byte{
+			itemV1.Release.DownloadURL: v1Zip,
+			itemV2.Release.DownloadURL: v2Zip,
+		},
+	}
+	store := plugin.NewPackageStore(t.TempDir())
+	queue := make(chan func(), 16)
+	cat := NewPluginCatalog(nil, fetcher, nil, func(fn func()) { queue <- fn }, func() {})
+	mounted := 0
+	updatedVersion := ""
+	cat.SetInstaller(store, "0.1.0", func(pkg plugin.InstalledPackage) error {
+		mounted++
+		return nil
+	})
+	cat.SetUpdateHooks(PluginUpdateHooks{
+		ApplySourceUpdate: func(_ *plugin.Source, receipt plugin.InstalledReceipt) error {
+			updatedVersion = receipt.Version
+			return nil
+		},
+	})
+
+	// 1. CancelInstall races AFTER StageAndInstall commits and posts its callback.
+	installOnDoneCalled := false
+	cat.Install(itemV1, func(PluginInstallOutcome) { installOnDoneCalled = true })
+	select {
+	case cb := <-queue:
+		cat.CancelInstall()
+		cb()
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for install completion callback")
+	}
+	if mounted != 1 {
+		t.Fatalf("mounted = %d, want 1 after committed install", mounted)
+	}
+	if inst, ok := cat.FindInstalled("race-media"); !ok || inst.Version != "1.0.0" {
+		t.Fatalf("committed install not reconciled into installed list: ok=%v inst=%+v", ok, inst)
+	}
+	if installOnDoneCalled {
+		t.Fatal("canceled install dialog onDone should not fire")
+	}
+
+	// 2. CancelUpdate races AFTER StageAndUpdate commits and posts its callback.
+	updateOnDoneCalled := false
+	cat.Update("race-media", PluginUpdateOffer{Item: itemV2}, func(PluginUpdateOutcome) { updateOnDoneCalled = true })
+	select {
+	case cb := <-queue:
+		cat.CancelUpdate()
+		cb()
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for update completion callback")
+	}
+	if updatedVersion != "1.1.0" {
+		t.Fatalf("updatedVersion = %q, want %q", updatedVersion, "1.1.0")
+	}
+	if inst, ok := cat.FindInstalled("race-media"); !ok || inst.Version != "1.1.0" {
+		t.Fatalf("committed update not reconciled into installed list: ok=%v inst=%+v", ok, inst)
+	}
+	if updateOnDoneCalled {
+		t.Fatal("canceled update dialog onDone should not fire")
+	}
+}

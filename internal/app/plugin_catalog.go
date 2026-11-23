@@ -957,16 +957,17 @@ func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInsta
 		receipt := pkg.Receipt
 		c.post(func() {
 			c.mu.Lock()
-			if c.installGen != gen {
-				c.mu.Unlock()
-				return
+			canceled := c.installGen != gen
+			if !canceled {
+				c.installCancel = nil
 			}
-			c.installCancel = nil
 			c.mu.Unlock()
 
+			// StageAndInstall already committed the package and receipt to disk;
+			// reconcile runtime state even if the dialog was canceled right after commit.
 			if onMounted != nil {
 				if err := onMounted(pkg); err != nil {
-					if onDone != nil {
+					if !canceled && onDone != nil {
 						onDone(PluginInstallOutcome{Err: err, Retryable: false})
 					}
 					c.notify()
@@ -978,7 +979,7 @@ func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInsta
 			c.upsertInstalledLocked(installedPluginFromPackage(pkg))
 			c.mu.Unlock()
 
-			if onDone != nil {
+			if !canceled && onDone != nil {
 				onDone(PluginInstallOutcome{Receipt: receipt})
 			}
 			c.notify()
@@ -1262,15 +1263,16 @@ func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone 
 
 		c.post(func() {
 			c.mu.Lock()
-			if c.updateGen != gen {
-				c.mu.Unlock()
-				return
+			canceled := c.updateGen != gen
+			if !canceled {
+				c.updateCancel = nil
 			}
-			c.updateCancel = nil
 			c.mu.Unlock()
 
+			// StageAndUpdate already committed the new archive and receipt to disk;
+			// reconcile runtime state even if the update dialog was canceled right after commit.
 			if err := dispatchPackageUpdate(hooks, pkg); err != nil {
-				if onDone != nil {
+				if !canceled && onDone != nil {
 					onDone(PluginUpdateOutcome{Err: err, Retryable: false})
 				}
 				c.notify()
@@ -1289,7 +1291,7 @@ func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone 
 			}
 			c.mu.Unlock()
 
-			if onDone != nil {
+			if !canceled && onDone != nil {
 				onDone(PluginUpdateOutcome{Receipt: receipt})
 			}
 			c.notify()

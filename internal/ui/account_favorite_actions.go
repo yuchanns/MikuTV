@@ -201,7 +201,7 @@ func (p *PageContext) favoriteManagementBar(c *ui.Context, snapshot app.AccountS
 				if m.query.Section == provider.AccountFavorites {
 					p.openFavoriteDialog(favoriteDialog{mode: favoriteConfirmRemove, resources: resources}, app.CloseModal)
 				} else {
-					p.removeLibraryItems(m.query, resources)
+					p.removeLibraryItems(m.query, snapshot.Page.Rows, resources)
 				}
 			})
 		} else {
@@ -227,9 +227,22 @@ func (p *PageContext) libraryManagementButton(c *ui.Context, label, icon string,
 	})
 }
 
-func (p *PageContext) removeLibraryItems(query provider.AccountQuery, resources []string) {
+func (p *PageContext) removeLibraryItems(query provider.AccountQuery, rows []provider.AccountRow, resources []string) {
 	activity, management := p.host.Activity, &p.host.favorites.management
 	management.err = ""
+	refsByRemoval := make(map[string]provider.MediaRef, len(resources))
+	for _, row := range rows {
+		if row.RemovalID != "" && row.Item != nil && row.Item.Ref.ID != "" {
+			ref := row.Item.Ref
+			if ref.EntryID == "" {
+				ref.EntryID = p.State.CurrentEntry
+			}
+			if ref.Kind == "" {
+				ref.Kind = provider.Series
+			}
+			refsByRemoval[row.RemovalID] = ref
+		}
+	}
 	done := func(completed int, err error) {
 		if management.query != query {
 			return
@@ -245,12 +258,12 @@ func (p *PageContext) removeLibraryItems(query provider.AccountQuery, resources 
 		}
 		if query.Section == provider.AccountTracking && completed > 0 {
 			for _, id := range resources[:completed] {
-				refID := id
-				if !strings.HasPrefix(refID, "ss") {
-					refID = "ss" + refID
+				ref, ok := refsByRemoval[id]
+				if !ok {
+					ref = provider.MediaRef{EntryID: p.State.CurrentEntry, Kind: provider.Series, ID: id}
 				}
 				p.host.syncSeriesTracked(provider.SeriesEntry{
-					Item: provider.MediaItem{Ref: provider.MediaRef{EntryID: p.State.CurrentEntry, Kind: provider.Series, ID: refID}},
+					Item: provider.MediaItem{Ref: ref},
 				}, false, false)
 			}
 		}

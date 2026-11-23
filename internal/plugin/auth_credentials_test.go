@@ -356,6 +356,16 @@ export async function resolvePlayback(req) {
 	}
 	resp.Body.Close()
 
+	// Confirming rotated credentials for the SAME account must preserve the active playback transport scope.
+	if err := session2.SetAccount(&restored); err != nil {
+		t.Fatalf("SetAccount same account refresh: %v", err)
+	}
+	respSame, err := pb.Transport.OpenResource(ctx, pb.Plan.Streams[0].Video.Resource, http.MethodGet, "")
+	if err != nil {
+		t.Fatalf("OpenResource after same-account SetAccount failed: %v", err)
+	}
+	respSame.Body.Close()
+
 	// SSRF isolation check: fetch to a DIFFERENT port on 127.0.0.1 MUST be blocked!
 	if _, err := session2.Browse(ctx, provider.BrowseRequest{Filter: "probe-other"}); err == nil {
 		t.Fatal("expected fetch to unrelated loopback port to be blocked")
@@ -364,9 +374,12 @@ export async function resolvePlayback(req) {
 		t.Fatalf("unrelated server received %d hits, want 0", otherHits)
 	}
 
-	// Clearing account revokes user origin.
+	// Clearing account revokes user origin AND cancels active playback transport scope.
 	if err := session2.SetAccount(nil); err != nil {
 		t.Fatalf("SetAccount(nil): %v", err)
+	}
+	if _, err := pb.Transport.OpenResource(ctx, pb.Plan.Streams[0].Video.Resource, http.MethodGet, ""); err == nil {
+		t.Fatal("expected active playback transport to be canceled after sign-out")
 	}
 	if _, err := session2.LoadCatalogArtwork(ctx, coverURL); err == nil {
 		t.Fatal("expected LoadCatalogArtwork after sign-out to be blocked")

@@ -212,13 +212,17 @@ func (s *Session) SetAccount(credential *provider.Credential) error {
 	if err := s.context.Err(); err != nil {
 		return err
 	}
-	s.stop()
-	s.active, s.secret, s.userOrigin = client, secret, userOrigin
-	s.accountID = ""
+	nextAccountID := ""
 	if credential != nil {
-		s.accountID = credential.Account.ID
+		nextAccountID = credential.Account.ID
 	}
-	s.scope, s.stop = context.WithCancel(s.context)
+	sameAccount := nextAccountID != "" && nextAccountID == s.accountID
+	if !sameAccount {
+		s.stop()
+		s.scope, s.stop = context.WithCancel(s.context)
+	}
+	s.active, s.secret, s.userOrigin = client, secret, userOrigin
+	s.accountID = nextAccountID
 	return nil
 }
 
