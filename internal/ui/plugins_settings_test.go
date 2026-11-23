@@ -227,7 +227,7 @@ func TestPluginsSettingsCatalogDiscoverySearchFilterDetailRestoreAndEntriesIsola
 	tester := ui.NewTester(view.Render, 1920, 1080)
 	tester.Frame()
 
-	// 1. Open Discover view -> fetches page 1.
+	// 1. Open Discover view -> fetches page 1 and automatically triggers page 2 when viewport reaches the end (virtualized infinite scroll).
 	view.State.Focus = pluginsDiscoverBtn
 	tester.Frame()
 	tester.Key(0, ui.KeyEnter)
@@ -237,15 +237,11 @@ func TestPluginsSettingsCatalogDiscoverySearchFilterDetailRestoreAndEntriesIsola
 		t.Fatalf("expected discover view, got %v", view.pluginsUI.view)
 	}
 
-	// 2. Load page 2 so Theme item joins the catalog -> focus recovers from disappeared load-more button to newly loaded item!
-	view.State.Focus = pluginsLoadMoreBtn
-	tester.Frame()
-	tester.Key(0, ui.KeyEnter)
+	// 2. Page 2 loads automatically without a manual load-more button -> Theme item joins the catalog.
 	drain(func() bool { return !pluginCat.Snapshot().LoadingMore && pluginCat.Snapshot().Page == 2 })
 	tester.Frame()
-	if view.State.Focus != pluginsCatalogFocus(itemTheme.Repository) {
-		t.Fatalf("expected focus recovered from disappeared load-more button to %q, got %q",
-			pluginsCatalogFocus(itemTheme.Repository), view.State.Focus)
+	if !tester.HasText(itemTheme.Manifest.Name) {
+		t.Fatalf("expected page 2 theme item %q to load automatically", itemTheme.Manifest.Name)
 	}
 
 	view.State.Focus = pluginsFilterTheme

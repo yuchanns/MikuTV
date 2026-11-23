@@ -272,17 +272,22 @@ func TestPrivateMessagesUIWorkflowDraftRetentionCreatorEntryAndCapabilityHiding(
 		t.Fatal("private messages layout missing contacts, bubble, or compose bar")
 	}
 
-	// 3. Load older messages in Alice's thread.
-	state.Focus = privateOlderFocus
+	// 3. Pressing Up at top of Alice's thread automatically loads older messages (no manual click needed).
+	state.Focus = privateHistoryFocus
 	tester.Frame()
-	tester.Key(0, ui.KeyEnter)
+	tester.Key(0, ui.KeyUp)
 	drain(func() bool { return len(pm.Thread("p1").Messages) == 2 })
 	tester.Frame()
 	if !tester.HasText("Alice earlier message") {
-		t.Fatal("older message did not appear after LoadOlderMessages")
+		t.Fatal("older message did not appear after scrolling up at thread top")
 	}
 
-	// 4. Switch conversation to Bob & load page 2 of contacts.
+	// 4. Contacts auto-load page 2 when viewport/focus nears bottom (virtualized infinite scroll) and switching to Bob loads Bob's thread.
+	drain(func() bool { return len(pm.Conversations().Conversations) == 3 })
+	tester.Frame()
+	if !tester.HasText("Charlie") {
+		t.Fatal("virtualized conversation auto-pagination did not reveal Charlie")
+	}
 	state.Focus = privateContactFocus("p2")
 	tester.Frame()
 	tester.Key(0, ui.KeyEnter)
@@ -290,14 +295,6 @@ func TestPrivateMessagesUIWorkflowDraftRetentionCreatorEntryAndCapabilityHiding(
 	tester.Frame()
 	if !tester.HasText("Bob latest message") {
 		t.Fatal("switching to Bob did not load Bob's thread")
-	}
-	state.Focus = privateMoreContacts
-	tester.Frame()
-	tester.Key(0, ui.KeyEnter)
-	drain(func() bool { return len(pm.Conversations().Conversations) == 3 })
-	tester.Frame()
-	if !tester.HasText("Charlie") {
-		t.Fatal("conversation pagination did not reveal Charlie")
 	}
 
 	// 5. Open compose modal -> fail send preserves draft -> retry send succeeds and appends bubble.

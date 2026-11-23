@@ -32,7 +32,6 @@ const (
 	pluginsRetryBtn        app.FocusID = "settings/plugins/retry"
 	pluginsEmptyAddRepoBtn app.FocusID = "settings/plugins/empty-add-repo"
 	pluginsEmptyExitBtn    app.FocusID = "settings/plugins/empty-exit"
-	pluginsLoadMoreBtn     app.FocusID = "settings/plugins/load-more"
 
 	pluginsDetailToggle  app.FocusID = "settings/plugins/detail-toggle"
 	pluginsDetailVersion app.FocusID = "settings/plugins/detail-version"
@@ -41,7 +40,9 @@ const (
 	pluginsDetailCompat  app.FocusID = "settings/plugins/detail-compat"
 	pluginsDetailInstall app.FocusID = "settings/plugins/detail-install"
 
-	pluginSearchMaxLength = 120
+	pluginSearchMaxLength  = 120
+	pluginCatalogRowHeight = 94
+	pluginCatalogListTop   = 420
 )
 
 func pluginsInstalledFocus(id string) app.FocusID {
@@ -429,8 +430,21 @@ func (p *PageContext) renderPluginsDiscover(c *ui.Context) {
 		}
 	default:
 		ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
-		for _, entry := range visible {
-			item := entry
+		scrollY := p.scroll().Y
+		first, end := visibleItemRange(scrollY-pluginCatalogListTop, p.Height, pluginCatalogRowHeight, len(visible), 3)
+		focusedIdx := -1
+		paintFocus := p.paintFocus()
+		for idx, entry := range visible {
+			if paintFocus == pluginsCatalogFocus(entry.Repository) {
+				focusedIdx = idx
+				break
+			}
+		}
+		nearEnd := len(visible) > 0 && (end >= len(visible) || (focusedIdx >= 0 && focusedIdx >= len(visible)-2))
+		if p.active && snap.HasMore && !snap.LoadingMore && snap.Status == app.PluginCatalogReady && nearEnd && v.PluginCatalog != nil {
+			v.PluginCatalog.LoadMore()
+		}
+		renderCatalogItem := func(idx int, item plugin.CatalogItem) {
 			focusID := pluginsCatalogFocus(item.Repository)
 			note := p.catalogPluginSubtitle(item)
 			status := p.catalogPluginStatus(item)
@@ -439,29 +453,34 @@ func (p *PageContext) renderPluginsDiscover(c *ui.Context) {
 				sw := item.Swatches
 				swatches = &sw
 			}
-			p.pluginRowWithSwatches(c, focusID, "content", p.pluginKindIcon(item.Manifest.Kind), item.Manifest.Name, note, status, swatches, func() {
-				if v.activeScroll != nil {
-					s.listScroll = v.activeScroll.Y
-				}
-				s.returnFocus = focusID
-				s.selectedInstalledID = ""
-				s.selectedCatalogRepo = item.Repository
-				if item.Compatibility.Compatible {
-					p.State.Focus, v.reveal = pluginsDetailInstall, true
-				} else {
-					p.State.Focus, v.reveal = pluginsBackBtn, true
-				}
+			ui.Box(c.Key("catalog-slot/" + item.Repository)).Absolute().Top(float32(idx * pluginCatalogRowHeight)).Left(0).Right(0).Height(pluginCatalogRowHeight).Children(func() {
+				p.pluginRowWithSwatches(c, focusID, "content", p.pluginKindIcon(item.Manifest.Kind), item.Manifest.Name, note, status, swatches, func() {
+					if v.activeScroll != nil {
+						s.listScroll = v.activeScroll.Y
+					}
+					s.returnFocus = focusID
+					s.selectedInstalledID = ""
+					s.selectedCatalogRepo = item.Repository
+					if item.Compatibility.Compatible {
+						p.State.Focus, v.reveal = pluginsDetailInstall, true
+					} else {
+						p.State.Focus, v.reveal = pluginsBackBtn, true
+					}
+				})
 			})
 		}
-		if snap.HasMore {
-			label := l.LoadMoreAction
-			if snap.LoadingMore {
-				label = l.LoadingMore
+		ui.Box(c.Key("plugins-discover-virtual")).FillWidth().Height(float32(len(visible) * pluginCatalogRowHeight)).Children(func() {
+			for idx := first; idx < end; idx++ {
+				renderCatalogItem(idx, visible[idx])
 			}
-			p.pluginRow(c, pluginsLoadMoreBtn, "content", "refresh", label, "", "", func() {
-				if v.PluginCatalog != nil {
-					v.PluginCatalog.LoadMore()
-				}
+			if focusedIdx >= 0 && (focusedIdx < first || focusedIdx >= end) {
+				renderCatalogItem(focusedIdx, visible[focusedIdx])
+			}
+		})
+		if snap.LoadingMore {
+			ui.Row(c).FillWidth().Padding(20, 0).Gap(12).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+				p.loadingSpinner(c, 20)
+				ui.Text(c, l.LoadingMore).FontSize(18).TextColor(paint(colors.Text.Muted))
 			})
 		}
 	}
@@ -846,12 +865,6 @@ func (p *PageContext) restorePluginsDiscoverFocus(snap app.PluginCatalogSnapshot
 	}
 	focus := p.State.Focus
 	switch {
-	case focus == pluginsLoadMoreBtn && (!snap.HasMore || len(visible) == 0):
-		if len(visible) > 0 {
-			p.State.Focus = pluginsCatalogFocus(visible[len(visible)-1].Repository)
-		} else {
-			p.State.Focus = fallback
-		}
 	case focus == pluginsRetryBtn && bodyFirst != pluginsRetryBtn:
 		p.State.Focus = fallback
 	case focus == pluginsEmptyAddRepoBtn && bodyFirst != pluginsEmptyAddRepoBtn:
