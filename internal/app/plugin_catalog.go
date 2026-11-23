@@ -122,6 +122,29 @@ type PluginCatalogFetcher interface {
 	DownloadAsset(ctx context.Context, asset plugin.ReleaseAsset) ([]byte, [sha256.Size]byte, error)
 }
 
+// PluginReleaseRestorer fetches a previously installed plugin.zip by pinned
+// repository, release tag, and SHA-256 digest during tvOS cache self-healing.
+type PluginReleaseRestorer interface {
+	DownloadReleaseAsset(ctx context.Context, repo, tagName string, assetID int64, expectedSHA256 string) ([]byte, [sha256.Size]byte, error)
+}
+
+type PluginRecoveryPhase uint8
+
+const (
+	PluginRecoveryNone PluginRecoveryPhase = iota
+	PluginRecoveryRunning
+	PluginRecoveryDone
+	PluginRecoveryPartial
+)
+
+type PluginRecoveryState struct {
+	Phase     PluginRecoveryPhase
+	Total     int
+	Restored  int
+	Failed    int
+	UpdatedAt time.Time
+}
+
 type PluginCatalogSnapshot struct {
 	Status           PluginCatalogStatus
 	LoadingMore      bool
@@ -136,6 +159,7 @@ type PluginCatalogSnapshot struct {
 	Installed        []InstalledPlugin
 	Items            []plugin.CatalogItem
 	Error            string
+	Recovery         PluginRecoveryState
 }
 
 type PluginCatalog struct {
@@ -164,6 +188,7 @@ type PluginCatalog struct {
 	hasMore           bool
 	rateLimitResetAt  time.Time
 	lastErr           string
+	recovery          PluginRecoveryState
 	gen               uint64
 	cancel            context.CancelFunc
 	resolveGen        uint64
@@ -174,6 +199,8 @@ type PluginCatalog struct {
 	updateCheckCancel context.CancelFunc
 	updateGen         uint64
 	updateCancel      context.CancelFunc
+	recoveryGen       uint64
+	recoveryCancel    context.CancelFunc
 }
 
 func (c *PluginCatalog) SetInstaller(
@@ -265,7 +292,200 @@ func (c *PluginCatalog) Snapshot() PluginCatalogSnapshot {
 		Installed:        cloneInstalledPlugins(c.installed),
 		Items:            append([]plugin.CatalogItem(nil), c.items...),
 		Error:            c.lastErr,
+		Recovery:         c.recovery,
 	}
+}
+
+// RecoveryState returns the current tvOS cache self-healing status snapshot.
+func (c *PluginCatalog) RecoveryState() PluginRecoveryState {
+	if c == nil {
+		return PluginRecoveryState{}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.recovery
+}
+
+// StartStartupRecovery restores plugins whose cached plugin.zip was evicted by
+// tvOS under low-storage pressure, strictly verifying each download against the
+// durable receipt's SHA-256 digest before hot-mounting it.
+func (c *PluginCatalog) StartStartupRecovery(
+	missing []plugin.InstalledReceipt,
+	onRestored func(plugin.InstalledPackage) error,
+	onDone func(restored, failed int),
+) {
+	if c == nil || len(missing) == 0 {
+		return
+	}
+	c.mu.Lock()
+	restorer, ok := c.fetcher.(PluginReleaseRestorer)
+	pkgStore := c.pkgStore
+	appVersion := c.appVersion
+	post := c.post
+	if !ok || pkgStore == nil {
+		c.recovery = PluginRecoveryState{
+			Phase:     PluginRecoveryPartial,
+			Total:     len(missing),
+			Restored:  0,
+			Failed:    len(missing),
+			UpdatedAt: time.Now(),
+		}
+		c.mu.Unlock()
+		c.notify()
+		return
+	}
+	if c.recoveryCancel != nil {
+		c.recoveryCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	c.recoveryGen++
+	gen := c.recoveryGen
+	c.recoveryCancel = cancel
+	c.recovery = PluginRecoveryState{
+		Phase:     PluginRecoveryRunning,
+		Total:     len(missing),
+		Restored:  0,
+		Failed:    0,
+		UpdatedAt: time.Now(),
+	}
+	c.mu.Unlock()
+	c.notify()
+
+	if post == nil {
+		post = func(fn func()) { fn() }
+	}
+	queue := append([]plugin.InstalledReceipt(nil), missing...)
+	go func() {
+		defer cancel()
+		restored := 0
+		failed := 0
+		for _, receipt := range queue {
+			if ctx.Err() != nil {
+				return
+			}
+			dlCtx, dlCancel := context.WithTimeout(ctx, 45*time.Second)
+			data, _, err := restorer.DownloadReleaseAsset(dlCtx, receipt.Repository, receipt.TagName, receipt.AssetID, receipt.SHA256)
+			dlCancel()
+			if err != nil {
+				failed++
+			} else {
+				pkg, restoreErr := pkgStore.RestoreReceipt(ctx, receipt, data, appVersion)
+				if restoreErr != nil {
+					failed++
+				} else {
+					doneCh := make(chan error, 1)
+					post(func() {
+						c.mu.Lock()
+						if c.recoveryGen != gen {
+							c.mu.Unlock()
+							doneCh <- context.Canceled
+							return
+						}
+						c.mu.Unlock()
+						var mountErr error
+						if onRestored != nil {
+							mountErr = onRestored(pkg)
+						}
+						if mountErr == nil {
+							inst := installedPluginFromPackage(pkg)
+							c.mu.Lock()
+							replaced := false
+							for i, existing := range c.installed {
+								if strings.EqualFold(existing.ID, inst.ID) {
+									c.installed[i] = inst
+									replaced = true
+									break
+								}
+							}
+							if !replaced {
+								c.installed = append(c.installed, inst)
+							}
+							c.mu.Unlock()
+						}
+						doneCh <- mountErr
+					})
+					if mountErr := <-doneCh; mountErr != nil {
+						failed++
+					} else {
+						restored++
+					}
+				}
+			}
+			curRestored, curFailed := restored, failed
+			post(func() {
+				c.mu.Lock()
+				if c.recoveryGen != gen {
+					c.mu.Unlock()
+					return
+				}
+				c.recovery.Restored = curRestored
+				c.recovery.Failed = curFailed
+				c.recovery.UpdatedAt = time.Now()
+				c.mu.Unlock()
+				c.notify()
+			})
+		}
+
+		finalRestored, finalFailed := restored, failed
+		post(func() {
+			c.mu.Lock()
+			if c.recoveryGen != gen {
+				c.mu.Unlock()
+				return
+			}
+			c.recoveryCancel = nil
+			if finalFailed == 0 {
+				c.recovery.Phase = PluginRecoveryDone
+			} else {
+				c.recovery.Phase = PluginRecoveryPartial
+			}
+			c.recovery.Restored = finalRestored
+			c.recovery.Failed = finalFailed
+			c.recovery.UpdatedAt = time.Now()
+			c.mu.Unlock()
+			if onDone != nil {
+				onDone(finalRestored, finalFailed)
+			}
+			c.notify()
+		})
+	}()
+}
+
+func installedPluginFromPackage(pkg plugin.InstalledPackage) InstalledPlugin {
+	receipt := pkg.Receipt
+	inst := InstalledPlugin{
+		ID:          receipt.ID,
+		Name:        receipt.Name,
+		Description: receipt.Description,
+		Kind:        receipt.Kind,
+		Version:     receipt.Version,
+		Repository:  receipt.Repository,
+		ReleaseID:   receipt.ReleaseID,
+		TagName:     receipt.TagName,
+		AssetID:     receipt.AssetID,
+		SHA256:      receipt.SHA256,
+		Bundled:     false,
+		Enabled:     receipt.Enabled,
+		InstalledAt: receipt.InstalledAt,
+		UpdatedAt:   receipt.UpdatedAt,
+		License:     receipt.License,
+		Permissions: append([]string(nil), receipt.Permissions...),
+		Swatches:    receipt.Swatches,
+	}
+	if pkg.Source != nil {
+		m := pkg.Source.Manifest()
+		inst.Name = m.Name
+		inst.Description = m.Description
+		inst.License = m.License
+		inst.Capabilities = pkg.Source.Capabilities()
+	} else if pkg.Theme != nil {
+		m := pkg.Theme.Manifest()
+		inst.Name = m.Name
+		inst.Description = m.Description
+		inst.License = m.License
+		inst.Swatches = pkg.Theme.Theme().Swatches()
+	}
+	return inst
 }
 
 func cloneInstalledPlugins(src []InstalledPlugin) []InstalledPlugin {
@@ -488,16 +708,19 @@ func (c *PluginCatalog) Close() {
 	installCancel := c.installCancel
 	updateCheckCancel := c.updateCheckCancel
 	updateCancel := c.updateCancel
+	recoveryCancel := c.recoveryCancel
 	c.cancel = nil
 	c.resolveCancel = nil
 	c.installCancel = nil
 	c.updateCheckCancel = nil
 	c.updateCancel = nil
+	c.recoveryCancel = nil
 	c.gen++
 	c.resolveGen++
 	c.installGen++
 	c.updateCheckGen++
 	c.updateGen++
+	c.recoveryGen++
 	c.loadingMore = false
 	c.checkingUpdates = false
 	if c.status == PluginCatalogLoading {
@@ -522,6 +745,9 @@ func (c *PluginCatalog) Close() {
 	}
 	if updateCancel != nil {
 		updateCancel()
+	}
+	if recoveryCancel != nil {
+		recoveryCancel()
 	}
 }
 

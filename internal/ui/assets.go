@@ -114,6 +114,8 @@ type pluginLabels struct {
 	ThemeUpdateConfirmBody, ThemeRemoveNote         string
 	ThemeRemoveActiveBody, ThemeRemoveInactiveBody  string
 	ThemeDisableActiveBody                          string
+	RecoveryBannerStarting, RecoveryBannerRunning   string
+	RecoveryBannerDone, RecoveryBannerPartial       string
 }
 
 type appearanceSettingsLabels struct {

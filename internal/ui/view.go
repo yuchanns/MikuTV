@@ -1,9 +1,11 @@
 package tvui
 
 import (
+	"fmt"
 	"log"
 	"time"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
 	"github.com/yuchanns/MikuTV/internal/provider"
@@ -288,6 +290,7 @@ func (v *View) Render(c *ui.Context) {
 			ui.Text(c, v.notice).Absolute().Right(32).Bottom(28).Padding(18, 24).
 				Background(paint(v.Theme.Colors.Surface.Raised)).Radius(12).FontSize(20)
 		}
+		v.renderPluginRecoveryBanner(c, width)
 	})
 	for index, location := range layers[1:] {
 		v.renderModal(c, v.context(location, index == len(layers)-2, width, height), fromMedia)
@@ -301,6 +304,65 @@ func (v *View) Render(c *ui.Context) {
 	}
 	v.drawnRevision = v.State.Revision
 	v.reveal = false
+}
+
+func (v *View) renderPluginRecoveryBanner(c *ui.Context, width float32) {
+	if v.PluginCatalog == nil || v.Assets == nil {
+		return
+	}
+	rec := v.PluginCatalog.RecoveryState()
+	if rec.Phase == app.PluginRecoveryNone || rec.Total <= 0 {
+		return
+	}
+	var message string
+	accent := v.Theme.Colors.Accent.Primary
+	switch rec.Phase {
+	case app.PluginRecoveryRunning:
+		done := rec.Restored + rec.Failed
+		if done > 0 && done < rec.Total {
+			message = fmt.Sprintf(v.Assets.Text.Plugins.RecoveryBannerRunning, done, rec.Total)
+		} else {
+			message = fmt.Sprintf(v.Assets.Text.Plugins.RecoveryBannerStarting, rec.Total)
+		}
+	case app.PluginRecoveryDone:
+		remaining := 6*time.Second - time.Since(rec.UpdatedAt)
+		if remaining <= 0 {
+			return
+		}
+		c.After(remaining)
+		accent = v.Theme.Colors.Status.Success.Foreground
+		message = fmt.Sprintf(v.Assets.Text.Plugins.RecoveryBannerDone, rec.Restored)
+	case app.PluginRecoveryPartial:
+		remaining := 10*time.Second - time.Since(rec.UpdatedAt)
+		if remaining <= 0 {
+			return
+		}
+		c.After(remaining)
+		accent = v.Theme.Colors.Status.Warning.Foreground
+		message = fmt.Sprintf(v.Assets.Text.Plugins.RecoveryBannerPartial, rec.Restored, rec.Total)
+	default:
+		return
+	}
+	if message == "" {
+		return
+	}
+	d := deriveColors(v.Theme)
+	ui.Column(c.Key("plugin-recovery-banner")).Absolute().Left(collapsedRailWidth).Right(0).Top(28).AlignItems(ui.Center).
+		ZIndex(200).PassThrough().Children(func() {
+		pill := ui.Row(c.Key("plugin-recovery-pill")).AlignItems(ui.Center).Gap(14).Padding(14, 24).Radius(18).
+			Material(glass.Blur{Radius: 25}).
+			Background(d.toastFill).
+			Border(1, d.toastBorder).
+			MaxWidth(width - collapsedRailWidth - 120).
+			Role(ui.RoleStatus).PassThrough()
+		if v.Theme.Dark {
+			pill.Shadow(0, 12, 40, 0, withAlpha(v.Theme.Colors.Overlay.Shadow, 0x44))
+		}
+		pill.Children(func() {
+			ui.Box(c.Key("plugin-recovery-dot")).Width(10).Height(10).Radius(5).Background(paint(accent)).Shrink(0).PassThrough()
+			ui.Text(c.Key("plugin-recovery-text"), message).FontSize(22).TextColor(d.toastText).PassThrough()
+		})
+	})
 }
 
 func (v *View) renderRootPage(c *ui.Context, location app.Location, active bool, width, height float32) {

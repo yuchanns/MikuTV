@@ -760,6 +760,114 @@ func (c *CatalogClient) DownloadAsset(ctx context.Context, asset ReleaseAsset) (
 	return data, digest, nil
 }
 
+// DownloadReleaseAsset fetches the pinned plugin.zip for a previously installed
+// repository and release tag (preferring exact assetID when available) and
+// enforces expectedSHA256 verification before returning the bytes.
+func (c *CatalogClient) DownloadReleaseAsset(ctx context.Context, rawRepo, tagName string, assetID int64, expectedSHA256 string) ([]byte, [sha256.Size]byte, error) {
+	canonical, ok := ParseRepository(rawRepo)
+	if !ok {
+		return nil, [sha256.Size]byte{}, ErrInvalidRepository
+	}
+	parts := strings.Split(canonical, "/")
+	var release *githubReleaseEntry
+	if tag := strings.TrimSpace(tagName); tag != "" {
+		endpoint := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s",
+			c.apiBase(), url.PathEscape(parts[0]), url.PathEscape(parts[1]), url.PathEscape(tag))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, [sha256.Size]byte{}, err
+		}
+		c.setGitHubHeaders(req)
+		resp, err := c.httpClient().Do(req)
+		if err != nil {
+			return nil, [sha256.Size]byte{}, err
+		}
+		if resp.StatusCode == http.StatusOK {
+			var rel githubReleaseEntry
+			decErr := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&rel)
+			resp.Body.Close()
+			if decErr != nil {
+				return nil, [sha256.Size]byte{}, fmt.Errorf("decode release tag: %w", decErr)
+			}
+			release = &rel
+		} else {
+			err := checkGitHubResponse(resp)
+			status := resp.StatusCode
+			resp.Body.Close()
+			if status != http.StatusNotFound {
+				return nil, [sha256.Size]byte{}, err
+			}
+		}
+	}
+
+	var candidates []githubReleaseEntry
+	if release != nil {
+		candidates = []githubReleaseEntry{*release}
+	} else {
+		endpoint := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=20",
+			c.apiBase(), url.PathEscape(parts[0]), url.PathEscape(parts[1]))
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return nil, [sha256.Size]byte{}, err
+		}
+		c.setGitHubHeaders(req)
+		resp, err := c.httpClient().Do(req)
+		if err != nil {
+			return nil, [sha256.Size]byte{}, err
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			return nil, [sha256.Size]byte{}, ErrNoOfficialRelease
+		}
+		if err := checkGitHubResponse(resp); err != nil {
+			resp.Body.Close()
+			return nil, [sha256.Size]byte{}, err
+		}
+		decErr := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&candidates)
+		resp.Body.Close()
+		if decErr != nil {
+			return nil, [sha256.Size]byte{}, fmt.Errorf("decode releases: %w", decErr)
+		}
+	}
+
+	var matched ReleaseAsset
+	found := false
+	if assetID > 0 {
+		for _, rel := range candidates {
+			if rel.Draft {
+				continue
+			}
+			for _, a := range rel.Assets {
+				if a.ID == assetID && strings.EqualFold(strings.TrimSpace(a.Name), "plugin.zip") &&
+					a.Size > 0 && a.Size <= MaxInspectArchiveBytes && strings.TrimSpace(a.BrowserDownloadURL) != "" {
+					matched = ReleaseAsset{
+						ReleaseID:   rel.ID,
+						TagName:     strings.TrimSpace(rel.TagName),
+						PublishedAt: strings.TrimSpace(rel.PublishedAt),
+						AssetID:     a.ID,
+						AssetName:   a.Name,
+						DownloadURL: strings.TrimSpace(a.BrowserDownloadURL),
+						Size:        a.Size,
+					}
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+	}
+	if !found {
+		matched, found = selectOfficialPluginAsset(candidates)
+	}
+	if !found {
+		return nil, [sha256.Size]byte{}, ErrNoOfficialRelease
+	}
+	matched.SHA256 = strings.TrimSpace(expectedSHA256)
+	return c.DownloadAsset(ctx, matched)
+}
+
 func (c *CatalogClient) downloadArchive(ctx context.Context, rawURL string) ([]byte, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsed.Host == "" {

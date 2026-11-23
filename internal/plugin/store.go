@@ -41,13 +41,33 @@ type InstalledPackage struct {
 	Theme   *ThemePackage
 }
 
+// StoreBackup mirrors lightweight plugin receipts and store state into durable
+// platform storage (such as tvOS NSUserDefaults) so plugins can be detected and
+// self-healed if the OS purges Library/Caches under low-storage pressure.
+type StoreBackup interface {
+	LoadPluginReceiptsBackup() []byte
+	SavePluginReceiptsBackup(data []byte) error
+	LoadPluginStateBackup() []byte
+	SavePluginStateBackup(data []byte) error
+}
+
 type PackageStore struct {
-	mu   sync.Mutex
-	root string
+	mu     sync.Mutex
+	root   string
+	backup StoreBackup
 }
 
 func NewPackageStore(root string) *PackageStore {
 	return &PackageStore{root: root}
+}
+
+func (s *PackageStore) SetBackup(backup StoreBackup) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.backup = backup
+	s.mu.Unlock()
 }
 
 func (s *PackageStore) Root() string {
@@ -189,19 +209,33 @@ func (s *PackageStore) SaveAppearanceMotion(hoverPreview, reduceMotion bool) err
 func (s *PackageStore) loadStateLocked() (packageStoreState, error) {
 	raw, err := os.ReadFile(s.statePath())
 	if err != nil {
-		if os.IsNotExist(err) {
-			return packageStoreState{}, nil
+		if !os.IsNotExist(err) {
+			return packageStoreState{}, err
 		}
-		return packageStoreState{}, err
+		if s.backup != nil {
+			if backed := s.backup.LoadPluginStateBackup(); len(backed) > 0 {
+				var st packageStoreState
+				if jsonErr := json.Unmarshal(backed, &st); jsonErr == nil {
+					_ = s.writeStateFileLocked(st)
+					return st, nil
+				}
+			}
+		}
+		return packageStoreState{}, nil
 	}
 	var st packageStoreState
 	if err := json.Unmarshal(raw, &st); err != nil {
 		return packageStoreState{}, fmt.Errorf("decode plugin store state: %w", err)
 	}
+	if s.backup != nil && len(s.backup.LoadPluginStateBackup()) == 0 {
+		if compact, mErr := json.Marshal(st); mErr == nil {
+			_ = s.backup.SavePluginStateBackup(compact)
+		}
+	}
 	return st, nil
 }
 
-func (s *PackageStore) saveStateLocked(st packageStoreState) error {
+func (s *PackageStore) writeStateFileLocked(st packageStoreState) error {
 	if err := os.MkdirAll(s.root, 0o755); err != nil {
 		return err
 	}
@@ -214,6 +248,18 @@ func (s *PackageStore) saveStateLocked(st packageStoreState) error {
 		return err
 	}
 	return os.Rename(tmp, s.statePath())
+}
+
+func (s *PackageStore) saveStateLocked(st packageStoreState) error {
+	if err := s.writeStateFileLocked(st); err != nil {
+		return err
+	}
+	if s.backup != nil {
+		if compact, err := json.Marshal(st); err == nil {
+			_ = s.backup.SavePluginStateBackup(compact)
+		}
+	}
+	return nil
 }
 
 func (s *PackageStore) LoadDisabledBundled() ([]string, error) {
@@ -367,22 +413,86 @@ func (s *PackageStore) saveReceiptsLocked(receipts []InstalledReceipt) error {
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.receiptsPath())
+	if err := os.Rename(tmp, s.receiptsPath()); err != nil {
+		return err
+	}
+	if s.backup != nil {
+		if compact, err := json.Marshal(receipts); err == nil {
+			_ = s.backup.SavePluginReceiptsBackup(compact)
+		}
+	}
+	return nil
 }
 
 // LoadAll opens every persisted external plugin package, verifying each stored
 // archive's SHA-256 against its receipt before compiling it.
 func (s *PackageStore) LoadAll(ctx context.Context, appVersion string) ([]InstalledPackage, []error) {
+	loaded, _, _, failures := s.LoadAllWithMissing(ctx, appVersion)
+	return loaded, failures
+}
+
+// LoadAllWithMissing opens every persisted external plugin package and compares
+// against durable backup receipts (when configured) so plugins purged from
+// Library/Caches by tvOS under low-storage pressure are returned in missing for
+// automatic SHA-256-verified self-healing.
+func (s *PackageStore) LoadAllWithMissing(ctx context.Context, appVersion string) ([]InstalledPackage, []InstalledReceipt, bool, []error) {
 	if s == nil || s.root == "" {
-		return nil, nil
+		return nil, nil, false, nil
 	}
 	s.mu.Lock()
-	receipts, err := s.loadReceiptsLocked()
-	s.mu.Unlock()
-	if err != nil {
-		return nil, []error{err}
+	diskRaw, diskErr := os.ReadFile(s.receiptsPath())
+	var diskReceipts []InstalledReceipt
+	diskMissing := false
+	if diskErr != nil {
+		if os.IsNotExist(diskErr) {
+			diskMissing = true
+		} else {
+			s.mu.Unlock()
+			return nil, nil, false, []error{diskErr}
+		}
+	} else if err := json.Unmarshal(diskRaw, &diskReceipts); err != nil {
+		s.mu.Unlock()
+		return nil, nil, false, []error{fmt.Errorf("decode installed plugin receipts: %w", err)}
 	}
+
+	var backupReceipts []InstalledReceipt
+	backupLoaded := false
+	if s.backup != nil {
+		if backed := s.backup.LoadPluginReceiptsBackup(); len(backed) > 0 {
+			if err := json.Unmarshal(backed, &backupReceipts); err == nil {
+				backupLoaded = true
+			}
+		}
+	}
+
+	receipts := append([]InstalledReceipt(nil), diskReceipts...)
+	cachePurged := false
+	if diskMissing && len(backupReceipts) > 0 {
+		receipts = append([]InstalledReceipt(nil), backupReceipts...)
+		cachePurged = true
+	} else if !diskMissing && len(diskReceipts) > 0 && !backupLoaded && s.backup != nil {
+		// Seed durable backup once for existing installations upgrading to backup support.
+		if compact, err := json.Marshal(diskReceipts); err == nil {
+			_ = s.backup.SavePluginReceiptsBackup(compact)
+		}
+	} else if len(backupReceipts) > 0 {
+		existing := make(map[string]bool, len(receipts))
+		for _, r := range receipts {
+			existing[strings.ToLower(strings.TrimSpace(r.ID))] = true
+		}
+		for _, r := range backupReceipts {
+			key := strings.ToLower(strings.TrimSpace(r.ID))
+			if key != "" && !existing[key] {
+				receipts = append(receipts, r)
+				existing[key] = true
+				cachePurged = true
+			}
+		}
+	}
+	s.mu.Unlock()
+
 	var loaded []InstalledPackage
+	var missing []InstalledReceipt
 	var failures []error
 	seen := make(map[string]bool, len(receipts))
 	for _, receipt := range receipts {
@@ -392,13 +502,22 @@ func (s *PackageStore) LoadAll(ctx context.Context, appVersion string) ([]Instal
 			continue
 		}
 		seen[idKey] = true
+		recoverable := strings.TrimSpace(receipt.Repository) != "" && strings.TrimSpace(receipt.SHA256) != ""
 		data, err := os.ReadFile(s.packageZipPath(receipt.ID))
 		if err != nil {
+			if recoverable {
+				missing = append(missing, receipt)
+				cachePurged = true
+			}
 			failures = append(failures, fmt.Errorf("installed plugin %s: %w", receipt.ID, err))
 			continue
 		}
 		digest := sha256.Sum256(data)
 		if strings.ToLower(receipt.SHA256) != fmt.Sprintf("%x", digest) {
+			if recoverable {
+				missing = append(missing, receipt)
+				cachePurged = true
+			}
 			failures = append(failures, fmt.Errorf("installed plugin %s: %w", receipt.ID, ErrDigestMismatch))
 			continue
 		}
@@ -432,7 +551,111 @@ func (s *PackageStore) LoadAll(ctx context.Context, appVersion string) ([]Instal
 			failures = append(failures, fmt.Errorf("installed plugin %s: %w: unsupported kind %q", receipt.ID, ErrIncompatible, receipt.Kind))
 		}
 	}
-	return loaded, failures
+	return loaded, missing, cachePurged, failures
+}
+
+// RestoreReceipt verifies downloaded bytes strictly against a backed-up
+// receipt's pinned SHA-256 digest and identity, restores packages/<id>/plugin.zip
+// atomically, and ensures receipts.json contains the restored entry.
+func (s *PackageStore) RestoreReceipt(ctx context.Context, receipt InstalledReceipt, data []byte, appVersion string) (InstalledPackage, error) {
+	if s == nil || s.root == "" {
+		return InstalledPackage{}, fmt.Errorf("plugin package store is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return InstalledPackage{}, err
+	}
+	if !validPluginID(receipt.ID) || strings.TrimSpace(receipt.SHA256) == "" {
+		return InstalledPackage{}, fmt.Errorf("invalid plugin receipt for restoration")
+	}
+	if len(data) == 0 {
+		return InstalledPackage{}, fmt.Errorf("empty plugin archive")
+	}
+	digest := sha256.Sum256(data)
+	gotHex := fmt.Sprintf("%x", digest)
+	if !strings.EqualFold(strings.TrimSpace(receipt.SHA256), gotHex) {
+		return InstalledPackage{}, fmt.Errorf("%w: expected %s, got %s", ErrDigestMismatch, receipt.SHA256, gotHex)
+	}
+
+	var out InstalledPackage
+	switch receipt.Kind {
+	case SourceKind:
+		src, err := Open(ctx, data, appVersion)
+		if err != nil {
+			return InstalledPackage{}, err
+		}
+		m := src.Manifest()
+		if m.ID != receipt.ID || m.Version != receipt.Version || m.Kind != receipt.Kind {
+			return InstalledPackage{}, fmt.Errorf("restored manifest does not match receipt for %s", receipt.ID)
+		}
+		out.Source = src
+	case ThemeKind:
+		pkg, err := OpenTheme(data, appVersion)
+		if err != nil {
+			return InstalledPackage{}, err
+		}
+		m := pkg.Manifest()
+		if m.ID != receipt.ID || m.Version != receipt.Version || m.Kind != receipt.Kind {
+			return InstalledPackage{}, fmt.Errorf("restored theme manifest does not match receipt for %s", receipt.ID)
+		}
+		receipt.Swatches = pkg.Theme().Swatches()
+		out.Theme = pkg
+	default:
+		return InstalledPackage{}, fmt.Errorf("%w: unsupported kind %q", ErrIncompatible, receipt.Kind)
+	}
+
+	if err := os.MkdirAll(s.stagingDir(), 0o755); err != nil {
+		return InstalledPackage{}, err
+	}
+	staged, err := os.CreateTemp(s.stagingDir(), "restore-*.zip")
+	if err != nil {
+		return InstalledPackage{}, err
+	}
+	stagedPath := staged.Name()
+	cleanupStaged := true
+	defer func() {
+		if cleanupStaged {
+			_ = os.Remove(stagedPath)
+		}
+	}()
+	if _, err := staged.Write(data); err != nil {
+		_ = staged.Close()
+		return InstalledPackage{}, err
+	}
+	if err := staged.Close(); err != nil {
+		return InstalledPackage{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	target := s.packageZipPath(receipt.ID)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return InstalledPackage{}, err
+	}
+	if err := os.Rename(stagedPath, target); err != nil {
+		return InstalledPackage{}, err
+	}
+	cleanupStaged = false
+
+	receipts, err := s.loadReceiptsLocked()
+	if err != nil {
+		receipts = nil
+	}
+	replaced := false
+	for i, existing := range receipts {
+		if strings.EqualFold(existing.ID, receipt.ID) {
+			receipts[i] = receipt
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		receipts = append(receipts, receipt)
+	}
+	if err := s.saveReceiptsLocked(receipts); err != nil {
+		return InstalledPackage{}, err
+	}
+	out.Receipt = receipt
+	return out, nil
 }
 
 // StageAndInstall writes the downloaded archive to a temporary staging file,

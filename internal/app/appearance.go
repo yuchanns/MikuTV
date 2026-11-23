@@ -464,6 +464,39 @@ func (a *AppearanceSettings) RegisterTheme(pkg *plugin.ThemePackage) {
 	a.notify()
 }
 
+// ReapplyStoredThemes re-binds persisted light/dark theme slots after external
+// theme plugins are restored during startup cache recovery.
+func (a *AppearanceSettings) ReapplyStoredThemes() {
+	if a == nil || a.store == nil {
+		return
+	}
+	st, err := a.store.LoadAppearanceState()
+	if err != nil {
+		return
+	}
+	a.mu.Lock()
+	a.mode = normalizeAppearanceMode(st.AppearanceMode, st.FollowSystem)
+	a.lightID = a.sanitizeStoredIDLocked(st.LightTheme, theme.BaseMikuTVLight)
+	a.darkID = a.sanitizeStoredIDLocked(st.DarkTheme, theme.BaseMikuTVDark)
+	prevID := a.activeID
+	nextID, nextTheme := a.effectiveLocked()
+	a.activeID = nextID
+	a.activeTheme = nextTheme
+	onTheme := a.onTheme
+	onSyncCat := a.onSyncCat
+	a.mu.Unlock()
+
+	if nextID != prevID {
+		if onTheme != nil {
+			onTheme(nextTheme)
+		}
+		if onSyncCat != nil {
+			onSyncCat(nextID)
+		}
+	}
+	a.notify()
+}
+
 // UpdateTheme replaces a registered theme and, if it is the currently effective
 // theme, atomically swaps the live theme without touching any content source (§7.2).
 func (a *AppearanceSettings) UpdateTheme(pkg *plugin.ThemePackage) error {

@@ -30,6 +30,8 @@ type Preferences struct {
 	playbackPrefsKey  objc.ID
 	danmakuDisplayKey objc.ID
 	danmakuRulesKey   objc.ID
+	pluginReceiptsKey objc.ID
+	pluginStateKey    objc.ID
 	domain            objc.ID
 	writes            sync.Mutex
 }
@@ -47,6 +49,8 @@ func NewPreferences() (*Preferences, error) {
 	playbackPrefsKey := strCls.Send(strSel, playbackPrefsDefaultsKey)
 	danmakuDisplayKey := strCls.Send(strSel, danmakuDisplayDefaultsKey)
 	danmakuRulesKey := strCls.Send(strSel, danmakuRulesDefaultsKey)
+	pluginReceiptsKey := strCls.Send(strSel, "pluginReceiptsBackup")
+	pluginStateKey := strCls.Send(strSel, "pluginStateBackup")
 	bundle := objc.ID(objc.GetClass("NSBundle")).Send(objc.RegisterName("mainBundle"))
 	domain := bundle.Send(objc.RegisterName("bundleIdentifier"))
 	if domain == 0 {
@@ -59,10 +63,13 @@ func NewPreferences() (*Preferences, error) {
 	playbackPrefsKey.Send(retain)
 	danmakuDisplayKey.Send(retain)
 	danmakuRulesKey.Send(retain)
+	pluginReceiptsKey.Send(retain)
+	pluginStateKey.Send(retain)
 	domain.Send(retain)
 	return &Preferences{
 		defaults: defaults, key: key, positionsKey: positionsKey, searchHistoryKey: searchHistoryKey,
-		playbackPrefsKey: playbackPrefsKey, danmakuDisplayKey: danmakuDisplayKey, danmakuRulesKey: danmakuRulesKey, domain: domain,
+		playbackPrefsKey: playbackPrefsKey, danmakuDisplayKey: danmakuDisplayKey, danmakuRulesKey: danmakuRulesKey,
+		pluginReceiptsKey: pluginReceiptsKey, pluginStateKey: pluginStateKey, domain: domain,
 	}, nil
 }
 
@@ -423,6 +430,48 @@ func (p *Preferences) ClearPluginStorage(pluginID, entryID string) error {
 		p.defaults.Send(objc.RegisterName("removeObjectForKey:"), nsStringObj(pluginStorageKey(pluginID, entryID)))
 	})
 	return nil
+}
+
+func (p *Preferences) LoadPluginReceiptsBackup() []byte {
+	var data []byte
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		value := p.defaults.Send(objc.RegisterName("stringForKey:"), p.pluginReceiptsKey)
+		if value != 0 {
+			data = []byte(objc.Send[string](value, objc.RegisterName("UTF8String")))
+		}
+	})
+	return data
+}
+
+func (p *Preferences) SavePluginReceiptsBackup(data []byte) error {
+	var saveErr error
+	withAutoreleasePool(func() {
+		saveErr = p.saveString(p.pluginReceiptsKey, nsStringObj(string(data)), "")
+	})
+	return saveErr
+}
+
+func (p *Preferences) LoadPluginStateBackup() []byte {
+	var data []byte
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		value := p.defaults.Send(objc.RegisterName("stringForKey:"), p.pluginStateKey)
+		if value != 0 {
+			data = []byte(objc.Send[string](value, objc.RegisterName("UTF8String")))
+		}
+	})
+	return data
+}
+
+func (p *Preferences) SavePluginStateBackup(data []byte) error {
+	var saveErr error
+	withAutoreleasePool(func() {
+		saveErr = p.saveString(p.pluginStateKey, nsStringObj(string(data)), "")
+	})
+	return saveErr
 }
 
 func pluginStorageKey(pluginID, entryID string) string {

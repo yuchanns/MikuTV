@@ -161,6 +161,8 @@ func main() {
 		packageStore := platform.NewPluginPackageStore()
 		if pluginCatalogBase != "" {
 			packageStore = platform.NewPluginPackageStoreNamed("plugins-override")
+		} else {
+			packageStore.SetBackup(preferences)
 		}
 		disabledBundledList, err := packageStore.LoadDisabledBundled()
 		if err != nil {
@@ -220,7 +222,10 @@ func main() {
 			return aboutPl, installedPl
 		}
 
-		externalPackages, externalFailures := packageStore.LoadAll(context.Background(), appVersion)
+		externalPackages, missingReceipts, cachePurged, externalFailures := packageStore.LoadAllWithMissing(context.Background(), appVersion)
+		if cachePurged {
+			log.Printf("plugin recovery: detected tvOS cache purge (%d missing plugins queued for self-healing)", len(missingReceipts))
+		}
 		for _, err := range externalFailures {
 			log.Printf("external plugin load: %v", err)
 		}
@@ -572,6 +577,29 @@ func main() {
 		})
 		window.OnReadyToShow(func() { log.Print("MikuTV: first frame ready") })
 		view.SyncEntry()
+		if len(missingReceipts) > 0 {
+			pluginCatalog.StartStartupRecovery(missingReceipts, func(pkg plugin.InstalledPackage) error {
+				if pkg.Theme != nil {
+					aboutPl, _ := buildThemeMetadata(pkg.Theme, pkg.Receipt)
+					appearance.RegisterTheme(pkg.Theme)
+					appearance.ReapplyStoredThemes()
+					upsertAboutPlugin(aboutPl)
+					return nil
+				}
+				if pkg.Source != nil {
+					if err := upsertRuntimeSource(pkg.Source, pkg.Receipt, false); err != nil {
+						return err
+					}
+					view.SyncEntry()
+					return nil
+				}
+				return plugin.ErrIncompatible
+			}, func(restored, failed int) {
+				log.Printf("plugin recovery: finished restored=%d failed=%d", restored, failed)
+				appearance.ReapplyStoredThemes()
+				view.SyncEntry()
+			})
+		}
 		if pendingOpenURL != "" {
 			raw := pendingOpenURL
 			pendingOpenURL = ""
