@@ -464,3 +464,112 @@ func TestPlaybackPreloadNextReusesWarmedMediaAndCleansUpOnClose(t *testing.T) {
 		t.Fatal("Close did not clear preloaded episode resources")
 	}
 }
+
+func TestPlaybackInlinePreviewLifecycleAndFullscreenHandoff(t *testing.T) {
+	source := &playbackTestSession{requests: make(chan provider.PlaybackRequest, 4)}
+	catalog := &Catalog{session: source, entryID: "entry"}
+	store := &playbackTestStore{}
+	deliveries := make(chan func(), 8)
+	deliver := func() {
+		t.Helper()
+		select {
+		case fn := <-deliveries:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for inline preview delivery")
+		}
+	}
+
+	var (
+		previewCalls    []bool
+		fullscreenCalls []bool
+		openPositions   []float64
+		seekCalls       []float64
+		rates           []float64
+		stopCount       int
+		lastRect        player.ViewportRect
+		clock           player.Status
+	)
+	pb := NewPlayback(catalog, player.Engine{
+		Open: func(_ string, pos float64) bool {
+			openPositions = append(openPositions, pos)
+			return true
+		},
+		Seek:         func(sec float64) { seekCalls = append(seekCalls, sec) },
+		SetRate:      func(rate float64) { rates = append(rates, rate) },
+		Stop:         func() { stopCount++ },
+		Snapshot:     func() player.Status { return clock },
+		Fullscreen:   func(on bool) { fullscreenCalls = append(fullscreenCalls, on) },
+		Preview:      func(on bool) { previewCalls = append(previewCalls, on) },
+		ViewportRect: func(r player.ViewportRect) { lastRect = r },
+		Capabilities: func() player.Capabilities { return player.Capabilities{HDR: true, HEVC: true} },
+	}, store, func(fn func()) { deliveries <- fn }, func() {})
+	defer pb.Close()
+
+	target := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "entry", Kind: provider.Video, ID: "hero-1"}}
+	pb.StartInlinePreview(target)
+	if !pb.InlinePreviewState().Active || !pb.InlinePreviewState().Loading {
+		t.Fatalf("expected active loading preview, got %+v", pb.InlinePreviewState())
+	}
+	req := <-source.requests
+	if req.HDR || req.PreferredQuality != "1080p" {
+		t.Fatalf("inline preview must request SDR 1080p fast-start, got HDR=%t pref=%q", req.HDR, req.PreferredQuality)
+	}
+	deliver()
+
+	if len(fullscreenCalls) != 0 {
+		t.Fatalf("inline preview must never enter fullscreen: %v", fullscreenCalls)
+	}
+	if len(previewCalls) != 1 || !previewCalls[0] {
+		t.Fatalf("expected Preview(true), got %v", previewCalls)
+	}
+	if len(openPositions) != 1 || openPositions[0] != 0 {
+		t.Fatalf("expected preview open at 0, got %v", openPositions)
+	}
+	if len(rates) == 0 || rates[len(rates)-1] != 1 {
+		t.Fatalf("expected preview rate 1, got %v", rates)
+	}
+
+	wantRect := player.ViewportRect{X: 116, Y: 0, W: 1804, H: 875, Cover: true}
+	pb.SetInlinePreviewRect(wantRect)
+	if lastRect != wantRect {
+		t.Fatalf("viewport rect = %+v, want %+v", lastRect, wantRect)
+	}
+
+	clock = player.Status{HasFrame: true}
+	pb.TickInlinePreview(time.Now())
+	if st := pb.InlinePreviewState(); !st.HasFrame || !st.Playing {
+		t.Fatalf("expected HasFrame & Playing after tick, got %+v", st)
+	}
+
+	// Ending inline preview loops cleanly back to 0 without saving history.
+	clock = player.Status{HasFrame: true, Ended: true}
+	pb.TickInlinePreview(time.Now())
+	if len(seekCalls) != 1 || seekCalls[0] != 0 {
+		t.Fatalf("expected loop seek to 0 on end, got %v", seekCalls)
+	}
+	if store.saved != 0 {
+		t.Fatalf("inline preview must never persist watch history, saved=%.2f", store.saved)
+	}
+
+	// Entering full-screen Start() automatically tears down inline preview first.
+	startAt := 0.0
+	pb.Start(target, "user", false, &startAt)
+	if pb.InlinePreviewState().Active {
+		t.Fatal("fullscreen Start did not stop inline preview")
+	}
+	if stopCount == 0 || len(previewCalls) < 2 || previewCalls[len(previewCalls)-1] {
+		t.Fatalf("expected Stop + Preview(false) on handoff, stops=%d preview=%v", stopCount, previewCalls)
+	}
+	if len(fullscreenCalls) != 1 || !fullscreenCalls[0] {
+		t.Fatalf("expected Fullscreen(true) after handoff, got %v", fullscreenCalls)
+	}
+	<-source.requests
+	deliver()
+
+	// Inline preview must be ignored while fullscreen playback is active.
+	pb.StartInlinePreview(provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "entry", Kind: provider.Video, ID: "hero-2"}})
+	if pb.InlinePreviewState().Active {
+		t.Fatal("inline preview started while fullscreen playback was active")
+	}
+}

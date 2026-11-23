@@ -74,6 +74,7 @@ type catalogHome struct {
 	selected     int
 	featureStep  float32
 	featureInfo  catalogFeatureInfo
+	heroPreview  catalogHeroPreview
 	lastCard     app.FocusID
 	rotateAt     time.Time
 	hold         catalogHold
@@ -141,6 +142,8 @@ func (catalogPage) Render(c *ui.Context, p *PageContext) {
 		home.feedRevision, home.featured = current.FeedRevision, nil
 		home.rowScrolls = nil
 		home.featureInfo.reset()
+		p.host.stopHomePreview()
+		home.heroPreview.reset()
 		home.rotateAt = time.Time{}
 	}
 	picks := firstCatalogItems(current.Page.Collections)
@@ -163,10 +166,12 @@ func (catalogPage) Render(c *ui.Context, p *PageContext) {
 	if home.hold.key == ui.KeyUnknown {
 		p.selectCatalogFeature(c, current, shelves, picks)
 		p.syncCatalogFeatureInfo(c, current)
+		p.syncCatalogHeroPreview(c, current)
 		p.host.SyncTopShelf()
 	} else {
 		// Keep the current artwork while the user is moving through rows.
 		home.featureInfo.stop()
+		p.host.stopHomePreview()
 		prefetch *= 4
 	}
 
@@ -419,7 +424,8 @@ func (p *PageContext) selectCatalogFeature(c *ui.Context, current app.CatalogSna
 		}
 	}
 	now := c.Now()
-	if catalogSelectionPinned(p.State.Focus) || p.scroll().Y > 8 || len(home.featured) < 2 ||
+	previewActive := p.host.Playback != nil && p.host.Playback.InlinePreviewState().Active
+	if catalogSelectionPinned(p.State.Focus) || previewActive || p.scroll().Y > 8 || len(home.featured) < 2 ||
 		current.Phase != app.CatalogReady || p.host.reduceMotionEnabled(c) {
 		home.rotateAt = time.Time{}
 		return
@@ -525,6 +531,8 @@ func (v *View) showHomeTab(tab, filter string) {
 	if home.tab != tab {
 		home.filters = nil
 	}
+	v.stopHomePreview()
+	home.heroPreview.reset()
 	home.tab, home.filter, home.featured = tab, filter, nil
 	home.lastCard = ""
 	home.rotateAt = time.Time{}

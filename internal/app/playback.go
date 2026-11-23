@@ -29,7 +29,17 @@ const (
 	autoHDRStartupLimit       = 10 * time.Second
 	autoCDNGraceExtra         = 2 * time.Second
 	preloadExpiryMarginSec    = 10
+	inlinePreviewStallTimeout = 12 * time.Second
 )
+
+type InlinePreviewState struct {
+	Target   provider.PlaybackTarget
+	Active   bool
+	Loading  bool
+	HasFrame bool
+	Playing  bool
+	Failed   bool
+}
 
 type preloadedPlayback struct {
 	target           provider.PlaybackTarget
@@ -118,6 +128,13 @@ type Playback struct {
 	preloadTarget  provider.PlaybackTarget
 	preloadOwner   string
 	preloaded      *preloadedPlayback
+
+	inlineActive    bool
+	inlineState     InlinePreviewState
+	inlineMedia     *player.Media
+	inlineCancel    context.CancelFunc
+	inlineRequest   uint64
+	inlineStartedAt time.Time
 }
 
 type queuedPlaybackReport struct {
@@ -173,6 +190,7 @@ func (p *Playback) SetBackdropBlur(radius float32) bool {
 
 // Start resumes a saved position when start is nil.
 func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSource bool, start *float64) {
+	p.StopInlinePreview()
 	var hit *preloadedPlayback
 	prefQ := p.preferredQuality()
 	if p.preloaded != nil && p.preloaded.target == target && p.preloaded.owner == owner && p.preloaded.preferredQuality == prefQ &&
@@ -217,6 +235,7 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 }
 
 func (p *Playback) Close() {
+	p.StopInlinePreview()
 	if !p.active {
 		p.clearPreload()
 		return
@@ -1132,9 +1151,168 @@ func (p *Playback) Retry() {
 }
 
 func (p *Playback) Suspend() {
+	p.StopInlinePreview()
 	if p.active {
 		p.save()
 		p.bufferedAt = time.Time{}
+	}
+}
+
+func (p *Playback) InlinePreviewState() InlinePreviewState {
+	if p == nil {
+		return InlinePreviewState{}
+	}
+	return p.inlineState
+}
+
+func (p *Playback) SetInlinePreviewRect(rect player.ViewportRect) {
+	if p == nil || !p.inlineActive || p.active || p.engine.ViewportRect == nil {
+		return
+	}
+	p.engine.ViewportRect(rect)
+}
+
+// StartInlinePreview resolves and plays a low-friction SDR preview stream with
+// audio inside the Home Hero without recording watch history or triggering
+// display mode switching.
+func (p *Playback) StartInlinePreview(target provider.PlaybackTarget) {
+	if p == nil || p.active || target.Ref.ID == "" || !target.Ref.Kind.Valid() || p.post == nil || p.catalog == nil {
+		return
+	}
+	if p.inlineActive && p.inlineState.Target == target && !p.inlineState.Failed {
+		return
+	}
+	p.StopInlinePreview()
+	resolver, _ := p.catalog.session.(provider.PlaybackReader)
+	if resolver == nil {
+		p.inlineState = InlinePreviewState{Target: target, Failed: true}
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	p.inlineCancel = cancel
+	p.inlineRequest++
+	reqID := p.inlineRequest
+	p.inlineActive = true
+	p.inlineState = InlinePreviewState{Target: target, Active: true, Loading: true}
+	var caps player.Capabilities
+	if p.engine.Capabilities != nil {
+		caps = p.engine.Capabilities()
+	}
+	input := provider.PlaybackRequest{
+		PlaybackTarget:   target,
+		PreferredQuality: "1080p",
+		HDR:              false,
+		HEVC:             caps.HEVC,
+	}
+	go func() {
+		result, err := resolver.ResolvePlayback(ctx, input)
+		var media *player.Media
+		if err == nil && (result.Plan.Access == "" || result.Plan.Access == provider.VideoAccessGranted) &&
+			result.Plan.Restriction == "" && !result.Plan.LiveEnded {
+			media, err = player.OpenMedia(ctx, result)
+		}
+		p.post(func() {
+			if !p.inlineActive || p.active || p.inlineRequest != reqID || ctx.Err() != nil {
+				if media != nil {
+					media.Close()
+				}
+				return
+			}
+			cancel()
+			p.inlineCancel = nil
+			if err != nil || media == nil {
+				if media != nil {
+					media.Close()
+				}
+				p.inlineActive = false
+				p.inlineState = InlinePreviewState{Target: target, Failed: true}
+				if p.changed != nil {
+					p.changed()
+				}
+				return
+			}
+			if p.engine.Preview != nil {
+				p.engine.Preview(true)
+			}
+			if p.engine.Open == nil || !p.engine.Open(media.URL, 0) {
+				media.Close()
+				if p.engine.Preview != nil {
+					p.engine.Preview(false)
+				}
+				p.inlineActive = false
+				p.inlineState = InlinePreviewState{Target: target, Failed: true}
+				if p.changed != nil {
+					p.changed()
+				}
+				return
+			}
+			p.inlineMedia = media
+			p.inlineStartedAt = time.Now()
+			p.inlineState.Loading = false
+			if p.engine.SetRate != nil {
+				p.engine.SetRate(1)
+			}
+			if p.changed != nil {
+				p.changed()
+			}
+		})
+	}()
+}
+
+func (p *Playback) StopInlinePreview() {
+	if p == nil {
+		return
+	}
+	if p.inlineCancel != nil {
+		p.inlineCancel()
+		p.inlineCancel = nil
+	}
+	p.inlineRequest++
+	wasActive := p.inlineActive || p.inlineMedia != nil
+	p.inlineActive = false
+	p.inlineStartedAt = time.Time{}
+	p.inlineState = InlinePreviewState{}
+	if !p.active && wasActive {
+		if p.engine.Stop != nil {
+			p.engine.Stop()
+		}
+		if p.engine.Preview != nil {
+			p.engine.Preview(false)
+		}
+	}
+	if p.inlineMedia != nil {
+		p.inlineMedia.Close()
+		p.inlineMedia = nil
+	}
+}
+
+func (p *Playback) TickInlinePreview(now time.Time) {
+	if p == nil || !p.inlineActive || p.active || p.inlineState.Loading || p.inlineMedia == nil || p.engine.Snapshot == nil {
+		return
+	}
+	clock := p.engine.Snapshot()
+	prevHasFrame := p.inlineState.HasFrame
+	p.inlineState.HasFrame = clock.HasFrame
+	p.inlineState.Playing = clock.HasFrame && !clock.Buffering && !clock.Ended && !clock.Failed
+	if clock.Failed || (!clock.HasFrame && !p.inlineStartedAt.IsZero() && now.Sub(p.inlineStartedAt) > inlinePreviewStallTimeout) {
+		target := p.inlineState.Target
+		p.StopInlinePreview()
+		p.inlineState = InlinePreviewState{Target: target, Failed: true}
+		if p.changed != nil {
+			p.changed()
+		}
+		return
+	}
+	if clock.Ended {
+		if p.engine.Seek != nil {
+			p.engine.Seek(0)
+		}
+		if p.engine.SetRate != nil {
+			p.engine.SetRate(1)
+		}
+	}
+	if clock.HasFrame && !prevHasFrame && p.changed != nil {
+		p.changed()
 	}
 }
 

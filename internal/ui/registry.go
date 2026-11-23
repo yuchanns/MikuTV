@@ -81,7 +81,11 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	}
 	home.Policy.ExitFocus = app.RailFocus(app.Home)
 	home.Back = (*View).backFromHome
-	home.Leave = func(v *View) { v.home.featureInfo.reset() }
+	home.Leave = func(v *View) {
+		v.home.featureInfo.reset()
+		v.stopHomePreview()
+		v.home.heroPreview.reset()
+	}
 	home.HandleKey = func(v *View, event ui.InputEvent, group string) bool {
 		return event.Repeat && v.startCatalogHold(event.Key, group)
 	}

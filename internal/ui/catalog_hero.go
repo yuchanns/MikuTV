@@ -3,19 +3,160 @@ package tvui
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/player"
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
 const (
-	homePlayAction   app.FocusID = "home/play"
-	homeDetailAction app.FocusID = "home/details"
-	homeLaterAction  app.FocusID = "home/watch-later"
+	homePlayAction           app.FocusID = "home/play"
+	homeDetailAction         app.FocusID = "home/details"
+	homeLaterAction          app.FocusID = "home/watch-later"
+	homeHeroPreviewDelay                 = 1200 * time.Millisecond
+	homeHeroPreviewMaxScroll             = 260
 )
+
+type catalogHeroPreview struct {
+	ref    provider.MediaRef
+	due    time.Time
+	failed map[provider.MediaRef]bool
+	logged provider.MediaRef
+}
+
+func (hp *catalogHeroPreview) reset() {
+	hp.ref, hp.due, hp.failed, hp.logged = provider.MediaRef{}, time.Time{}, nil, provider.MediaRef{}
+}
+
+func catalogPreviewEligibleFocus(focus app.FocusID) bool {
+	switch focus {
+	case homePlayAction, homeDetailAction, homeLaterAction:
+		return true
+	}
+	key := string(focus)
+	return strings.HasPrefix(key, "home/feature/") || strings.HasPrefix(key, "home/card/")
+}
+
+func (v *View) stopHomePreview() {
+	v.home.heroPreview.ref = provider.MediaRef{}
+	v.home.heroPreview.due = time.Time{}
+	v.home.heroPreview.logged = provider.MediaRef{}
+	if v.Playback != nil && v.Playback.InlinePreviewState().Active {
+		if v.Trace {
+			log.Printf("hero-preview: stop")
+		}
+		v.Playback.StopInlinePreview()
+	}
+}
+
+func (v *View) homePreviewPlayingFor(ref provider.MediaRef) bool {
+	if v.Playback == nil || ref.ID == "" {
+		return false
+	}
+	ps := v.Playback.InlinePreviewState()
+	return ps.Active && ps.HasFrame && ps.Target.Ref == ref
+}
+
+func (v *View) homePreviewShowing(layers []app.Location) bool {
+	if len(layers) != 1 || layers[0].Page != app.Home || v.home.tab != "" || v.State.Area != app.ContentArea ||
+		!v.hoverPreviewEnabled() || v.Playback == nil || v.Playback.Active() {
+		return false
+	}
+	if len(v.home.featured) == 0 || v.home.selected < 0 || v.home.selected >= len(v.home.featured) {
+		return false
+	}
+	item := v.home.featured[v.home.selected]
+	return v.homePreviewPlayingFor(item.Ref)
+}
+
+func (p *PageContext) syncCatalogHeroPreview(c *ui.Context, snapshot app.CatalogSnapshot) {
+	v := p.host
+	home := &v.home
+	hp := &home.heroPreview
+	entry, _ := p.State.Current()
+	scrollY := p.scroll().Y
+	if !p.active || p.State.Area != app.ContentArea || !v.hoverPreviewEnabled() || v.reduceMotionEnabled(c) ||
+		home.tab != "" || len(home.featured) == 0 || scrollY >= homeHeroPreviewMaxScroll ||
+		snapshot.Phase != app.CatalogReady || v.Playback == nil || v.Playback.Active() ||
+		!entry.Capabilities.Has(provider.ResolvePlayback) || !catalogPreviewEligibleFocus(p.State.Focus) {
+		v.stopHomePreview()
+		return
+	}
+	item := home.featured[home.selected]
+	if !item.Ref.Kind.Valid() || item.Ref.EntryID != entry.ID || hp.failed[item.Ref] {
+		v.stopHomePreview()
+		return
+	}
+	if item.Ref != hp.ref {
+		v.stopHomePreview()
+		hp.ref = item.Ref
+		hp.due = c.Now().Add(homeHeroPreviewDelay)
+	}
+	ps := v.Playback.InlinePreviewState()
+	if ps.Target.Ref == item.Ref && ps.Failed {
+		if hp.failed == nil {
+			hp.failed = make(map[provider.MediaRef]bool)
+		}
+		hp.failed[item.Ref] = true
+		v.stopHomePreview()
+		return
+	}
+	if ps.Active && ps.Target.Ref == item.Ref {
+		railW := v.railSpan
+		if railW <= 0 {
+			railW = collapsedRailWidth
+		}
+		totalW := p.Width + collapsedRailWidth
+		heroH := max(0, float32(homeArtHeight)-scrollY)
+		v.Playback.SetInlinePreviewRect(player.ViewportRect{
+			X:     float64(railW),
+			Y:     0,
+			W:     float64(max(0, totalW-railW)),
+			H:     float64(heroH),
+			Cover: true,
+		})
+		v.Playback.TickInlinePreview(c.Now())
+		ps = v.Playback.InlinePreviewState()
+		if ps.HasFrame && hp.logged != item.Ref {
+			hp.logged = item.Ref
+			if v.Trace {
+				log.Printf("hero-preview: ready ref=%s", item.Ref.ID)
+			}
+		}
+		if ps.HasFrame {
+			c.After(250 * time.Millisecond)
+		} else {
+			c.After(120 * time.Millisecond)
+		}
+		return
+	}
+	if remaining := hp.due.Sub(c.Now()); remaining > 0 {
+		c.After(remaining)
+		return
+	}
+	railW := v.railSpan
+	if railW <= 0 {
+		railW = collapsedRailWidth
+	}
+	totalW := p.Width + collapsedRailWidth
+	heroH := max(0, float32(homeArtHeight)-scrollY)
+	if v.Trace {
+		log.Printf("hero-preview: start ref=%s", item.Ref.ID)
+	}
+	v.Playback.StartInlinePreview(provider.PlaybackTarget{Ref: item.Ref})
+	v.Playback.SetInlinePreviewRect(player.ViewportRect{
+		X:     float64(railW),
+		Y:     0,
+		W:     float64(max(0, totalW-railW)),
+		H:     float64(heroH),
+		Cover: true,
+	})
+	c.After(120 * time.Millisecond)
+}
 
 type catalogFeatureInfo struct {
 	ref    provider.MediaRef
@@ -75,7 +216,17 @@ func (p *PageContext) catalogBackdrop(c *ui.Context, item provider.MediaItem) {
 	}
 	ui.Box(c.Key("home-backdrop")).Absolute().Left(0).Right(0).Top(0).Height(homeArtHeight).Clip().Children(func() {
 		transition, exit := p.catalogSlide(c)
-		ui.Box(c.Key("home-art-track")).Fill().ChildExit(exit).Children(func() {
+		artOpacity := float32(1)
+		if p.host.homePreviewPlayingFor(item.Ref) {
+			artOpacity = 0
+		}
+		track := ui.Box(c.Key("home-art-track")).Fill().ChildExit(exit)
+		fadeAnim := ui.Animation{Duration: 280 * time.Millisecond, Ease: ui.EaseOut, NonMotion: true}
+		if p.host.reduceMotionEnabled(c) {
+			fadeAnim = ui.Animation{}
+		}
+		fade := track.AnimateTo("preview-fade", artOpacity, fadeAnim)
+		track.Opacity(fade).Children(func() {
 			ui.Box(c.Key(item.Ref)).Absolute().Left(0).Top(0).Fill().Transition(transition).Children(func() {
 				if image != nil {
 					ui.Image(c, image).Fill().Fit(ui.Cover).ObjectPosition(0.6, 0.46).

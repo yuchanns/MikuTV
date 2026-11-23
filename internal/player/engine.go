@@ -1,5 +1,10 @@
 package player
 
+type ViewportRect struct {
+	X, Y, W, H float64
+	Cover      bool
+}
+
 type Engine struct {
 	Open         func(url string, position float64) bool
 	Seek         func(seconds float64)
@@ -8,7 +13,9 @@ type Engine struct {
 	Stop         func()
 	Snapshot     func() Status
 	Fullscreen   func(bool)
+	Preview      func(bool)
 	Viewport     func(widthFraction float64)
+	ViewportRect func(ViewportRect)
 	BackdropBlur func(radius float32) bool
 	Capabilities func() Capabilities
 }

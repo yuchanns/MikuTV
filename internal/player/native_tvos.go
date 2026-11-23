@@ -161,6 +161,7 @@ var (
 		avDisplayModeSwitchEndNotification      objc.ID
 		avDisplayModeSwitchSettingsNotification objc.ID
 		avLayerVideoGravityResizeAspect         objc.ID
+		avLayerVideoGravityResizeAspectFill     objc.ID
 		avAudioSessionCategoryPlayback          objc.ID
 		avAudioSessionModeMoviePlayback         objc.ID
 		avAudioSessionInterruptionNotification  objc.ID
@@ -182,6 +183,7 @@ var (
 		selRootViewController, selView, selLayer                    objc.SEL
 		selBounds, selFrame, selSetFrame, selInitWithFrame          objc.SEL
 		selSetOpaque, selSetAutoresizingMask, selSetUserInteract    objc.SEL
+		selSetClipsToBounds                                         objc.SEL
 		selSetHidden, selIsHidden, selSetBackgroundColor            objc.SEL
 		selBlackColor, selSetZPosition, selSetVideoGravity          objc.SEL
 		selSetPlayer, selInsertSubviewAtIndex, selAddSubview        objc.SEL
@@ -381,6 +383,7 @@ func loadTVOSPlayer() error {
 			{avKitLib, "AVDisplayManagerModeSwitchEndNotification", &n.avDisplayModeSwitchEndNotification},
 			{avKitLib, "AVDisplayManagerModeSwitchSettingsChangedNotification", &n.avDisplayModeSwitchSettingsNotification},
 			{avLib, "AVLayerVideoGravityResizeAspect", &n.avLayerVideoGravityResizeAspect},
+			{avLib, "AVLayerVideoGravityResizeAspectFill", &n.avLayerVideoGravityResizeAspectFill},
 			{avAudioLib, "AVAudioSessionCategoryPlayback", &n.avAudioSessionCategoryPlayback},
 			{avAudioLib, "AVAudioSessionModeMoviePlayback", &n.avAudioSessionModeMoviePlayback},
 			{avAudioLib, "AVAudioSessionInterruptionNotification", &n.avAudioSessionInterruptionNotification},
@@ -425,6 +428,7 @@ func loadTVOSPlayer() error {
 		n.selSetFrame = sel("setFrame:")
 		n.selInitWithFrame = sel("initWithFrame:")
 		n.selSetOpaque = sel("setOpaque:")
+		n.selSetClipsToBounds = sel("setClipsToBounds:")
 		n.selSetAutoresizingMask = sel("setAutoresizingMask:")
 		n.selSetUserInteract = sel("setUserInteractionEnabled:")
 		n.selSetHidden = sel("setHidden:")
@@ -754,6 +758,7 @@ type tvosPlayer struct {
 	seeking                bool
 	foreground             bool
 	fullscreen             bool
+	preview                bool
 	audioInterrupted       bool
 	idleHeld               bool
 	idleDisabled           bool
@@ -788,7 +793,9 @@ func NewNative(window uintptr) (Engine, func()) {
 		Snapshot:     p.snapshot,
 		Stop:         p.stop,
 		Fullscreen:   p.setFullscreen,
+		Preview:      p.setPreview,
 		Viewport:     p.setViewport,
+		ViewportRect: p.setViewportRect,
 		BackdropBlur: func(radius float32) bool { return p.blurBackdrop(float64(radius)) },
 		Capabilities: func() Capabilities {
 			return Capabilities{HDR: tvosHDRSupported(), HEVC: tvosHEVCSupported()}
@@ -837,6 +844,7 @@ func newTVOSPlayer(window objc.ID) *tvosPlayer {
 	view := n.initRect(n.getObj(objc.ID(n.layerClass), n.selAlloc), n.selInitWithFrame, bounds)
 	setOwned(&p.view, view)
 	n.setUintptr(p.view, n.selSetAutoresizingMask, uiViewAutoresizingFlexibleSize)
+	n.setBool(p.view, n.selSetClipsToBounds, true)
 	n.setBool(p.view, n.selSetUserInteract, false)
 	n.setBool(p.view, n.selSetHidden, true)
 	black := n.getObj(objc.ID(objc.GetClass("UIColor")), n.selBlackColor)
@@ -950,7 +958,7 @@ func (p *tvosPlayer) onBecomeActive() {
 		}
 		p.foreground = true
 		p.refreshMatchDisplay()
-		if p.fullscreen {
+		if p.fullscreen || p.preview {
 			p.activateAudioSession()
 		}
 		p.applyDisplayCriteria()
@@ -1063,7 +1071,7 @@ func (p *tvosPlayer) onAudioInterruption(note objc.ID) {
 			p.applyRate()
 		case avAudioSessionInterruptEnded:
 			p.audioInterrupted = false
-			if p.fullscreen && p.foreground {
+			if (p.fullscreen || p.preview) && p.foreground {
 				p.activateAudioSession()
 				if options&avAudioSessionOptShouldResume != 0 {
 					p.applyRate()
@@ -1286,7 +1294,7 @@ func (p *tvosPlayer) inspectTracksAndDisplayCriteria() {
 		p.resolvedVideoFormat = true
 		p.applyForwardBuffer(item)
 		p.applyDisplayCriteria()
-		if !p.hdrVideo {
+		if p.fullscreen && !p.hdrVideo {
 			p.attachBackdropOutputIfSafe()
 		}
 	}
@@ -1303,7 +1311,9 @@ func (p *tvosPlayer) applyForwardBuffer(item objc.ID) {
 		return
 	}
 	seconds := 30.0
-	if p.hdrVideo {
+	if p.preview && !p.fullscreen {
+		seconds = 6.0
+	} else if p.hdrVideo {
 		seconds = 45.0
 	}
 	tvosNative.setFloat64(item, tvosNative.selSetPrefForwardBuffer, seconds)
@@ -1327,9 +1337,9 @@ func (p *tvosPlayer) attachBackdropOutputIfSafe() {
 
 func (p *tvosPlayer) applyRate() {
 	n := &tvosNative
-	if !p.foreground || !p.fullscreen || p.audioInterrupted || p.seeking || p.ended || p.rate == 0 {
+	if !p.foreground || (!p.fullscreen && !p.preview) || p.audioInterrupted || p.seeking || p.ended || p.rate == 0 {
 		n.getObj(p.player, n.selPause)
-		if !p.hdrVideo && n.getBool(p.layer, n.selIsReadyForDisplay) && !p.seeking {
+		if p.fullscreen && !p.hdrVideo && n.getBool(p.layer, n.selIsReadyForDisplay) && !p.seeking {
 			p.attachBackdropOutputIfSafe()
 			p.sampleBackdropAt(n.caCurrentMediaTime())
 		}
@@ -1571,7 +1581,7 @@ func (p *tvosPlayer) setRate(rate float64) {
 	p.rate = float32(rate)
 	if rate > 0 {
 		p.audioInterrupted = false
-		if p.fullscreen && p.foreground {
+		if (p.fullscreen || p.preview) && p.foreground {
 			p.activateAudioSession()
 		}
 	}
@@ -1701,15 +1711,46 @@ func (p *tvosPlayer) stop() {
 func (p *tvosPlayer) setFullscreen(active bool) {
 	n := &tvosNative
 	p.fullscreen = active
+	if active {
+		p.preview = false
+		n.setObj(p.layer, n.selSetVideoGravity, n.avLayerVideoGravityResizeAspect)
+		if super := n.getObj(p.view, n.selSuperview); super != 0 {
+			bounds := n.getRect(super, n.selBounds)
+			if n.getRect(p.view, n.selFrame) != bounds {
+				n.setRect(p.view, n.selSetFrame, bounds)
+			}
+		}
+	}
 	p.applyDisplayCriteria()
 	p.applyIdle()
 	p.applyRate()
 	if p.fullscreen {
 		p.activateAudioSession()
-	} else {
+	} else if !p.preview {
 		audio := n.getObj(objc.ID(objc.GetClass("AVAudioSession")), n.selSharedInstance)
 		n.setAudioActiveOpts(audio, n.selSetActiveWithOptions, false, avAudioSessionDeactivateNotify, 0)
 	}
+}
+
+func (p *tvosPlayer) setPreview(active bool) {
+	n := &tvosNative
+	p.preview = active
+	if !p.fullscreen {
+		if active {
+			p.activateAudioSession()
+		} else {
+			n.setObj(p.layer, n.selSetVideoGravity, n.avLayerVideoGravityResizeAspect)
+			if super := n.getObj(p.view, n.selSuperview); super != 0 {
+				bounds := n.getRect(super, n.selBounds)
+				if n.getRect(p.view, n.selFrame) != bounds {
+					n.setRect(p.view, n.selSetFrame, bounds)
+				}
+			}
+			audio := n.getObj(objc.ID(objc.GetClass("AVAudioSession")), n.selSharedInstance)
+			n.setAudioActiveOpts(audio, n.selSetActiveWithOptions, false, avAudioSessionDeactivateNotify, 0)
+		}
+	}
+	p.applyRate()
 }
 
 func (p *tvosPlayer) setViewport(widthFraction float64) {
@@ -1723,4 +1764,26 @@ func (p *tvosPlayer) setViewport(widthFraction float64) {
 	if n.getRect(p.view, n.selFrame) != want {
 		n.setRect(p.view, n.selSetFrame, want)
 	}
+}
+
+func (p *tvosPlayer) setViewportRect(r ViewportRect) {
+	n := &tvosNative
+	super := n.getObj(p.view, n.selSuperview)
+	if super == 0 {
+		return
+	}
+	bounds := n.getRect(super, n.selBounds)
+	x := max(0.0, min(bounds.W, r.X))
+	y := max(0.0, min(bounds.H, r.Y))
+	w := max(0.0, min(bounds.W-x, r.W))
+	h := max(0.0, min(bounds.H-y, r.H))
+	want := cgRect{X: x, Y: y, W: w, H: h}
+	if n.getRect(p.view, n.selFrame) != want {
+		n.setRect(p.view, n.selSetFrame, want)
+	}
+	gravity := n.avLayerVideoGravityResizeAspect
+	if r.Cover {
+		gravity = n.avLayerVideoGravityResizeAspectFill
+	}
+	n.setObj(p.layer, n.selSetVideoGravity, gravity)
 }

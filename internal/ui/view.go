@@ -190,17 +190,23 @@ func (v *View) Render(c *ui.Context) {
 	c.OnWindowBack(v.goBack)
 	width, height := c.Size()
 	layers := v.State.Layers()
+	if len(layers) != 1 || layers[0].Page != app.Home || v.State.Area != app.ContentArea || !v.hoverPreviewEnabled() || v.reduceMotionEnabled(c) {
+		v.stopHomePreview()
+	} else if v.Playback != nil && v.Playback.InlinePreviewState().Active {
+		v.Playback.TickInlinePreview(c.Now())
+	}
 	v.advanceCatalogHold(c, height, len(layers) == 1 && layers[0].Page == app.Home)
 	v.focus.begin(c)
 	v.activeScroll = nil
 	background := paint(v.Theme.Colors.Surface.Canvas)
 	rootReg := v.Pages.components[layers[0].Route]
-	if rootReg.TransparentCanvas {
+	homePreviewHole := v.homePreviewShowing(layers)
+	if rootReg.TransparentCanvas || homePreviewHole {
 		background = ui.Transparent
 		c.Root().Background(ui.Transparent)
 	}
 	screen := ui.Box(c).Fill().Clip().Background(background)
-	if !v.Theme.Dark && !rootReg.TransparentCanvas {
+	if !v.Theme.Dark && !rootReg.TransparentCanvas && !homePreviewHole {
 		screen.Gradient(paint(v.Theme.Colors.Surface.Raised), paint(v.Theme.Colors.Surface.Canvas), 145)
 	}
 	fromVideo := rootReg.PreserveFocusUnderlay
@@ -210,6 +216,24 @@ func (v *View) Render(c *ui.Context) {
 		screen.Cache().Blur(blur)
 	}
 	screen.Children(func() {
+		ui.Box(c.Key("home-preview-underlay")).Absolute().Left(0).Top(0).Fill().ZIndex(0).IgnoreInput(true).Children(func() {
+			if homePreviewHole {
+				canvas := paint(v.Theme.Colors.Surface.Canvas)
+				railW := v.railSpan
+				if railW <= 0 {
+					railW = collapsedRailWidth
+				}
+				var scrollY float32
+				if s := v.scrolls[scrollKey{v.State.CurrentEntry, layers[0].Route}]; s != nil {
+					scrollY = s.Y
+				}
+				heroBottom := max(0, float32(homeArtHeight)-scrollY)
+				ui.Box(c.Key("home-preview-rail-bg")).Absolute().Left(0).Top(0).Width(railW).Height(height).Background(canvas)
+				if heroBottom < height {
+					ui.Box(c.Key("home-preview-bottom-bg")).Absolute().Left(railW).Top(heroBottom).Right(0).Bottom(0).Background(canvas)
+				}
+			}
+		})
 		if fromVideo && len(layers) == 1 {
 			if layers[0].Page == app.Creator {
 				v.renderCreatorEntrance(c, width, height)
@@ -285,7 +309,7 @@ func (v *View) renderRootPage(c *ui.Context, location app.Location, active bool,
 		return
 	}
 	page := v.context(location, active, width-collapsedRailWidth, height)
-	row := ui.Row(c).Fill().IgnoreInput(!active).AccessHidden(!active)
+	row := ui.Row(c.Key("shell-root")).Fill().ZIndex(1).IgnoreInput(!active).AccessHidden(!active)
 	row.Children(func() {
 		navigationRail{}.Render(c, page)
 		ui.Box(c.Key("main")).Width(width - collapsedRailWidth).Height(height).Shrink(0).Clip().
@@ -414,6 +438,7 @@ func (v *View) SyncEntry() {
 			saved.images, saved.imageClock = nil, 0
 			saved.hold = catalogHold{}
 			saved.featureInfo = catalogFeatureInfo{}
+			saved.heroPreview = catalogHeroPreview{}
 			saved.rotateAt = time.Time{}
 			v.homeStates[v.home.entry] = saved
 		}
@@ -425,6 +450,7 @@ func (v *View) SyncEntry() {
 		}
 		v.series.signInAction = nil
 		v.series.feedback = videoDetailFeedback{}
+		v.stopHomePreview()
 		if v.Playback != nil && v.Playback.Active() {
 			v.leavePlayback()
 		}

@@ -198,6 +198,7 @@ func (p *PageContext) openLivePlayback(item provider.MediaItem, openInfo bool) {
 }
 
 func (p *PageContext) openPlayback(items []playbackItem, index int, keepQueue bool, start *float64) {
+	p.host.stopHomePreview()
 	origin := p.State.Location
 	if index < 0 || index >= len(items) || !p.canPlay(items[index].item.Ref) || !p.State.Push(app.Route{Page: app.Player}) {
 		return
