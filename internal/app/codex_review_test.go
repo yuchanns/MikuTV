@@ -408,6 +408,93 @@ func TestAccountActivityPaginationRetainsNotificationReadAck(t *testing.T) {
 	}
 }
 
+type gatedDanmakuRulesSession struct {
+	fakeDanmakuRulesSession
+	firstSyncStarted chan struct{}
+	releaseFirstSync chan struct{}
+	syncCalls        int
+}
+
+func (g *gatedDanmakuRulesSession) DanmakuRules(ctx context.Context) ([]provider.DanmakuRule, error) {
+	g.mu.Lock()
+	g.syncCalls++
+	call := g.syncCalls
+	staleSnapshot := append([]provider.DanmakuRule(nil), g.rules...)
+	g.mu.Unlock()
+	if call == 1 {
+		close(g.firstSyncStarted)
+		<-g.releaseFirstSync
+		return staleSnapshot, nil
+	}
+	return g.fakeDanmakuRulesSession.DanmakuRules(ctx)
+}
+
+func TestDanmakuRulesMutationInvalidatesInFlightSync(t *testing.T) {
+	queue := make(chan func(), 32)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+
+	sess := &gatedDanmakuRulesSession{
+		fakeDanmakuRulesSession: fakeDanmakuRulesSession{
+			rules: []provider.DanmakuRule{{
+				ID: "remote:old", RemoteID: "r-old", Kind: provider.DanmakuRuleKeyword, Pattern: "old", Enabled: true, Synced: true,
+			}},
+		},
+		firstSyncStarted: make(chan struct{}),
+		releaseFirstSync: make(chan struct{}),
+	}
+	post := func(fn func()) { queue <- fn }
+	caps := provider.Capabilities{provider.BrowseCatalog, provider.ReadDanmaku, provider.SignIn, provider.DanmakuRules}
+	cat := NewCatalog(func(string) provider.Session { return sess }, post, func() {})
+	defer cat.Close()
+	cat.Open(Entry{ID: "src", SourceID: "src", Capabilities: caps})
+
+	store := newMemoryDanmakuStore()
+	dr := NewDanmakuRules(store, post, func() {})
+	defer dr.Close()
+	dr.SetScope("src", caps, "u1", cat)
+
+	dr.Sync()
+	<-sess.firstSyncStarted
+
+	// Add a new cloud rule while the initial sync is still in flight.
+	added := false
+	dr.Add(provider.DanmakuRuleKeyword, "fresh-spoiler", func(err error) {
+		if err != nil {
+			t.Errorf("Add error: %v", err)
+		}
+		added = true
+	})
+	waitUntil(t, drain, func() bool { return added })
+
+	// Release the stale initial sync (which did NOT contain "fresh-spoiler").
+	close(sess.releaseFirstSync)
+	waitUntil(t, drain, func() bool { return dr.Snapshot().SyncState == DanmakuRulesSynced })
+
+	snap := dr.Snapshot()
+	foundFresh := false
+	foundOld := false
+	for _, r := range snap.Rules {
+		if r.Pattern == "fresh-spoiler" {
+			foundFresh = true
+		}
+		if r.Pattern == "old" {
+			foundOld = true
+		}
+	}
+	if !foundFresh || !foundOld {
+		t.Fatalf("expected both fresh-spoiler and old rules retained after stale sync release, got %+v", snap.Rules)
+	}
+}
+
 func TestDanmakuRulesLocalIDNoCollisionAfterReload(t *testing.T) {
 	store := newMemoryDanmakuStore()
 	_ = store.SaveDanmakuRules("src", "", []provider.DanmakuRule{

@@ -429,18 +429,27 @@ func (r *DanmakuRules) Add(kind provider.DanmakuRuleKind, raw string, done func(
 		if !hasMatchingRule(r.rules, kind, pattern) {
 			r.rules = append(r.rules, created)
 		}
-		r.syncState = DanmakuRulesSynced
-		r.syncError = ""
+		syncCancel, wasSyncing := r.invalidateSyncLocked()
+		if !wasSyncing {
+			r.syncState = DanmakuRulesSynced
+			r.syncError = ""
+		}
 		r.revision++
 		store := r.rulesStore
 		toSave := slices.Clone(r.rules)
 		r.mu.Unlock()
+		if syncCancel != nil {
+			syncCancel()
+		}
 		if store != nil && entryID != "" {
 			_ = store.SaveDanmakuRules(entryID, owner, toSave)
 		}
 		r.notify()
 		if done != nil {
 			done(nil)
+		}
+		if wasSyncing {
+			r.Sync()
 		}
 	})
 	r.mu.Lock()
@@ -535,16 +544,23 @@ func (r *DanmakuRules) Remove(id string, done func(error)) {
 		r.rules = slices.DeleteFunc(r.rules, func(rule provider.DanmakuRule) bool {
 			return rule.ID == id || (target.RemoteID != "" && rule.RemoteID == target.RemoteID)
 		})
+		syncCancel, wasSyncing := r.invalidateSyncLocked()
 		r.revision++
 		store := r.rulesStore
 		toSave := slices.Clone(r.rules)
 		r.mu.Unlock()
+		if syncCancel != nil {
+			syncCancel()
+		}
 		if store != nil && entryID != "" {
 			_ = store.SaveDanmakuRules(entryID, owner, toSave)
 		}
 		r.notify()
 		if done != nil {
 			done(nil)
+		}
+		if wasSyncing {
+			r.Sync()
 		}
 	})
 	r.mu.Lock()
@@ -553,6 +569,17 @@ func (r *DanmakuRules) Remove(id string, done func(error)) {
 	}
 	r.mu.Unlock()
 	r.notify()
+}
+
+func (r *DanmakuRules) invalidateSyncLocked() (func(), bool) {
+	wasSyncing := r.syncState == DanmakuRulesSyncing || r.syncCancel != nil
+	r.syncSeq++
+	cancel := r.syncCancel
+	r.syncCancel = nil
+	if r.syncState == DanmakuRulesSyncing {
+		r.syncState = DanmakuRulesIdle
+	}
+	return cancel, wasSyncing
 }
 
 func (r *DanmakuRules) Blocks(text, senderID, senderHash string) bool {
