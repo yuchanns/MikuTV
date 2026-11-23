@@ -43,6 +43,51 @@ type Session struct {
 	stop       context.CancelFunc
 }
 
+type sessionAuth struct {
+	client *http.Client
+	scope  context.Context
+	owner  string
+	secret json.RawMessage
+}
+
+func (a sessionAuth) signedIn() bool { return a.owner != "" }
+
+func (s *Session) snapshotAuth() sessionAuth {
+	s.requests.RLock()
+	auth := sessionAuth{
+		client: s.active,
+		scope:  s.scope,
+		owner:  s.accountID,
+		secret: s.secret,
+	}
+	s.requests.RUnlock()
+	return auth
+}
+
+func (s *Session) requireSignedIn() (sessionAuth, error) {
+	auth := s.snapshotAuth()
+	if !auth.signedIn() {
+		return sessionAuth{}, &provider.Error{Code: provider.NeedsSignIn}
+	}
+	return auth, nil
+}
+
+func (s *Session) ownSummaryItem(item *provider.MediaItem) error {
+	if item.VideoDetails != nil {
+		return &provider.Error{Code: provider.PluginFailed}
+	}
+	return s.ownItem(item)
+}
+
+func (s *Session) ownSummaryItems(items []provider.MediaItem) error {
+	for index := range items {
+		if err := s.ownSummaryItem(&items[index]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Session) activeUserOrigin() *url.URL {
 	s.requests.RLock()
 	origin := s.userOrigin
@@ -86,15 +131,13 @@ func (s *Source) Verify(ctx context.Context) error {
 
 func (s *Session) Browse(ctx context.Context, request provider.BrowseRequest) (provider.CollectionPage, error) {
 	var page provider.CollectionPage
-	s.requests.RLock()
-	client, scope, signedIn, secret := s.active, s.scope, s.accountID != "", s.secret
-	s.requests.RUnlock()
+	auth := s.snapshotAuth()
 	input := struct {
 		provider.BrowseRequest
 		SignedIn bool            `json:"signedIn,omitempty"`
 		Secret   json.RawMessage `json:"secret,omitempty"`
-	}{request, signedIn, secret}
-	if err := s.invoke(ctx, scope, client, provider.BrowseCatalog, "browse", input, &page); err != nil {
+	}{request, auth.signedIn(), auth.secret}
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.BrowseCatalog, "browse", input, &page); err != nil {
 		return page, err
 	}
 	for _, group := range slices.Concat(page.Collections, page.Shelves) {
@@ -128,18 +171,14 @@ func (s *Session) item(ctx context.Context, ref provider.MediaRef, includeSectio
 	if ref.EntryID != s.entryID || !ref.Kind.Valid() || ref.ID == "" {
 		return item, &provider.Error{Code: provider.Denied}
 	}
+	auth := s.snapshotAuth()
 	input := struct {
 		provider.MediaRef
 		IncludeSections bool            `json:"includeSections,omitempty"`
 		SignedIn        bool            `json:"signedIn,omitempty"`
 		Secret          json.RawMessage `json:"secret,omitempty"`
-	}{MediaRef: ref, IncludeSections: includeSections}
-	s.requests.RLock()
-	client, scope, signedIn, secret := s.active, s.scope, s.accountID != "", s.secret
-	s.requests.RUnlock()
-	input.SignedIn = signedIn
-	input.Secret = secret
-	if err := s.invoke(ctx, scope, client, provider.GetCatalogItem, "getItem", input, &item); err != nil {
+	}{MediaRef: ref, IncludeSections: includeSections, SignedIn: auth.signedIn(), Secret: auth.secret}
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.GetCatalogItem, "getItem", input, &item); err != nil {
 		return item, err
 	}
 	if item.Ref.Kind != ref.Kind || item.Ref.ID != ref.ID {
@@ -209,14 +248,8 @@ func (s *Session) ownVideoSections(detail *provider.VideoDetails) error {
 	if err := ownVideoActions(detail.Actions); err != nil {
 		return err
 	}
-	for index := range detail.Related {
-		item := &detail.Related[index]
-		if item.VideoDetails != nil {
-			return &provider.Error{Code: provider.PluginFailed}
-		}
-		if err := s.ownItem(item); err != nil {
-			return err
-		}
+	if err := s.ownSummaryItems(detail.Related); err != nil {
+		return err
 	}
 	return nil
 }
@@ -225,19 +258,17 @@ func (s *Session) ReadAccount(ctx context.Context, request provider.AccountReque
 	if len(request.Folder) > 512 {
 		return provider.AccountPage{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, accountID, secret := s.active, s.scope, s.accountID, s.secret
-	s.requests.RUnlock()
-	if accountID == "" {
-		return provider.AccountPage{}, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return provider.AccountPage{}, err
 	}
 	input := struct {
 		provider.AccountRequest
 		Owner  string          `json:"owner"`
 		Secret json.RawMessage `json:"secret,omitempty"`
-	}{request, accountID, secret}
+	}{request, auth.owner, auth.secret}
 	var page provider.AccountPage
-	if err := s.invoke(ctx, scope, client, request.Section.Capability(), "readAccount", input, &page); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, request.Section.Capability(), "readAccount", input, &page); err != nil {
 		return provider.AccountPage{}, err
 	}
 	if len(page.NextCursor) > 4096 || page.Total != nil && *page.Total < 0 || page.Unread != nil && *page.Unread < 0 {
@@ -292,19 +323,17 @@ func (s *Session) EditFavoriteFolder(ctx context.Context, edit provider.Favorite
 	if !edit.Valid() {
 		return &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
-	s.requests.RUnlock()
-	if owner == "" {
-		return &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return err
 	}
 	request := struct {
 		provider.FavoriteFolderEdit
 		Owner  string          `json:"owner"`
 		Secret json.RawMessage `json:"secret"`
-	}{edit, owner, secret}
+	}{edit, auth.owner, auth.secret}
 	var result struct{}
-	return s.invoke(ctx, scope, client, provider.EditFavoriteFolders, "editFavoriteFolder", request, &result)
+	return s.invoke(ctx, auth.scope, auth.client, provider.EditFavoriteFolders, "editFavoriteFolder", request, &result)
 }
 
 func (s *Session) RemoveAccountItems(ctx context.Context, section provider.AccountSection, ids []string) error {
@@ -317,38 +346,34 @@ func (s *Session) RemoveAccountItems(ctx context.Context, section provider.Accou
 			return &provider.Error{Code: provider.Denied}
 		}
 	}
-	s.requests.RLock()
-	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
-	s.requests.RUnlock()
-	if owner == "" {
-		return &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return err
 	}
 	input := struct {
 		Section provider.AccountSection `json:"section"`
 		IDs     []string                `json:"ids"`
 		Secret  json.RawMessage         `json:"secret"`
-	}{section, ids, secret}
+	}{section, ids, auth.secret}
 	var result struct{}
-	return s.invoke(ctx, scope, client, capability, "removeAccountItems", input, &result)
+	return s.invoke(ctx, auth.scope, auth.client, capability, "removeAccountItems", input, &result)
 }
 
 func (s *Session) MarkNotificationsRead(ctx context.Context, request provider.NotificationReadRequest) (provider.NotificationReadResult, error) {
 	if !request.Valid() {
 		return provider.NotificationReadResult{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
-	s.requests.RUnlock()
-	if owner == "" {
-		return provider.NotificationReadResult{}, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return provider.NotificationReadResult{}, err
 	}
 	input := struct {
 		provider.NotificationReadRequest
 		Owner  string          `json:"owner"`
 		Secret json.RawMessage `json:"secret"`
-	}{request, owner, secret}
+	}{request, auth.owner, auth.secret}
 	var result provider.NotificationReadResult
-	if err := s.invoke(ctx, scope, client, provider.EditNotifications, "markNotificationsRead", input, &result); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.EditNotifications, "markNotificationsRead", input, &result); err != nil {
 		return provider.NotificationReadResult{}, err
 	}
 	if result.Unread != nil && *result.Unread < 0 {

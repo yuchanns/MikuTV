@@ -106,7 +106,6 @@ func (p *PageContext) aboutActionRow(c *ui.Context, id app.FocusID, label string
 		FillWidth().Height(76).Radius(8).Border(borderW, borderColor).Padding(0).
 		OnClick(func() { p.dispatch(action) })
 	p.animateFocus(button, background, ink)
-	p.applyFocusElevation(button, focused)
 	p.bind(button, id, "content")
 	button.Children(func() {
 		ui.Row(c).Fill().Padding(0, 19).AlignItems(ui.Center).Children(func() {

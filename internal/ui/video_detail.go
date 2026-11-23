@@ -170,9 +170,8 @@ func (v *View) leaveVideoDetail() {
 	}
 }
 
-func (v *View) renderVideoDetailEntrance(c *ui.Context, width, height float32) {
-	entrance := &v.videoDetail.entrance
-	if entrance.from.Page == "" {
+func (v *View) renderPageEntrance(c *ui.Context, entrance *videoDetailEntrance, width, height float32) {
+	if entrance == nil || entrance.from.Page == "" {
 		return
 	}
 	if c.Preferences().ReduceMotion {

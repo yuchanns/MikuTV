@@ -167,25 +167,29 @@ func (v *View) openLanguagePicker(focusID string) {
 	v.State.Focus, v.reveal = languagePickerOptionID(target), true
 }
 
-func (v *View) openDiscoverLanguagesFromPicker() {
-	if v.State.Page == app.LanguagePicker {
+func (v *View) openDiscoverPluginsFromPicker(fromPage app.Page, kind plugin.Kind, focus app.FocusID) {
+	if v.State.Page == fromPage {
 		v.State.Back()
 	}
 	s := &v.pluginsUI
 	s.view = pluginsViewDiscover
-	s.filter = plugin.LocaleKind
+	s.filter = kind
 	s.query = ""
 	s.input = ""
 	s.editing = false
 	s.selectedInstalledID = ""
 	s.selectedCatalogRepo = ""
-	s.returnToThemePicker = false
-	s.returnToLanguagePicker = true
+	s.returnToThemePicker = kind == plugin.ThemeKind
+	s.returnToLanguagePicker = kind == plugin.LocaleKind
 	if v.PluginCatalog != nil {
 		v.PluginCatalog.EnsureLoaded()
 	}
 	v.State.Navigate(app.Route{Page: app.Settings, Section: "plugins"})
-	v.State.Focus, v.reveal = pluginsFilterLocale, true
+	v.State.Focus, v.reveal = focus, true
+}
+
+func (v *View) openDiscoverLanguagesFromPicker() {
+	v.openDiscoverPluginsFromPicker(app.LanguagePicker, plugin.LocaleKind, pluginsFilterLocale)
 }
 
 func (v *View) returnToAppearanceLanguagePicker(focusID string) {
@@ -279,24 +283,7 @@ func (v *View) openThemeError(themeID, themeName string) {
 }
 
 func (v *View) openDiscoverThemesFromPicker() {
-	// Close ThemePicker modal, navigate to Settings/plugins Discover pre-filtered to ThemeKind.
-	if v.State.Page == app.ThemePicker {
-		v.State.Back()
-	}
-	s := &v.pluginsUI
-	s.view = pluginsViewDiscover
-	s.filter = plugin.ThemeKind
-	s.query = ""
-	s.input = ""
-	s.editing = false
-	s.selectedInstalledID = ""
-	s.selectedCatalogRepo = ""
-	s.returnToThemePicker = true
-	if v.PluginCatalog != nil {
-		v.PluginCatalog.EnsureLoaded()
-	}
-	v.State.Navigate(app.Route{Page: app.Settings, Section: "plugins"})
-	v.State.Focus, v.reveal = pluginsFilterTheme, true
+	v.openDiscoverPluginsFromPicker(app.ThemePicker, plugin.ThemeKind, pluginsFilterTheme)
 }
 
 func (v *View) returnToAppearanceThemePicker(focusThemeID string) {
@@ -355,7 +342,7 @@ type appearanceSettingsPage struct{}
 
 func (appearanceSettingsPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
-	l, colors, d := p.Assets.Text.Appearance, p.Theme.Colors, p.uiColors()
+	l := p.Assets.Text.Appearance
 	snap := v.appearanceSnapshot()
 	localeSnap := v.localeSnapshot()
 	p.region("content", nil)
@@ -388,30 +375,28 @@ func (appearanceSettingsPage) Render(c *ui.Context, p *PageContext) {
 		darkNote = l.DarkThemeActiveNote
 	}
 
-	ui.Text(c, l.Title).Height(45).FontSize(32).FontWeight(550).LineHeight(1.4).Margin(0, 0, 13, 0)
-	ui.Text(c, l.Intro).Height(32).FontSize(19).LineHeight(1.7).TextColor(paint(colors.Text.Muted)).Margin(0, 0, 27, 0)
-	ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
+	p.settingsSectionHeader(c, l.Title, l.Intro)
 
-	p.danmakuValueRow(c, appearanceLanguageRow, "globe", l.LanguageLabel, langNote, langValue, func() {
+	p.settingsValueRow(c, appearanceLanguageRow, "globe", l.LanguageLabel, langNote, langValue, func() {
 		v.openLanguagePicker("")
 	})
-	p.danmakuValueRow(c, appearanceModeRow, "sparkles", l.ModeLabel, p.appearanceModeNote(snap.Mode), p.appearanceModeLabel(snap.Mode), func() {
+	p.settingsValueRow(c, appearanceModeRow, "sparkles", l.ModeLabel, p.appearanceModeNote(snap.Mode), p.appearanceModeLabel(snap.Mode), func() {
 		v.openAppearanceModePicker()
 	})
-	p.danmakuValueRow(c, appearanceLightThemeRow, "sun", l.LightThemeLabel, lightNote, lightName, func() {
+	p.settingsValueRow(c, appearanceLightThemeRow, "sun", l.LightThemeLabel, lightNote, lightName, func() {
 		v.openThemePickerForSlot(app.ThemeSlotLight, "")
 	})
-	p.danmakuValueRow(c, appearanceDarkThemeRow, "moon", l.DarkThemeLabel, darkNote, darkName, func() {
+	p.settingsValueRow(c, appearanceDarkThemeRow, "moon", l.DarkThemeLabel, darkNote, darkName, func() {
 		v.openThemePickerForSlot(app.ThemeSlotDark, "")
 	})
-	p.danmakuToggleRow(c, appearanceHoverPreviewRow, "series", l.HoverPreviewLabel, l.HoverPreviewNote, snap.HoverPreview, func() {
+	p.settingsToggleRow(c, appearanceHoverPreviewRow, "series", l.HoverPreviewLabel, l.HoverPreviewNote, snap.HoverPreview, func() {
 		if v.Appearance != nil {
 			if err := v.Appearance.SetHoverPreview(!snap.HoverPreview); err != nil {
 				v.showSettingsFeedback(p.Assets.Text.SaveFailed)
 			}
 		}
 	})
-	p.danmakuToggleRow(c, appearanceReduceMotionRow, "brand", l.ReduceMotionLabel, l.ReduceMotionNote, snap.ReduceMotion, func() {
+	p.settingsToggleRow(c, appearanceReduceMotionRow, "brand", l.ReduceMotionLabel, l.ReduceMotionNote, snap.ReduceMotion, func() {
 		if v.Appearance != nil {
 			if err := v.Appearance.SetReduceMotion(!snap.ReduceMotion); err != nil {
 				v.showSettingsFeedback(p.Assets.Text.SaveFailed)
@@ -490,11 +475,10 @@ func (appearanceModePickerPage) Render(c *ui.Context, p *PageContext) {
 	choices := [...]struct {
 		mode  app.AppearanceMode
 		label string
-		note  string
 	}{
-		{app.AppearanceModeSystem, l.ModeSystem, l.ModeSystemNote},
-		{app.AppearanceModeLight, l.ModeLight, l.ModeLightNote},
-		{app.AppearanceModeDark, l.ModeDark, l.ModeDarkNote},
+		{app.AppearanceModeSystem, l.ModeSystem},
+		{app.AppearanceModeLight, l.ModeLight},
+		{app.AppearanceModeDark, l.ModeDark},
 	}
 
 	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {

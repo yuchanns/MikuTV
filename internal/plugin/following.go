@@ -11,18 +11,16 @@ func (s *Session) ReadFollowing(ctx context.Context, request provider.FollowingR
 	if !request.Section.Valid() || len(request.Cursor) > maxSearchCursorLength {
 		return provider.FollowingPage{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner := s.active, s.scope, s.accountID
-	s.requests.RUnlock()
-	if owner == "" {
-		return provider.FollowingPage{}, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return provider.FollowingPage{}, err
 	}
 	input := struct {
 		provider.FollowingRequest
 		Owner string `json:"owner"`
-	}{request, owner}
+	}{request, auth.owner}
 	var page provider.FollowingPage
-	if err := s.invoke(ctx, scope, client, provider.BrowseFollowing, "readFollowing", input, &page); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.BrowseFollowing, "readFollowing", input, &page); err != nil {
 		return provider.FollowingPage{}, err
 	}
 	if len(page.CreatorsCursor) > maxSearchCursorLength ||
@@ -41,21 +39,11 @@ func (s *Session) ReadFollowing(ctx context.Context, request provider.FollowingR
 			entry.Creator.AvatarURL = ""
 		}
 	}
-	for index := range page.Updates {
-		if page.Updates[index].VideoDetails != nil {
-			return provider.FollowingPage{}, &provider.Error{Code: provider.PluginFailed}
-		}
-		if err := s.ownItem(&page.Updates[index]); err != nil {
-			return provider.FollowingPage{}, err
-		}
+	if err := s.ownSummaryItems(page.Updates); err != nil {
+		return provider.FollowingPage{}, err
 	}
-	for index := range page.LiveRooms {
-		if page.LiveRooms[index].VideoDetails != nil {
-			return provider.FollowingPage{}, &provider.Error{Code: provider.PluginFailed}
-		}
-		if err := s.ownItem(&page.LiveRooms[index]); err != nil {
-			return provider.FollowingPage{}, err
-		}
+	if err := s.ownSummaryItems(page.LiveRooms); err != nil {
+		return provider.FollowingPage{}, err
 	}
 	return page, nil
 }

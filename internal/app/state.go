@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+type Preferences struct {
+	RecentEntry string
+}
+
+type PreferencesStore interface {
+	Save(Preferences) error
+}
+
 type viewKey struct {
 	EntryID string
 	Route

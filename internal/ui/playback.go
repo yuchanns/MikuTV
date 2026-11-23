@@ -523,7 +523,7 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 			v.State.Focus, v.reveal = s.controlFocus, true
 		}
 	}
-	externalBlur := v.modalBlur(p.State.Route, true)
+	externalBlur := v.modalBlur(p.State.Route)
 	backdropBlur := externalBlur
 	liveRoomOverlay := liveMode && s.panel == playerInfo
 	if access || contentModal || liveRoomOverlay {

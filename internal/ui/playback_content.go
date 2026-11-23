@@ -371,10 +371,6 @@ func (p *PageContext) playbackTextLayers(c *ui.Context, state app.PlaybackState)
 	p.playbackToast(c, message, expiry)
 }
 
-func estimateDanmakuWidth(text string) float32 {
-	return estimateDanmakuWidthScaled(text, app.DanmakuFontNormal)
-}
-
 func estimateDanmakuWidthScaled(text string, size app.DanmakuFontSize) float32 {
 	scale := float32(1)
 	if size == app.DanmakuFontLarge {

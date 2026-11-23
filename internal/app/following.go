@@ -54,26 +54,12 @@ type FollowingFeed struct {
 	reader    provider.FollowingReader
 
 	sessionGen uint64
-	overview   pendingFollowingCall
-	creators   pendingFollowingCall
-	updates    pendingFollowingCall
-	live       pendingFollowingCall
+	overview   pendingCall
+	creators   pendingCall
+	updates    pendingCall
+	live       pendingCall
 	stale      bool
 	snapshot   FollowingSnapshot
-}
-
-type pendingFollowingCall struct {
-	gen    uint64
-	cancel context.CancelFunc
-}
-
-func (p *pendingFollowingCall) stop() bool {
-	if p.cancel == nil {
-		return false
-	}
-	p.cancel()
-	p.cancel = nil
-	return true
 }
 
 func NewFollowingFeed(post func(func()), changed func()) *FollowingFeed {

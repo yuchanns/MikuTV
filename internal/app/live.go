@@ -35,20 +35,6 @@ func (s LiveSnapshot) CanLoadMoreFollowing() bool {
 	return s.Phase == CatalogReady && !s.FollowingLoading && s.FollowingCursor != "" && !s.FollowingStalled
 }
 
-type pendingLiveCall struct {
-	gen    uint64
-	cancel context.CancelFunc
-}
-
-func (p *pendingLiveCall) stop() bool {
-	if p.cancel == nil {
-		return false
-	}
-	p.cancel()
-	p.cancel = nil
-	return true
-}
-
 // LiveCatalog is owned by the UI thread. Provider calls run in workers and re-enter via post.
 type LiveCatalog struct {
 	post    func(func())
@@ -61,9 +47,9 @@ type LiveCatalog struct {
 	reader    provider.LiveReader
 
 	sessionGen    uint64
-	hubCall       pendingLiveCall
-	roomsCall     pendingLiveCall
-	followingCall pendingLiveCall
+	hubCall       pendingCall
+	roomsCall     pendingCall
+	followingCall pendingCall
 	snapshot      LiveSnapshot
 }
 

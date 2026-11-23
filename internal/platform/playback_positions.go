@@ -2,10 +2,8 @@ package platform
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"math"
-	"slices"
 
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
@@ -39,14 +37,7 @@ func legacyPlaybackPositionKeyName(owner string, target provider.PlaybackTarget)
 }
 
 func parsePlaybackPositionStore(raw string) playbackPositionStore {
-	if raw == "" {
-		return playbackPositionStore{}
-	}
-	var store playbackPositionStore
-	if err := json.Unmarshal([]byte(raw), &store); err != nil {
-		return playbackPositionStore{}
-	}
-	return store
+	return unmarshalJSONOrZero[playbackPositionStore](raw)
 }
 
 func (s *playbackPositionStore) get(owner string, target provider.PlaybackTarget) (float64, bool) {
@@ -80,41 +71,21 @@ func (s *playbackPositionStore) put(owner string, target provider.PlaybackTarget
 		Seconds: seconds,
 		Order:   s.NextOrder,
 	})
-	if len(s.Items) > maxPlaybackPositions {
-		slices.SortFunc(s.Items, func(a, b playbackPositionEntry) int {
-			switch {
-			case a.Order < b.Order:
-				return -1
-			case a.Order > b.Order:
-				return 1
-			default:
-				return 0
-			}
-		})
-		s.Items = slices.Clone(s.Items[len(s.Items)-maxPlaybackPositions:])
-	}
+	s.Items = trimRecentByOrder(s.Items, maxPlaybackPositions, func(item playbackPositionEntry) int64 { return item.Order })
 }
 
 func (s *playbackPositionStore) clearEntry(entryID string) bool {
-	before := len(s.Items)
-	s.Items = slices.DeleteFunc(s.Items, func(item playbackPositionEntry) bool {
+	return deleteMatching(&s.Items, func(item playbackPositionEntry) bool {
 		return item.Entry == entryID
 	})
-	return len(s.Items) != before
 }
 
 func (s *playbackPositionStore) clearAccount(entryID, owner string) bool {
-	before := len(s.Items)
-	s.Items = slices.DeleteFunc(s.Items, func(item playbackPositionEntry) bool {
+	return deleteMatching(&s.Items, func(item playbackPositionEntry) bool {
 		return item.Entry == entryID && item.Owner == owner
 	})
-	return len(s.Items) != before
 }
 
 func (s *playbackPositionStore) encode() (string, error) {
-	data, err := json.Marshal(s)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+	return marshalJSONString(s)
 }

@@ -197,13 +197,6 @@ func (m *PrivateMessages) EnsureConversations() {
 	}
 }
 
-func (m *PrivateMessages) RefreshConversations() {
-	if !m.Available() {
-		return
-	}
-	m.loadConversations("", false)
-}
-
 func (m *PrivateMessages) RetryConversations() {
 	if !m.Available() {
 		return
@@ -376,13 +369,6 @@ func (m *PrivateMessages) OpenPeer(peer provider.PrivatePeer) string {
 		m.changed()
 	}
 	return conv.ID
-}
-
-func (m *PrivateMessages) EnsureMessages(conversationID string) {
-	if !m.Available() || conversationID == "" {
-		return
-	}
-	m.ensureMessagesLocked(conversationID)
 }
 
 func (m *PrivateMessages) ensureMessagesLocked(conversationID string) {

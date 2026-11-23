@@ -38,7 +38,7 @@ func (v *View) modalStyle(route app.Route) modalPresentation {
 	return reg.ModalPresentation
 }
 
-func (v *View) modalBlur(route app.Route, fromMedia bool) float32 {
+func (v *View) modalBlur(route app.Route) float32 {
 	reg, ok := v.Pages.components[route]
 	if !ok || !reg.Policy.Modal {
 		return 0
@@ -52,90 +52,46 @@ func (v *View) modalBlur(route app.Route, fromMedia bool) float32 {
 	return drawerBlurRadius
 }
 
-func (v *View) renderModal(c *ui.Context, page *PageContext, _ bool) {
+func (v *View) renderModal(c *ui.Context, page *PageContext) {
 	page.left = focusDestination{}
 	reg := v.Pages.components[page.Location.Route]
 	page.Title, page.Node = reg.Title, reg.Policy.Route
 	style := v.modalStyle(page.Location.Route)
-	colors, d := v.Theme.Colors, deriveColors(v.Theme)
 
 	ui.Overlay(c, func() {
 		shadeKey := struct{ Shade app.Route }{page.Location.Route}
-		fTrans := framelessTransition
-		dTrans := drawerTransition
+		fTrans, dTrans := framelessTransition, drawerTransition
 		if v.reduceMotionEnabled(c) {
-			fTrans = ui.ElementTransition{}
-			dTrans = ui.ElementTransition{}
+			fTrans, dTrans = ui.ElementTransition{}, ui.ElementTransition{}
 		}
 		if style == modalFrameless {
-			contentW := reg.ModalWidth
-			if contentW == 0 {
-				contentW = 840
+			w := reg.ModalWidth
+			if w == 0 {
+				w = 840
 			}
-			contentW = min(contentW, page.Width-240)
-			ui.Box(c.Key(shadeKey)).Absolute().Left(0).Top(0).Size(page.Width, page.Height).
-				Background(d.framelessScrim).Transition(fTrans)
-			ui.Box(c).Absolute().Left(0).Top(0).Size(page.Width, page.Height).LinearGradient(ui.LinearGradient{
-				Angle: 155,
-				Stops: []ui.GradientStop{
-					{Color: d.framelessGlow, At: 0},
-					{Color: ui.Transparent, At: 0.55},
-				},
-			})
-			ui.Column(c.Key(page.Location.Route)).Absolute().Left(0).Top(0).Size(page.Width, page.Height).
-				Center().Modal().Transition(fTrans).Padding(80, 120).Children(func() {
-				ui.Column(c).Width(contentW).Children(func() {
-					reg.Component.Render(c, page)
-				})
+			page.drawFramelessModal(c, shadeKey, page.Location.Route, w, fTrans, func() {
+				reg.Component.Render(c, page)
 			})
 			return
 		}
-
-		drawerW := reg.ModalWidth
-		if drawerW == 0 {
-			drawerW = 620
+		w := reg.ModalWidth
+		if w == 0 {
+			w = 620
 		}
-		drawerW = min(drawerW, page.Width-220)
-		padX := float32(52)
-		if drawerW >= 620 {
-			padX = 56
-		}
-		ui.Box(c.Key(shadeKey)).Absolute().Left(0).Top(0).Size(page.Width, page.Height).
-			LinearGradient(ui.LinearGradient{
-				Angle: 90,
-				Stops: []ui.GradientStop{
-					{Color: d.drawerScrimLeft, At: 0},
-					{Color: d.drawerScrimMid, At: 0.54},
-					{Color: d.drawerScrimRight, At: 1},
-				},
-			}).Transition(dTrans)
-
-		panel := ui.Box(c.Key(page.Location.Route)).Absolute().Right(0).Top(0).
-			Size(drawerW, page.Height).Modal().Transition(dTrans).
-			Gradient(d.drawerStart, d.drawerEnd, 180)
-		if !v.Theme.Dark {
-			panel.Material(glass.Blur{Radius: 36})
-		} else {
-			panel.Shadow(-36, 0, 90, 0, paint(colors.Overlay.Shadow))
-		}
-		panel.Children(func() {
-			ui.Box(c).Absolute().Left(0).Top(0).Bottom(0).Width(1).Background(d.drawerBorder)
-			ui.Box(c).Absolute().Left(1).Top(0).Bottom(0).Width(1).Background(d.drawerAccentRim)
-			ui.Column(c).Fill().Padding(66, padX, 46, padX).Children(func() {
-				reg.Component.Render(c, page)
-			})
+		page.drawDrawerModal(c, shadeKey, page.Location.Route, w, dTrans, func() {
+			reg.Component.Render(c, page)
 		})
 	})
 }
 
-func (p *PageContext) renderPlayerDrawer(c *ui.Context, key string, width float32, body func()) {
+func (p *PageContext) drawDrawerModal(c *ui.Context, shadeKey, panelKey any, width float32, trans ui.ElementTransition, body func()) {
 	colors, d := p.Theme.Colors, p.uiColors()
 	drawerW := min(width, p.Width-220)
 	padX := float32(52)
 	if drawerW >= 620 {
 		padX = 56
 	}
-	ui.Box(c.Key(key+"-scrim")).Absolute().Left(0).Top(0).Fill().LinearGradient(ui.LinearGradient{
+	scrim := ui.Box(c.Key(shadeKey)).Absolute().Left(0).Top(0).Size(p.Width, p.Height).LinearGradient(ui.LinearGradient{
 		Angle: 90,
 		Stops: []ui.GradientStop{
 			{Color: d.drawerScrimLeft, At: 0},
@@ -143,8 +99,14 @@ func (p *PageContext) renderPlayerDrawer(c *ui.Context, key string, width float3
 			{Color: d.drawerScrimRight, At: 1},
 		},
 	})
-	panel := ui.Box(c.Key(key)).Absolute().Right(0).Top(0).Size(drawerW, p.Height).Modal().
+	if trans.Duration > 0 {
+		scrim.Transition(trans)
+	}
+	panel := ui.Box(c.Key(panelKey)).Absolute().Right(0).Top(0).Size(drawerW, p.Height).Modal().
 		Gradient(d.drawerStart, d.drawerEnd, 180)
+	if trans.Duration > 0 {
+		panel.Transition(trans)
+	}
 	if !p.Theme.Dark {
 		panel.Material(glass.Blur{Radius: 36})
 	} else {
@@ -157,20 +119,35 @@ func (p *PageContext) renderPlayerDrawer(c *ui.Context, key string, width float3
 	})
 }
 
-func (p *PageContext) renderPlayerFrameless(c *ui.Context, key string, width float32, body func()) {
+func (p *PageContext) drawFramelessModal(c *ui.Context, shadeKey, panelKey any, width float32, trans ui.ElementTransition, body func()) {
 	d := p.uiColors()
 	contentW := min(width, p.Width-240)
-	ui.Box(c.Key(key + "-scrim")).Absolute().Left(0).Top(0).Fill().Background(d.framelessScrim)
-	ui.Box(c).Absolute().Left(0).Top(0).Fill().LinearGradient(ui.LinearGradient{
+	scrim := ui.Box(c.Key(shadeKey)).Absolute().Left(0).Top(0).Size(p.Width, p.Height).Background(d.framelessScrim)
+	if trans.Duration > 0 {
+		scrim.Transition(trans)
+	}
+	ui.Box(c).Absolute().Left(0).Top(0).Size(p.Width, p.Height).LinearGradient(ui.LinearGradient{
 		Angle: 155,
 		Stops: []ui.GradientStop{
 			{Color: d.framelessGlow, At: 0},
 			{Color: ui.Transparent, At: 0.55},
 		},
 	})
-	ui.Column(c.Key(key)).Absolute().Left(0).Top(0).Fill().Center().Modal().Padding(80, 120).Children(func() {
+	col := ui.Column(c.Key(panelKey)).Absolute().Left(0).Top(0).Size(p.Width, p.Height).Center().Modal().Padding(80, 120)
+	if trans.Duration > 0 {
+		col.Transition(trans)
+	}
+	col.Children(func() {
 		ui.Column(c).Width(contentW).Children(body)
 	})
+}
+
+func (p *PageContext) renderPlayerDrawer(c *ui.Context, key string, width float32, body func()) {
+	p.drawDrawerModal(c, key+"-scrim", key, width, ui.ElementTransition{}, body)
+}
+
+func (p *PageContext) renderPlayerFrameless(c *ui.Context, key string, width float32, body func()) {
+	p.drawFramelessModal(c, key+"-scrim", key, width, ui.ElementTransition{}, body)
 }
 
 func (p *PageContext) drawerHeader(c *ui.Context, eyebrow, title, meta, subtitle string) {

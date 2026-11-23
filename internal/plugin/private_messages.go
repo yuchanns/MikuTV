@@ -12,18 +12,16 @@ func (s *Session) ReadPrivateConversations(ctx context.Context, request provider
 	if !request.Valid() {
 		return provider.PrivateConversationsPage{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner := s.active, s.scope, s.accountID
-	s.requests.RUnlock()
-	if owner == "" {
-		return provider.PrivateConversationsPage{}, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return provider.PrivateConversationsPage{}, err
 	}
 	input := struct {
 		provider.PrivateConversationsRequest
 		Owner string `json:"owner"`
-	}{request, owner}
+	}{request, auth.owner}
 	var page provider.PrivateConversationsPage
-	if err := s.invoke(ctx, scope, client, provider.ReadPrivateMessages, "readPrivateConversations", input, &page); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.ReadPrivateMessages, "readPrivateConversations", input, &page); err != nil {
 		return provider.PrivateConversationsPage{}, err
 	}
 	if len(page.NextCursor) > 512 || (page.Unread != nil && *page.Unread < 0) {
@@ -52,18 +50,16 @@ func (s *Session) ReadPrivateMessages(ctx context.Context, request provider.Priv
 	if !request.Valid() {
 		return provider.PrivateMessagesPage{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner := s.active, s.scope, s.accountID
-	s.requests.RUnlock()
-	if owner == "" {
-		return provider.PrivateMessagesPage{}, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return provider.PrivateMessagesPage{}, err
 	}
 	input := struct {
 		provider.PrivateMessagesRequest
 		Owner string `json:"owner"`
-	}{request, owner}
+	}{request, auth.owner}
 	var page provider.PrivateMessagesPage
-	if err := s.invoke(ctx, scope, client, provider.ReadPrivateMessages, "readPrivateMessages", input, &page); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.ReadPrivateMessages, "readPrivateMessages", input, &page); err != nil {
 		return provider.PrivateMessagesPage{}, err
 	}
 	if len(page.NextCursor) > 512 {
@@ -88,19 +84,17 @@ func (s *Session) SendPrivateMessage(ctx context.Context, request provider.Priva
 	if !request.Valid() {
 		return provider.PrivateMessageSendResult{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
-	s.requests.RUnlock()
-	if owner == "" {
-		return provider.PrivateMessageSendResult{}, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return provider.PrivateMessageSendResult{}, err
 	}
 	input := struct {
 		provider.PrivateMessageSendRequest
 		Owner  string          `json:"owner"`
 		Secret json.RawMessage `json:"secret"`
-	}{request, owner, secret}
+	}{request, auth.owner, auth.secret}
 	var result provider.PrivateMessageSendResult
-	if err := s.invoke(ctx, scope, client, provider.WritePrivateMessages, "sendPrivateMessage", input, &result); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.WritePrivateMessages, "sendPrivateMessage", input, &result); err != nil {
 		return provider.PrivateMessageSendResult{}, err
 	}
 	msg := &result.Message
@@ -108,7 +102,7 @@ func (s *Session) SendPrivateMessage(ctx context.Context, request provider.Priva
 		return provider.PrivateMessageSendResult{}, &provider.Error{Code: provider.PluginFailed}
 	}
 	if msg.SenderID == "" {
-		msg.SenderID = owner
+		msg.SenderID = auth.owner
 	}
 	msg.FromSelf = true
 	return result, nil
@@ -118,19 +112,17 @@ func (s *Session) MarkPrivateMessagesRead(ctx context.Context, request provider.
 	if !request.Valid() {
 		return provider.PrivateMessageReadResult{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
-	s.requests.RUnlock()
-	if owner == "" {
-		return provider.PrivateMessageReadResult{}, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return provider.PrivateMessageReadResult{}, err
 	}
 	input := struct {
 		provider.PrivateMessageReadRequest
 		Owner  string          `json:"owner"`
 		Secret json.RawMessage `json:"secret"`
-	}{request, owner, secret}
+	}{request, auth.owner, auth.secret}
 	var result provider.PrivateMessageReadResult
-	if err := s.invoke(ctx, scope, client, provider.WritePrivateMessages, "markPrivateMessagesRead", input, &result); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.WritePrivateMessages, "markPrivateMessagesRead", input, &result); err != nil {
 		return provider.PrivateMessageReadResult{}, err
 	}
 	if result.Unread != nil && *result.Unread < 0 {

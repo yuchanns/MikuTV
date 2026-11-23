@@ -108,7 +108,6 @@ func (p *PageContext) railButton(c *ui.Context, registration Registration, width
 			})
 		})
 	p.animateFocus(e, background, foreground)
-	p.applyFocusElevation(e, focused)
 	opacity := float32(0)
 	if expanded {
 		opacity = 1

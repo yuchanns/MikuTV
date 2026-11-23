@@ -408,17 +408,7 @@ func (c *PluginCatalog) StartStartupRecovery(
 						if mountErr == nil {
 							inst := installedPluginFromPackage(pkg)
 							c.mu.Lock()
-							replaced := false
-							for i, existing := range c.installed {
-								if strings.EqualFold(existing.ID, inst.ID) {
-									c.installed[i] = inst
-									replaced = true
-									break
-								}
-							}
-							if !replaced {
-								c.installed = append(c.installed, inst)
-							}
+							c.upsertInstalledLocked(inst)
 							c.mu.Unlock()
 						}
 						doneCh <- mountErr
@@ -468,6 +458,25 @@ func (c *PluginCatalog) StartStartupRecovery(
 			c.notify()
 		})
 	}()
+}
+
+func (c *PluginCatalog) upsertInstalledLocked(inst InstalledPlugin) {
+	for i, existing := range c.installed {
+		if strings.EqualFold(existing.ID, inst.ID) {
+			c.installed[i] = inst
+			return
+		}
+	}
+	c.installed = append(c.installed, inst)
+}
+
+func isPluginStageRetryable(err error, canceled bool) bool {
+	return !canceled &&
+		!errors.Is(err, plugin.ErrKindChanged) &&
+		!errors.Is(err, plugin.ErrIncompatible) &&
+		!errors.Is(err, plugin.ErrSourceConflict) &&
+		!errors.Is(err, plugin.ErrDigestMismatch) &&
+		!errors.Is(err, plugin.ErrVersionTagMismatch)
 }
 
 func installedPluginFromPackage(pkg plugin.InstalledPackage) InstalledPlugin {
@@ -938,15 +947,10 @@ func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInsta
 		pkg, err := store.StageAndInstall(ctx, data, item, appVersion, bound)
 		if err != nil {
 			canceled := errors.Is(err, context.Canceled) || ctx.Err() != nil
-			retryable := !errors.Is(err, plugin.ErrIncompatible) &&
-				!errors.Is(err, plugin.ErrSourceConflict) &&
-				!errors.Is(err, plugin.ErrDigestMismatch) &&
-				!errors.Is(err, plugin.ErrVersionTagMismatch) &&
-				!canceled
 			c.finishInstall(gen, PluginInstallOutcome{
 				Err:       err,
 				Canceled:  canceled,
-				Retryable: retryable,
+				Retryable: isPluginStageRetryable(err, canceled),
 			}, onDone)
 			return
 		}
@@ -971,39 +975,7 @@ func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInsta
 			}
 
 			c.mu.Lock()
-			installed := InstalledPlugin{
-				ID:          receipt.ID,
-				Name:        receipt.Name,
-				Description: receipt.Description,
-				Kind:        receipt.Kind,
-				Version:     receipt.Version,
-				Repository:  receipt.Repository,
-				ReleaseID:   receipt.ReleaseID,
-				TagName:     receipt.TagName,
-				AssetID:     receipt.AssetID,
-				SHA256:      receipt.SHA256,
-				Bundled:     false,
-				Enabled:     receipt.Enabled,
-				InstalledAt: receipt.InstalledAt,
-				UpdatedAt:   receipt.UpdatedAt,
-				License:     receipt.License,
-				Permissions: append([]string(nil), receipt.Permissions...),
-				Swatches:    receipt.Swatches,
-			}
-			if pkg.Source != nil {
-				installed.Capabilities = pkg.Source.Capabilities()
-			}
-			replaced := false
-			for i, existing := range c.installed {
-				if strings.EqualFold(existing.ID, installed.ID) {
-					c.installed[i] = installed
-					replaced = true
-					break
-				}
-			}
-			if !replaced {
-				c.installed = append(c.installed, installed)
-			}
+			c.upsertInstalledLocked(installedPluginFromPackage(pkg))
 			c.mu.Unlock()
 
 			if onDone != nil {
@@ -1028,18 +1000,6 @@ func (c *PluginCatalog) finishInstall(gen uint64, outcome PluginInstallOutcome, 
 		}
 		c.notify()
 	})
-}
-
-func (c *PluginCatalog) CancelUpdateCheck() {
-	c.mu.Lock()
-	cancel := c.updateCheckCancel
-	c.updateCheckCancel = nil
-	c.updateCheckGen++
-	c.checkingUpdates = false
-	c.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
 }
 
 func (c *PluginCatalog) CancelUpdate() {
@@ -1291,16 +1251,10 @@ func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone 
 		pkg, err := store.StageAndUpdate(ctx, data, existingReceipt, offer.Item, appVersion)
 		if err != nil {
 			canceled := errors.Is(err, context.Canceled) || ctx.Err() != nil
-			retryable := !errors.Is(err, plugin.ErrKindChanged) &&
-				!errors.Is(err, plugin.ErrIncompatible) &&
-				!errors.Is(err, plugin.ErrSourceConflict) &&
-				!errors.Is(err, plugin.ErrDigestMismatch) &&
-				!errors.Is(err, plugin.ErrVersionTagMismatch) &&
-				!canceled
 			c.finishUpdate(gen, PluginUpdateOutcome{
 				Err:       err,
 				Canceled:  canceled,
-				Retryable: retryable,
+				Retryable: isPluginStageRetryable(err, canceled),
 			}, onDone)
 			return
 		}
@@ -1326,29 +1280,9 @@ func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone 
 			c.mu.Lock()
 			for i, item := range c.installed {
 				if strings.EqualFold(item.ID, receipt.ID) {
-					updated := InstalledPlugin{
-						ID:              receipt.ID,
-						Name:            receipt.Name,
-						Description:     receipt.Description,
-						Kind:            receipt.Kind,
-						Version:         receipt.Version,
-						Repository:      receipt.Repository,
-						ReleaseID:       receipt.ReleaseID,
-						TagName:         receipt.TagName,
-						AssetID:         receipt.AssetID,
-						SHA256:          receipt.SHA256,
-						Bundled:         false,
-						Enabled:         item.Enabled,
-						InstalledAt:     receipt.InstalledAt,
-						UpdatedAt:       receipt.UpdatedAt,
-						License:         receipt.License,
-						Permissions:     append([]string(nil), receipt.Permissions...),
-						Swatches:        receipt.Swatches,
-						AvailableUpdate: nil,
-					}
-					if pkg.Source != nil {
-						updated.Capabilities = pkg.Source.Capabilities()
-					}
+					updated := installedPluginFromPackage(pkg)
+					updated.Enabled = item.Enabled
+					updated.AvailableUpdate = nil
 					c.installed[i] = updated
 					break
 				}

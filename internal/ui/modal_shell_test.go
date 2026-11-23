@@ -48,7 +48,7 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		if got := view.modalStyle(route); got != modalDrawer {
 			t.Errorf("route %+v: want modalDrawer, got %v", route, got)
 		}
-		if blur := view.modalBlur(route, false); blur != drawerBlurRadius {
+		if blur := view.modalBlur(route); blur != drawerBlurRadius {
 			t.Errorf("route %+v: want drawer blur %v, got %v", route, drawerBlurRadius, blur)
 		}
 	}
@@ -70,7 +70,7 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		if !reg.RawScreen {
 			t.Errorf("route %+v: want RawScreen=true", route)
 		}
-		if blur := view.modalBlur(route, false); blur != 0 {
+		if blur := view.modalBlur(route); blur != 0 {
 			t.Errorf("route %+v: want blur 0, got %v", route, blur)
 		}
 	}
@@ -98,7 +98,7 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		if got := view.modalStyle(route); got != modalFrameless {
 			t.Errorf("route %+v: want modalFrameless, got %v", route, got)
 		}
-		if blur := view.modalBlur(route, false); blur != framelessBlurRadius {
+		if blur := view.modalBlur(route); blur != framelessBlurRadius {
 			t.Errorf("route %+v: want frameless blur %v, got %v", route, framelessBlurRadius, blur)
 		}
 	}

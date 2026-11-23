@@ -20,28 +20,21 @@ func (s *Session) Search(ctx context.Context, request provider.SearchRequest) (p
 		len(request.Query) > maxSearchQueryLength || len(request.Cursor) > maxSearchCursorLength {
 		return provider.SearchPage{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, signedIn, secret := s.active, s.scope, s.accountID != "", s.secret
-	s.requests.RUnlock()
+	auth := s.snapshotAuth()
 	input := struct {
 		provider.SearchRequest
 		SignedIn bool            `json:"signedIn,omitempty"`
 		Secret   json.RawMessage `json:"secret,omitempty"`
-	}{request, signedIn, secret}
+	}{request, auth.signedIn(), auth.secret}
 	var page provider.SearchPage
-	if err := s.invoke(ctx, scope, client, provider.SearchCatalog, "search", input, &page); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.SearchCatalog, "search", input, &page); err != nil {
 		return provider.SearchPage{}, err
 	}
 	if len(page.NextCursor) > maxSearchCursorLength || page.Total != nil && *page.Total < 0 {
 		return provider.SearchPage{}, &provider.Error{Code: provider.PluginFailed}
 	}
-	for index := range page.Items {
-		if page.Items[index].VideoDetails != nil {
-			return provider.SearchPage{}, &provider.Error{Code: provider.PluginFailed}
-		}
-		if err := s.ownItem(&page.Items[index]); err != nil {
-			return provider.SearchPage{}, err
-		}
+	if err := s.ownSummaryItems(page.Items); err != nil {
+		return provider.SearchPage{}, err
 	}
 	for index := range page.Creators {
 		creator := &page.Creators[index]
@@ -81,15 +74,13 @@ func (s *Session) SearchSuggest(ctx context.Context, query string) (provider.Sea
 	if len(query) > maxSearchQueryLength {
 		return provider.SearchSuggestResult{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, secret := s.active, s.scope, s.secret
-	s.requests.RUnlock()
+	auth := s.snapshotAuth()
 	input := struct {
 		Query  string          `json:"query"`
 		Secret json.RawMessage `json:"secret,omitempty"`
-	}{Query: query, Secret: secret}
+	}{Query: query, Secret: auth.secret}
 	var result provider.SearchSuggestResult
-	if err := s.invoke(ctx, scope, client, provider.SearchSuggest, "searchSuggest", input, &result); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.SearchSuggest, "searchSuggest", input, &result); err != nil {
 		return provider.SearchSuggestResult{}, err
 	}
 	result.Suggestions = sanitizeKeywords(result.Suggestions, maxSearchSuggestions)

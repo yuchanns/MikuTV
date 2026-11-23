@@ -1,7 +1,6 @@
 package platform
 
 import (
-	"encoding/json"
 	"slices"
 	"strings"
 )
@@ -26,14 +25,7 @@ type searchHistoryStore struct {
 }
 
 func parseSearchHistoryStore(raw string) searchHistoryStore {
-	if raw == "" {
-		return searchHistoryStore{}
-	}
-	var store searchHistoryStore
-	if err := json.Unmarshal([]byte(raw), &store); err != nil {
-		return searchHistoryStore{}
-	}
-	return store
+	return unmarshalJSONOrZero[searchHistoryStore](raw)
 }
 
 func normalizeSearchQueries(queries []string) []string {
@@ -85,41 +77,21 @@ func (s *searchHistoryStore) put(entryID, owner string, queries []string) {
 	s.Buckets = append(s.Buckets, searchHistoryBucket{
 		Entry: entryID, Owner: owner, Queries: cleaned, Order: s.NextOrder,
 	})
-	if len(s.Buckets) > maxSearchHistoryBuckets {
-		slices.SortFunc(s.Buckets, func(a, b searchHistoryBucket) int {
-			switch {
-			case a.Order < b.Order:
-				return -1
-			case a.Order > b.Order:
-				return 1
-			default:
-				return 0
-			}
-		})
-		s.Buckets = slices.Clone(s.Buckets[len(s.Buckets)-maxSearchHistoryBuckets:])
-	}
+	s.Buckets = trimRecentByOrder(s.Buckets, maxSearchHistoryBuckets, func(b searchHistoryBucket) int64 { return b.Order })
 }
 
 func (s *searchHistoryStore) clearAccount(entryID, owner string) bool {
-	before := len(s.Buckets)
-	s.Buckets = slices.DeleteFunc(s.Buckets, func(bucket searchHistoryBucket) bool {
+	return deleteMatching(&s.Buckets, func(bucket searchHistoryBucket) bool {
 		return bucket.Entry == entryID && bucket.Owner == owner
 	})
-	return len(s.Buckets) != before
 }
 
 func (s *searchHistoryStore) clearEntry(entryID string) bool {
-	before := len(s.Buckets)
-	s.Buckets = slices.DeleteFunc(s.Buckets, func(bucket searchHistoryBucket) bool {
+	return deleteMatching(&s.Buckets, func(bucket searchHistoryBucket) bool {
 		return bucket.Entry == entryID
 	})
-	return len(s.Buckets) != before
 }
 
 func (s *searchHistoryStore) encode() (string, error) {
-	data, err := json.Marshal(s)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+	return marshalJSONString(s)
 }

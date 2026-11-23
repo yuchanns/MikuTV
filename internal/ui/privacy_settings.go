@@ -94,15 +94,13 @@ func (privacySettingsPage) Render(c *ui.Context, p *PageContext) {
 		settingsEmptyPage{}.Render(c, p)
 		return
 	}
-	act, priv, colors, d := p.Assets.Text.Activity, p.Assets.Text.Privacy, p.Theme.Colors, p.uiColors()
+	act, priv := p.Assets.Text.Activity, p.Assets.Text.Privacy
 	p.region("content", nil)
-	ui.Text(c, p.Title).Height(45).FontSize(32).FontWeight(550).LineHeight(1.4).Margin(0, 0, 13, 0)
-	ui.Text(c, act.PrivacyIntro).Height(32).FontSize(19).LineHeight(1.7).TextColor(paint(colors.Text.Muted)).Margin(0, 0, 27, 0)
-	ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
+	p.settingsSectionHeader(c, p.Title, act.PrivacyIntro)
 
 	if showSync {
 		enabled := v.Activity.HistorySync()
-		p.danmakuToggleRow(c, app.HistorySync, "history", act.HistorySync, act.HistorySyncNote, enabled, func() {
+		p.settingsToggleRow(c, app.HistorySync, "history", act.HistorySync, act.HistorySyncNote, enabled, func() {
 			if err := v.Activity.ToggleHistorySync(); err != nil {
 				v.showSettingsFeedback(priv.SyncSaveFailed)
 				return
@@ -111,12 +109,12 @@ func (privacySettingsPage) Render(c *ui.Context, p *PageContext) {
 		})
 	}
 	if showSearch {
-		p.danmakuValueRow(c, privacyClearSearch, "trash", priv.ClearSearch, "", "", func() {
+		p.settingsValueRow(c, privacyClearSearch, "trash", priv.ClearSearch, "", "", func() {
 			v.openPrivacyConfirm(privacyClearKindSearch)
 		})
 	}
 	if showHistory {
-		p.danmakuValueRow(c, privacyClearHistory, "trash", priv.ClearHistory, "", "", func() {
+		p.settingsValueRow(c, privacyClearHistory, "trash", priv.ClearHistory, "", "", func() {
 			v.openPrivacyConfirm(privacyClearKindHistory)
 		})
 	}

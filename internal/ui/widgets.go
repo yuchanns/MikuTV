@@ -99,8 +99,6 @@ func (p *PageContext) styledButton(c *ui.Context, label, icon string, id app.Foc
 		AlignSelf(ui.Start).OnClick(func() { p.dispatch(action) })
 	if style.focusShadow {
 		p.addVideoFocusShadow(e, focused)
-	} else {
-		p.applyFocusElevation(e, focused)
 	}
 	if style.fontWeight > 0 {
 		e.FontWeight(style.fontWeight)
@@ -152,10 +150,6 @@ func (p *PageContext) animateFocus(element ui.Element, background, foreground ui
 	color := element.AnimateColor("foreground", foreground, animation)
 	element.Background(element.AnimateColor("background", background, animation)).TextColor(color)
 	return color
-}
-
-func (p *PageContext) applyFocusElevation(_ ui.Element, _ bool) {
-	// Light themes preserve the same flat frosted-glass surface language as Dark themes without heavy drop shadows.
 }
 
 func (p *PageContext) loadingSpinner(c *ui.Context, size float32) {

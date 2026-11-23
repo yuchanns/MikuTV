@@ -209,7 +209,6 @@ func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSe
 						})
 					})
 				p.animateFocus(button, background, foreground)
-				p.applyFocusElevation(button, focused)
 				p.bind(button, id, favoriteTabs)
 				button.Children(func() {
 					ui.Text(c, title).FontSize(24).LetterSpacing(1)

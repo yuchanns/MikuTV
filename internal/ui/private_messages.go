@@ -1,7 +1,6 @@
 package tvui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -612,21 +611,7 @@ func (p *PageContext) editPrivateDraft() {
 
 func (p *PageContext) finishPrivateDraftEdit(key ui.TextKey) bool {
 	draft := &p.host.privateUI.draft
-	switch key.Key {
-	case ui.KeyEnter:
-		draft.body = key.Text()
-		draft.preview.Y = 0
-	case ui.KeyEscape:
-	default:
-		return false
-	}
-	draft.editing = false
-	focus := privateComposeEdit
-	if key.Key == ui.KeyEnter && draft.canSend() {
-		focus = privateComposeSend
-	}
-	p.host.moveFocus(focus, app.Right, true)
-	return true
+	return p.finishTextComposeEdit(key, &draft.editing, &draft.body, &draft.preview, draft.canSend, privateComposeEdit, privateComposeSend)
 }
 
 func (p *PageContext) sendPrivateDraft() {
@@ -656,66 +641,43 @@ func (p *PageContext) sendPrivateDraft() {
 type privateComposePage struct{}
 
 func (privateComposePage) Render(c *ui.Context, p *PageContext) {
-	const region = "private-compose-modal"
 	draft := &p.host.privateUI.draft
 	text, detailText, colors := p.Assets.Text.Activity, p.Assets.Text.Detail, p.Theme.Colors
 	sending := p.host.PrivateMessages != nil && p.host.PrivateMessages.Sending()
-	p.region(region, nil)
-	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
-		p.framelessHeader(c, "PRIVATE MESSAGE", "comment", text.WritePrivateMessage, "")
-		ui.Row(c).Gap(15).AlignItems(ui.Center).Margin(0, 0, 24, 0).Children(func() {
+	sendLabel := text.SendMessage
+	if sending {
+		sendLabel = text.SendingMessage
+	}
+	p.renderTextComposeModal(c, textComposeModalSpec{
+		region:  "private-compose-modal",
+		eyebrow: "PRIVATE MESSAGE",
+		title:   text.WritePrivateMessage,
+		renderAuthor: func(c *ui.Context) {
 			p.privatePeerAvatar(c, draft.peer, 40, 17)
 			ui.Text(c, draft.peer.Name).FontSize(20).TextColor(paint(colors.Text.Secondary))
-		})
-		if draft.editing {
-			field := ui.TextInput(c.Key("private-compose-input"), &draft.input).FillWidth().Height(105).FontSize(29).
-				Label(text.WritePrivateMessage).Placeholder(detailText.KeyboardPlaceholder).MaxLength(provider.PrivateMessageLimit).
-				ReturnKey(ui.ReturnDone).OnTextKey(p.finishPrivateDraftEdit)
-			if p.active {
-				field.FocusBind(&p.State.Focus, privateComposeInput)
-				field.Focus(ui.FocusOptions{PreventScroll: true})
-			}
-		} else {
-			p.drawPrivateDraftPreview(c, draft, region)
-		}
-		ui.Text(c, fmt.Sprintf("%d / %d", ui.UTF16Len(draft.body), provider.PrivateMessageLimit)).
-			AlignSelf(ui.End).Margin(10, 0, 0, 0).FontSize(16).TextColor(paint(colors.Text.Muted))
-		if draft.failure != "" {
-			ui.Text(c.Key("private-compose-failure"), draft.failure).Margin(10, 0, 0, 0).FontSize(18).TextColor(paint(colors.Status.Warning.Foreground))
-		}
-		ui.Row(c.Key("private-compose-actions")).Gap(16).Margin(36, 0, 0, 0).AlignSelf(ui.Start).Children(func() {
-			p.styledButton(c, text.EditMessage, "", privateComposeEdit, region, p.editPrivateDraft, p.framelessButtonAppearance()).
-				AccessDisabled(sending)
-			sendLabel := text.SendMessage
-			if sending {
-				sendLabel = text.SendingMessage
-			}
-			disabled := !draft.canSend() || sending
-			button := p.styledButton(c, sendLabel, "send", privateComposeSend, region, p.sendPrivateDraft, p.framelessButtonAppearance()).
-				Disabled(!draft.canSend()).AccessDisabled(sending).DimDisabled(false)
-			if disabled {
-				button.Opacity(0.35)
-			}
-		})
+		},
+		editing:            draft.editing,
+		inputKey:           "private-compose-input",
+		input:              &draft.input,
+		inputFocus:         privateComposeInput,
+		inputPlaceholder:   detailText.KeyboardPlaceholder,
+		maxLength:          provider.PrivateMessageLimit,
+		onTextKey:          p.finishPrivateDraftEdit,
+		body:               draft.body,
+		hasDraft:           draft.canSend(),
+		previewFocus:       privateComposePreview,
+		previewScroll:      &draft.preview,
+		previewPlaceholder: text.PrivateDraftPlaceholder,
+		mutedPlaceholder:   true,
+		failureKey:         "private-compose-failure",
+		failure:            draft.failure,
+		actionsKey:         "private-compose-actions",
+		editLabel:          text.EditMessage,
+		editFocus:          privateComposeEdit,
+		onEdit:             p.editPrivateDraft,
+		sendLabel:          sendLabel,
+		sendFocus:          privateComposeSend,
+		onSend:             p.sendPrivateDraft,
+		sending:            sending,
 	})
-}
-
-func (p *PageContext) drawPrivateDraftPreview(c *ui.Context, draft *privateMessageDraft, region string) {
-	body := draft.body
-	hasDraft := draft.canSend()
-	if !hasDraft {
-		body = p.Assets.Text.Activity.PrivateDraftPlaceholder
-	}
-	preview := ui.Scroll(c.Key(string(privateComposePreview))).FillWidth().MinHeight(101).MaxHeight(174).
-		TrackScroll(&draft.preview)
-	preview.Children(func() {
-		ink := paint(p.Theme.Colors.Text.Primary)
-		if !hasDraft {
-			ink = paint(p.Theme.Colors.Text.Muted)
-		}
-		ui.Text(c, body).FillWidth().Padding(17, 0, 0, 0).FontSize(29).LineHeight(1.8).TextColor(ink)
-	})
-	if hasDraft {
-		p.bindDraftPreview(preview, privateComposePreview, region, &draft.preview, privateComposeEdit, 92)
-	}
 }

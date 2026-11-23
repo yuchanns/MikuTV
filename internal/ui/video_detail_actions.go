@@ -278,7 +278,7 @@ func (p *PageContext) showVideoActionConfirmation(action provider.ActionSpec) {
 
 func (videoConfirmPage) Render(c *ui.Context, p *PageContext) {
 	const region = "video-confirm"
-	detail, text, colors := &p.host.videoDetail, p.Assets.Text, p.Theme.Colors
+	detail, text := &p.host.videoDetail, p.Assets.Text
 	action := detail.confirm
 	if action == nil || action.Confirm == nil {
 		return
@@ -309,13 +309,6 @@ func (videoConfirmPage) Render(c *ui.Context, p *PageContext) {
 			p.styledButton(c, closeLabel, "", app.CloseModal, region, func() { p.State.Back() }, p.framelessButtonAppearance())
 		})
 	})
-	_ = colors
-}
-
-func (p *PageContext) videoModalButton(c *ui.Context, label, icon string, id app.FocusID, region string, action func()) ui.Element {
-	style := p.dialogButtonAppearance()
-	style.iconSize, style.iconGap, style.fontWeight, style.focusShadow = 24, 13, 550, true
-	return p.styledButton(c, label, icon, id, region, action, style)
 }
 
 func (p *PageContext) toggleVideoCommentLike(comment provider.VideoComment) {

@@ -69,18 +69,16 @@ func (s *Session) EditVideo(ctx context.Context, request provider.VideoEdit) (pr
 	case provider.VideoReplyDislike, provider.VideoPostComment:
 		capability = provider.WriteVideoComments
 	}
-	s.requests.RLock()
-	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
-	s.requests.RUnlock()
-	if owner == "" {
-		return result, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return result, err
 	}
 	input := struct {
 		provider.VideoEdit
 		Owner  string          `json:"owner"`
 		Secret json.RawMessage `json:"secret"`
-	}{request, owner, secret}
-	if err := s.invoke(ctx, scope, client, capability, "editVideo", input, &result); err != nil {
+	}{request, auth.owner, auth.secret}
+	if err := s.invoke(ctx, auth.scope, auth.client, capability, "editVideo", input, &result); err != nil {
 		return provider.VideoEditResult{}, err
 	}
 	if len(result.ActionStates) > maxVideoActions {
@@ -105,10 +103,8 @@ func (s *Session) VideoComments(ctx context.Context, query provider.VideoComment
 		(query.ThreadID == "" && query.Order != provider.VideoCommentsHot && query.Order != provider.VideoCommentsLatest) {
 		return page, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope := s.active, s.scope
-	s.requests.RUnlock()
-	if err := s.invoke(ctx, scope, client, provider.ReadVideoComments, "videoComments", query, &page); err != nil {
+	auth := s.snapshotAuth()
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.ReadVideoComments, "videoComments", query, &page); err != nil {
 		return provider.VideoCommentPage{}, err
 	}
 	if err := ownVideoComments(page.Comments, query.ThreadID == ""); err != nil {
@@ -153,20 +149,18 @@ func (s *Session) VideoFavoriteFolders(ctx context.Context, ref provider.MediaRe
 	if !s.ownsVideo(ref) {
 		return nil, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner := s.active, s.scope, s.accountID
-	s.requests.RUnlock()
-	if owner == "" {
-		return nil, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return nil, err
 	}
 	input := struct {
 		Ref   provider.MediaRef `json:"ref"`
 		Owner string            `json:"owner"`
-	}{ref, owner}
+	}{ref, auth.owner}
 	var result struct {
 		Folders []provider.VideoFavoriteFolder `json:"folders"`
 	}
-	if err := s.invoke(ctx, scope, client, provider.EditVideoFavorites, "videoFavoriteFolders", input, &result); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.EditVideoFavorites, "videoFavoriteFolders", input, &result); err != nil {
 		return nil, err
 	}
 	for _, folder := range result.Folders {

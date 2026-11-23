@@ -679,7 +679,7 @@ func (p *PageContext) renderInstalledPluginDetail(c *ui.Context, item app.Instal
 		}
 	}
 	instItem := item
-	p.danmakuToggleRow(c, pluginsDetailToggle, toggleIcon, l.EnableLabel, toggleNote, item.Enabled, func() {
+	p.settingsToggleRow(c, pluginsDetailToggle, toggleIcon, l.EnableLabel, toggleNote, item.Enabled, func() {
 		if instItem.Enabled {
 			v.openPluginDisableDialog(instItem)
 		} else {
@@ -840,48 +840,16 @@ func (p *PageContext) pluginRow(c *ui.Context, id app.FocusID, region, iconName,
 }
 
 func (p *PageContext) pluginRowWithSwatches(c *ui.Context, id app.FocusID, region, iconName, label, note, value string, swatches *[6]theme.Color, action func()) {
-	colors, d := p.Theme.Colors, p.uiColors()
-	focused := p.paintFocus() == id
-	fill, ink, noteColor, iconColor, valColor := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Muted), paint(colors.Text.Secondary), paint(colors.Text.Secondary)
-	borderW, borderColor := float32(0), ui.Transparent
-	if focused {
-		fill, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
-		noteColor, iconColor, valColor = d.focusSubtext, d.focusSubtext, d.focusSubtext
-		if !p.Theme.Dark {
-			borderW, borderColor = 1, d.focusBorder
-		}
-	}
-	fullLabel := label
-	if value != "" {
-		fullLabel += " " + value
-	}
-	control := ui.Button(c.Key(string(id)), "").FillWidth().MinHeight(88).
-		Radius(7).Border(borderW, borderColor).Padding(0).Label(fullLabel).
-		OnClick(func() { p.dispatch(action) })
-	p.animateFocus(control, fill, ink)
-	p.applyFocusElevation(control, focused)
-	p.bind(control, id, region)
-	control.Children(func() {
-		ui.Row(c).Fill().Padding(14, 20).Gap(20).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(36, 36).Shrink(0).Center().Children(func() {
-				ui.Icon(c, p.Assets.Icon(iconName)).Size(24, 24).TextColor(iconColor)
-			})
-			ui.Column(c).Grow(1).MinWidth(0).Gap(6).Children(func() {
-				ui.Text(c, label).FontSize(23).FontWeight(450).LineHeight(1.4).SingleLine()
-				if note != "" {
-					ui.Text(c, note).FontSize(16).LineHeight(1.6).TextColor(noteColor).SingleLine()
-				}
-			})
-			if swatches != nil {
-				p.renderThemeSwatches(c, *swatches, 76, 46, 8)
-			}
-			if value != "" {
-				ui.Text(c, value).FontSize(21).Shrink(0).TextColor(valColor)
-			}
-		})
-		if !focused || p.Theme.Dark {
-			ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
-		}
+	p.settingsRow(c, settingsRowOptions{
+		id:         id,
+		region:     region,
+		icon:       iconName,
+		label:      label,
+		note:       note,
+		value:      value,
+		singleLine: true,
+		swatches:   swatches,
+		action:     action,
 	})
 }
 

@@ -444,7 +444,6 @@ func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem
 				Border(1, borderColor).Background(background).TextColor(ink).Center().
 				OnClick(func() { p.dispatch(func() { p.addCatalogWatchLater(featured) }) })
 			p.animateFocus(button, background, ink)
-			p.applyFocusElevation(button, focused)
 			p.bind(button, homeLaterAction, homeHero)
 			button.Children(func() { ui.Icon(c, p.Assets.Icon("plus")).Size(28, 28) })
 		}

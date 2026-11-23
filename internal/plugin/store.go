@@ -185,7 +185,7 @@ func (s *PackageStore) LoadAppearanceState() (AppearanceState, error) {
 	}, nil
 }
 
-func (s *PackageStore) SaveActiveTheme(id string) error {
+func (s *PackageStore) updateState(mutate func(*packageStoreState)) error {
 	if s == nil || s.root == "" {
 		return nil
 	}
@@ -195,46 +195,36 @@ func (s *PackageStore) SaveActiveTheme(id string) error {
 	if err != nil {
 		return err
 	}
-	st.AppearanceMode = ""
-	st.ActiveTheme = strings.TrimSpace(id)
-	st.DarkTheme = ""
-	st.LightTheme = ""
-	st.FollowSystem = false
+	mutate(&st)
 	return s.saveStateLocked(st)
+}
+
+func (s *PackageStore) SaveActiveTheme(id string) error {
+	return s.updateState(func(st *packageStoreState) {
+		st.AppearanceMode = ""
+		st.ActiveTheme = strings.TrimSpace(id)
+		st.DarkTheme = ""
+		st.LightTheme = ""
+		st.FollowSystem = false
+	})
 }
 
 func (s *PackageStore) SaveAppearanceConfig(mode, lightTheme, darkTheme string) error {
-	if s == nil || s.root == "" {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st, err := s.loadStateLocked()
-	if err != nil {
-		return err
-	}
-	st.AppearanceMode = strings.TrimSpace(mode)
-	st.LightTheme = strings.TrimSpace(lightTheme)
-	st.DarkTheme = strings.TrimSpace(darkTheme)
-	st.ActiveTheme = ""
-	st.FollowSystem = st.AppearanceMode == "system"
-	return s.saveStateLocked(st)
+	return s.updateState(func(st *packageStoreState) {
+		st.AppearanceMode = strings.TrimSpace(mode)
+		st.LightTheme = strings.TrimSpace(lightTheme)
+		st.DarkTheme = strings.TrimSpace(darkTheme)
+		st.ActiveTheme = ""
+		st.FollowSystem = st.AppearanceMode == "system"
+	})
 }
 
 func (s *PackageStore) SaveAppearanceMotion(hoverPreview, reduceMotion bool) error {
-	if s == nil || s.root == "" {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st, err := s.loadStateLocked()
-	if err != nil {
-		return err
-	}
-	hp := hoverPreview
-	st.HoverPreview = &hp
-	st.ReduceMotion = reduceMotion
-	return s.saveStateLocked(st)
+	return s.updateState(func(st *packageStoreState) {
+		hp := hoverPreview
+		st.HoverPreview = &hp
+		st.ReduceMotion = reduceMotion
+	})
 }
 
 func (s *PackageStore) loadStateLocked() (packageStoreState, error) {
@@ -266,19 +256,23 @@ func (s *PackageStore) loadStateLocked() (packageStoreState, error) {
 	return st, nil
 }
 
-func (s *PackageStore) writeStateFileLocked(st packageStoreState) error {
-	if err := os.MkdirAll(s.root, 0o755); err != nil {
+func writeJSONAtomic(path string, v any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(st, "", "  ")
+	raw, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := s.statePath() + ".tmp"
+	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.statePath())
+	return os.Rename(tmp, path)
+}
+
+func (s *PackageStore) writeStateFileLocked(st packageStoreState) error {
+	return writeJSONAtomic(s.statePath(), st)
 }
 
 func (s *PackageStore) saveStateLocked(st packageStoreState) error {
@@ -314,29 +308,24 @@ func (s *PackageStore) SetBundledEnabled(id string, enabled bool) error {
 	if id == "" {
 		return fmt.Errorf("plugin id is required")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	st, err := s.loadStateLocked()
-	if err != nil {
-		return err
-	}
-	next := make([]string, 0, len(st.DisabledBundled)+1)
-	found := false
-	for _, existing := range st.DisabledBundled {
-		if strings.EqualFold(existing, id) {
-			found = true
-			if !enabled {
-				next = append(next, existing)
+	return s.updateState(func(st *packageStoreState) {
+		next := make([]string, 0, len(st.DisabledBundled)+1)
+		found := false
+		for _, existing := range st.DisabledBundled {
+			if strings.EqualFold(existing, id) {
+				found = true
+				if !enabled {
+					next = append(next, existing)
+				}
+				continue
 			}
-			continue
+			next = append(next, existing)
 		}
-		next = append(next, existing)
-	}
-	if !enabled && !found {
-		next = append(next, id)
-	}
-	st.DisabledBundled = next
-	return s.saveStateLocked(st)
+		if !enabled && !found {
+			next = append(next, id)
+		}
+		st.DisabledBundled = next
+	})
 }
 
 func (s *PackageStore) SetExternalEnabled(id string, enabled bool) (InstalledReceipt, error) {
@@ -408,15 +397,6 @@ func (s *PackageStore) packageZipPath(id string) string {
 	return filepath.Join(s.root, "packages", id, "plugin.zip")
 }
 
-func (s *PackageStore) LoadReceipts() ([]InstalledReceipt, error) {
-	if s == nil || s.root == "" {
-		return nil, nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.loadReceiptsLocked()
-}
-
 func (s *PackageStore) loadReceiptsLocked() ([]InstalledReceipt, error) {
 	raw, err := os.ReadFile(s.receiptsPath())
 	if err != nil {
@@ -433,18 +413,7 @@ func (s *PackageStore) loadReceiptsLocked() ([]InstalledReceipt, error) {
 }
 
 func (s *PackageStore) saveReceiptsLocked(receipts []InstalledReceipt) error {
-	if err := os.MkdirAll(s.root, 0o755); err != nil {
-		return err
-	}
-	raw, err := json.MarshalIndent(receipts, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := s.receiptsPath() + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.receiptsPath()); err != nil {
+	if err := writeJSONAtomic(s.receiptsPath(), receipts); err != nil {
 		return err
 	}
 	if s.backup != nil {
@@ -453,6 +422,97 @@ func (s *PackageStore) saveReceiptsLocked(receipts []InstalledReceipt) error {
 		}
 	}
 	return nil
+}
+
+type openedPackage struct {
+	manifest         Manifest
+	source           *Source
+	theme            *ThemePackage
+	locale           *LocalePackage
+	permissions      []string
+	swatches         [6]theme.Color
+	language         string
+	nativeName       string
+	enabledByDefault bool
+}
+
+func openPackageByKind(ctx context.Context, kind Kind, data []byte, appVersion string) (openedPackage, error) {
+	switch kind {
+	case SourceKind:
+		opened, err := Open(ctx, data, appVersion)
+		if err != nil {
+			return openedPackage{}, err
+		}
+		return openedPackage{
+			manifest:         opened.Manifest(),
+			source:           opened,
+			permissions:      append([]string(nil), opened.manifest.Permissions.Network...),
+			enabledByDefault: true,
+		}, nil
+	case ThemeKind:
+		opened, err := OpenTheme(data, appVersion)
+		if err != nil {
+			return openedPackage{}, err
+		}
+		return openedPackage{
+			manifest:         opened.Manifest(),
+			theme:            opened,
+			swatches:         opened.Theme().Swatches(),
+			enabledByDefault: false, // Themes are installed without auto-applying (§7.2).
+		}, nil
+	case LocaleKind:
+		opened, err := OpenLocale(data, appVersion)
+		if err != nil {
+			return openedPackage{}, err
+		}
+		return openedPackage{
+			manifest:         opened.Manifest(),
+			locale:           opened,
+			language:         opened.Language(),
+			nativeName:       opened.NativeName(),
+			enabledByDefault: false,
+		}, nil
+	default:
+		return openedPackage{}, fmt.Errorf("%w: unsupported kind %q", ErrIncompatible, kind)
+	}
+}
+
+func (s *PackageStore) writeStagedArchive(pattern string, data []byte) (string, error) {
+	if err := os.MkdirAll(s.stagingDir(), 0o755); err != nil {
+		return "", err
+	}
+	staged, err := os.CreateTemp(s.stagingDir(), pattern)
+	if err != nil {
+		return "", err
+	}
+	path := staged.Name()
+	if _, err := staged.Write(data); err != nil {
+		_ = staged.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := staged.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+func upsertReceipt(receipts []InstalledReceipt, receipt InstalledReceipt) []InstalledReceipt {
+	updated := make([]InstalledReceipt, 0, len(receipts)+1)
+	replaced := false
+	for _, existing := range receipts {
+		if strings.EqualFold(existing.ID, receipt.ID) {
+			updated = append(updated, receipt)
+			replaced = true
+		} else {
+			updated = append(updated, existing)
+		}
+	}
+	if !replaced {
+		updated = append(updated, receipt)
+	}
+	return updated
 }
 
 // LoadAll opens every persisted external plugin package, verifying each stored
@@ -552,49 +612,23 @@ func (s *PackageStore) LoadAllWithMissing(ctx context.Context, appVersion string
 			failures = append(failures, fmt.Errorf("installed plugin %s: %w", receipt.ID, ErrDigestMismatch))
 			continue
 		}
-		switch receipt.Kind {
-		case SourceKind:
-			src, err := Open(ctx, data, appVersion)
-			if err != nil {
-				failures = append(failures, fmt.Errorf("installed plugin %s: %w", receipt.ID, err))
-				continue
-			}
-			manifest := src.Manifest()
-			if manifest.ID != receipt.ID || manifest.Version != receipt.Version || manifest.Kind != receipt.Kind {
-				failures = append(failures, fmt.Errorf("installed plugin %s: manifest does not match receipt", receipt.ID))
-				continue
-			}
-			loaded = append(loaded, InstalledPackage{Receipt: receipt, Source: src})
-		case ThemeKind:
-			pkg, err := OpenTheme(data, appVersion)
-			if err != nil {
-				failures = append(failures, fmt.Errorf("installed theme %s: %w", receipt.ID, err))
-				continue
-			}
-			manifest := pkg.Manifest()
-			if manifest.ID != receipt.ID || manifest.Version != receipt.Version || manifest.Kind != receipt.Kind {
-				failures = append(failures, fmt.Errorf("installed theme %s: manifest does not match receipt", receipt.ID))
-				continue
-			}
-			receipt.Swatches = pkg.Theme().Swatches()
-			loaded = append(loaded, InstalledPackage{Receipt: receipt, Theme: pkg})
-		case LocaleKind:
-			pkg, err := OpenLocale(data, appVersion)
-			if err != nil {
-				failures = append(failures, fmt.Errorf("installed locale %s: %w", receipt.ID, err))
-				continue
-			}
-			manifest := pkg.Manifest()
-			if manifest.ID != receipt.ID || manifest.Version != receipt.Version || manifest.Kind != receipt.Kind {
-				failures = append(failures, fmt.Errorf("installed locale %s: manifest does not match receipt", receipt.ID))
-				continue
-			}
-			receipt.Language = pkg.Language()
-			receipt.NativeName = pkg.NativeName()
-			loaded = append(loaded, InstalledPackage{Receipt: receipt, Locale: pkg})
-		default:
-			failures = append(failures, fmt.Errorf("installed plugin %s: %w: unsupported kind %q", receipt.ID, ErrIncompatible, receipt.Kind))
+		opened, err := openPackageByKind(ctx, receipt.Kind, data, appVersion)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("installed plugin %s: %w", receipt.ID, err))
+			continue
 		}
+		if opened.manifest.ID != receipt.ID || opened.manifest.Version != receipt.Version || opened.manifest.Kind != receipt.Kind {
+			failures = append(failures, fmt.Errorf("installed plugin %s: manifest does not match receipt", receipt.ID))
+			continue
+		}
+		if opened.theme != nil {
+			receipt.Swatches = opened.swatches
+		}
+		if opened.locale != nil {
+			receipt.Language = opened.language
+			receipt.NativeName = opened.nativeName
+		}
+		loaded = append(loaded, InstalledPackage{Receipt: receipt, Source: opened.source, Theme: opened.theme, Locale: opened.locale})
 	}
 	return loaded, missing, cachePurged, failures
 }
@@ -621,66 +655,31 @@ func (s *PackageStore) RestoreReceipt(ctx context.Context, receipt InstalledRece
 		return InstalledPackage{}, fmt.Errorf("%w: expected %s, got %s", ErrDigestMismatch, receipt.SHA256, gotHex)
 	}
 
-	var out InstalledPackage
-	switch receipt.Kind {
-	case SourceKind:
-		src, err := Open(ctx, data, appVersion)
-		if err != nil {
-			return InstalledPackage{}, err
-		}
-		m := src.Manifest()
-		if m.ID != receipt.ID || m.Version != receipt.Version || m.Kind != receipt.Kind {
-			return InstalledPackage{}, fmt.Errorf("restored manifest does not match receipt for %s", receipt.ID)
-		}
-		out.Source = src
-	case ThemeKind:
-		pkg, err := OpenTheme(data, appVersion)
-		if err != nil {
-			return InstalledPackage{}, err
-		}
-		m := pkg.Manifest()
-		if m.ID != receipt.ID || m.Version != receipt.Version || m.Kind != receipt.Kind {
-			return InstalledPackage{}, fmt.Errorf("restored theme manifest does not match receipt for %s", receipt.ID)
-		}
-		receipt.Swatches = pkg.Theme().Swatches()
-		out.Theme = pkg
-	case LocaleKind:
-		pkg, err := OpenLocale(data, appVersion)
-		if err != nil {
-			return InstalledPackage{}, err
-		}
-		m := pkg.Manifest()
-		if m.ID != receipt.ID || m.Version != receipt.Version || m.Kind != receipt.Kind {
-			return InstalledPackage{}, fmt.Errorf("restored locale manifest does not match receipt for %s", receipt.ID)
-		}
-		receipt.Language = pkg.Language()
-		receipt.NativeName = pkg.NativeName()
-		out.Locale = pkg
-	default:
-		return InstalledPackage{}, fmt.Errorf("%w: unsupported kind %q", ErrIncompatible, receipt.Kind)
-	}
-
-	if err := os.MkdirAll(s.stagingDir(), 0o755); err != nil {
-		return InstalledPackage{}, err
-	}
-	staged, err := os.CreateTemp(s.stagingDir(), "restore-*.zip")
+	opened, err := openPackageByKind(ctx, receipt.Kind, data, appVersion)
 	if err != nil {
 		return InstalledPackage{}, err
 	}
-	stagedPath := staged.Name()
+	if opened.manifest.ID != receipt.ID || opened.manifest.Version != receipt.Version || opened.manifest.Kind != receipt.Kind {
+		return InstalledPackage{}, fmt.Errorf("restored manifest does not match receipt for %s", receipt.ID)
+	}
+	if opened.theme != nil {
+		receipt.Swatches = opened.swatches
+	}
+	if opened.locale != nil {
+		receipt.Language = opened.language
+		receipt.NativeName = opened.nativeName
+	}
+
+	stagedPath, err := s.writeStagedArchive("restore-*.zip", data)
+	if err != nil {
+		return InstalledPackage{}, err
+	}
 	cleanupStaged := true
 	defer func() {
 		if cleanupStaged {
 			_ = os.Remove(stagedPath)
 		}
 	}()
-	if _, err := staged.Write(data); err != nil {
-		_ = staged.Close()
-		return InstalledPackage{}, err
-	}
-	if err := staged.Close(); err != nil {
-		return InstalledPackage{}, err
-	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -697,22 +696,11 @@ func (s *PackageStore) RestoreReceipt(ctx context.Context, receipt InstalledRece
 	if err != nil {
 		receipts = nil
 	}
-	replaced := false
-	for i, existing := range receipts {
-		if strings.EqualFold(existing.ID, receipt.ID) {
-			receipts[i] = receipt
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		receipts = append(receipts, receipt)
-	}
+	receipts = upsertReceipt(receipts, receipt)
 	if err := s.saveReceiptsLocked(receipts); err != nil {
 		return InstalledPackage{}, err
 	}
-	out.Receipt = receipt
-	return out, nil
+	return InstalledPackage{Receipt: receipt, Source: opened.source, Theme: opened.theme, Locale: opened.locale}, nil
 }
 
 // StageAndInstall writes the downloaded archive to a temporary staging file,
@@ -733,27 +721,16 @@ func (s *PackageStore) StageAndInstall(
 	if err := ctx.Err(); err != nil {
 		return InstalledPackage{}, err
 	}
-	if err := os.MkdirAll(s.stagingDir(), 0o755); err != nil {
-		return InstalledPackage{}, err
-	}
-	stagedFile, err := os.CreateTemp(s.stagingDir(), "install-*.zip")
+	stagedPath, err := s.writeStagedArchive("install-*.zip", data)
 	if err != nil {
 		return InstalledPackage{}, err
 	}
-	stagedPath := stagedFile.Name()
 	cleanupStaged := true
 	defer func() {
 		if cleanupStaged {
 			_ = os.Remove(stagedPath)
 		}
 	}()
-	if _, err := stagedFile.Write(data); err != nil {
-		_ = stagedFile.Close()
-		return InstalledPackage{}, err
-	}
-	if err := stagedFile.Close(); err != nil {
-		return InstalledPackage{}, err
-	}
 
 	if err := ctx.Err(); err != nil {
 		return InstalledPackage{}, err
@@ -772,47 +749,11 @@ func (s *PackageStore) StageAndInstall(
 		return InstalledPackage{}, fmt.Errorf("%w: %s", ErrIncompatible, inspected.Compatibility.Code)
 	}
 
-	var src *Source
-	var themePkg *ThemePackage
-	var localePkg *LocalePackage
-	var manifest Manifest
-	var perms []string
-	var swatches [6]theme.Color
-	var language, nativeName string
-	enabledByDefault := true
-
-	switch inspected.Manifest.Kind {
-	case SourceKind:
-		opened, err := Open(ctx, data, appVersion)
-		if err != nil {
-			return InstalledPackage{}, err
-		}
-		src = opened
-		manifest = opened.Manifest()
-		perms = append([]string(nil), opened.manifest.Permissions.Network...)
-	case ThemeKind:
-		opened, err := OpenTheme(data, appVersion)
-		if err != nil {
-			return InstalledPackage{}, err
-		}
-		themePkg = opened
-		manifest = opened.Manifest()
-		swatches = opened.Theme().Swatches()
-		// Themes are installed without auto-applying (§7.2).
-		enabledByDefault = false
-	case LocaleKind:
-		opened, err := OpenLocale(data, appVersion)
-		if err != nil {
-			return InstalledPackage{}, err
-		}
-		localePkg = opened
-		manifest = opened.Manifest()
-		language = opened.Language()
-		nativeName = opened.NativeName()
-		enabledByDefault = false
-	default:
-		return InstalledPackage{}, fmt.Errorf("%w: unsupported kind %q", ErrIncompatible, inspected.Manifest.Kind)
+	opened, err := openPackageByKind(ctx, inspected.Manifest.Kind, data, appVersion)
+	if err != nil {
+		return InstalledPackage{}, err
 	}
+	manifest := opened.manifest
 
 	if item.Manifest.ID != "" && !strings.EqualFold(manifest.ID, item.Manifest.ID) {
 		return InstalledPackage{}, fmt.Errorf("package id %q does not match previewed %q", manifest.ID, item.Manifest.ID)
@@ -874,32 +815,20 @@ func (s *PackageStore) StageAndInstall(
 		TagName:     item.Release.TagName,
 		AssetID:     item.Release.AssetID,
 		SHA256:      digestHex,
-		Enabled:     enabledByDefault,
+		Enabled:     opened.enabledByDefault,
 		InstalledAt: time.Now().Unix(),
 		License:     manifest.License,
-		Permissions: perms,
-		Swatches:    swatches,
-		Language:    language,
-		NativeName:  nativeName,
+		Permissions: opened.permissions,
+		Swatches:    opened.swatches,
+		Language:    opened.language,
+		NativeName:  opened.nativeName,
 	}
-	updated := make([]InstalledReceipt, 0, len(receipts)+1)
-	replaced := false
-	for _, existing := range receipts {
-		if strings.EqualFold(existing.ID, receipt.ID) {
-			updated = append(updated, receipt)
-			replaced = true
-		} else {
-			updated = append(updated, existing)
-		}
-	}
-	if !replaced {
-		updated = append(updated, receipt)
-	}
+	updated := upsertReceipt(receipts, receipt)
 	if err := s.saveReceiptsLocked(updated); err != nil {
 		_ = os.RemoveAll(destDir)
 		return InstalledPackage{}, err
 	}
-	return InstalledPackage{Receipt: receipt, Source: src, Theme: themePkg, Locale: localePkg}, nil
+	return InstalledPackage{Receipt: receipt, Source: opened.source, Theme: opened.theme, Locale: opened.locale}, nil
 }
 
 // StageAndUpdate validates a downloaded update archive in staging without
@@ -926,27 +855,16 @@ func (s *PackageStore) StageAndUpdate(
 	if !strings.EqualFold(strings.TrimSpace(existing.Repository), strings.TrimSpace(target.Repository)) {
 		return InstalledPackage{}, fmt.Errorf("%w: update repository %q does not match %q", ErrSourceConflict, target.Repository, existing.Repository)
 	}
-	if err := os.MkdirAll(s.stagingDir(), 0o755); err != nil {
-		return InstalledPackage{}, err
-	}
-	stagedFile, err := os.CreateTemp(s.stagingDir(), "update-*.zip")
+	stagedPath, err := s.writeStagedArchive("update-*.zip", data)
 	if err != nil {
 		return InstalledPackage{}, err
 	}
-	stagedPath := stagedFile.Name()
 	cleanupStaged := true
 	defer func() {
 		if cleanupStaged {
 			_ = os.Remove(stagedPath)
 		}
 	}()
-	if _, err := stagedFile.Write(data); err != nil {
-		_ = stagedFile.Close()
-		return InstalledPackage{}, err
-	}
-	if err := stagedFile.Close(); err != nil {
-		return InstalledPackage{}, err
-	}
 	if err := ctx.Err(); err != nil {
 		return InstalledPackage{}, err
 	}
@@ -978,38 +896,12 @@ func (s *PackageStore) StageAndUpdate(
 		return InstalledPackage{}, fmt.Errorf("%w: %s", ErrIncompatible, inspected.Compatibility.Code)
 	}
 
-	var src *Source
-	var themePkg *ThemePackage
-	var localePkg *LocalePackage
-	var perms []string
-	var swatches [6]theme.Color
-	var language, nativeName string
-	switch existing.Kind {
-	case SourceKind:
-		opened, err := Open(ctx, data, appVersion)
-		if err != nil {
-			return InstalledPackage{}, err
-		}
-		src = opened
-		perms = append([]string(nil), opened.manifest.Permissions.Network...)
-	case ThemeKind:
-		opened, err := OpenTheme(data, appVersion)
-		if err != nil {
-			return InstalledPackage{}, err
-		}
-		themePkg = opened
-		swatches = opened.Theme().Swatches()
-	case LocaleKind:
-		opened, err := OpenLocale(data, appVersion)
-		if err != nil {
-			return InstalledPackage{}, err
-		}
-		localePkg = opened
-		language = opened.Language()
-		nativeName = opened.NativeName()
-	default:
-		return InstalledPackage{}, fmt.Errorf("%w: unsupported kind %q", ErrIncompatible, existing.Kind)
+	opened, err := openPackageByKind(ctx, existing.Kind, data, appVersion)
+	if err != nil {
+		return InstalledPackage{}, err
 	}
+	src, themePkg, localePkg := opened.source, opened.theme, opened.locale
+	perms, swatches, language, nativeName := opened.permissions, opened.swatches, opened.language, opened.nativeName
 	if err := ctx.Err(); err != nil {
 		return InstalledPackage{}, err
 	}

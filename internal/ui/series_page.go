@@ -128,8 +128,7 @@ func (seriesPage) Render(c *ui.Context, p *PageContext) {
 	catalog := p.host.Series
 	entry, _ := p.State.Current()
 	if catalog == nil || !entry.Capabilities.Has(provider.BrowseSeries) {
-		ui.Column(c).FillWidth().Padding(148, 83, 0, 103).Gap(44).
-			Children(func() { contentPage{}.Render(c, p) })
+		p.renderUnavailableContent(c)
 		return
 	}
 	snap := catalog.Hub()
@@ -500,7 +499,6 @@ func (p *PageContext) seriesHeader(c *ui.Context, snap app.SeriesHubSnapshot) {
 					Radius(30).Border(borderW, borderColor).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
 					OnClick(func() { p.dispatch(func() { p.host.selectSeriesGenre(val) }) })
 				p.animateFocus(btn, background, ink)
-				p.applyFocusElevation(btn, focused)
 				p.bind(btn, id, seriesHeaderRegion)
 				btn.Children(func() {
 					ui.Text(c, genre.Label).FontSize(24).LetterSpacing(1)

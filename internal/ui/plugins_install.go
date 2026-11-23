@@ -97,7 +97,7 @@ func (v *View) startPluginInstall() {
 		}
 		if out.Err != nil {
 			st.phase = pluginInstallError
-			st.failure = v.pluginInstallErrorMessage(out.Err)
+			st.failure = v.pluginTransferErrorMessage(out.Err)
 			st.retryable = out.Retryable
 			if out.Retryable {
 				v.State.Focus, v.reveal = pluginInstallRetryBtn, true
@@ -136,9 +136,11 @@ func (v *View) startPluginInstall() {
 	})
 }
 
-func (v *View) pluginInstallErrorMessage(err error) string {
+func (v *View) pluginTransferErrorMessage(err error) string {
 	l := v.Assets.Text.Plugins
 	switch {
+	case errors.Is(err, plugin.ErrKindChanged):
+		return l.UpdateErrKindChanged
 	case errors.Is(err, plugin.ErrDigestMismatch):
 		return l.InstallErrDigest
 	case errors.Is(err, plugin.ErrSourceConflict):
@@ -150,6 +152,25 @@ func (v *View) pluginInstallErrorMessage(err error) string {
 	default:
 		return l.InstallErrNetwork
 	}
+}
+
+func (p *PageContext) renderPluginPermissionList(c *ui.Context, domains []string, addedSet map[string]bool) {
+	colors, d, l := p.Theme.Colors, p.uiColors(), p.Assets.Text.Plugins
+	ui.Column(c).FillWidth().Gap(8).Children(func() {
+		limit := min(len(domains), 6)
+		for _, domain := range domains[:limit] {
+			isNew := addedSet != nil && addedSet[strings.ToLower(strings.TrimSpace(domain))]
+			ui.Row(c).FillWidth().MinHeight(54).Padding(12, 18).Radius(10).
+				Background(d.subtleFill).AlignItems(ui.Center).Justify(ui.SpaceBetween).Gap(16).Children(func() {
+				ui.Text(c, domain).Grow(1).MinWidth(0).SingleLine().FontSize(19).TextColor(paint(colors.Text.Primary))
+				if isNew {
+					ui.Text(c, l.UpdateAddedPermission).Shrink(0).FontSize(17).FontWeight(500).TextColor(paint(colors.Accent.Soft))
+				} else {
+					ui.Icon(c, p.Assets.Icon("lock")).Size(20, 20).TextColor(paint(colors.Text.Secondary))
+				}
+			})
+		}
+	})
 }
 
 func (v *View) submitPluginRepository() {
@@ -335,7 +356,7 @@ type pluginInstallDialogPage struct{}
 func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
 	st := &v.pluginsUI.install
-	l, colors, d := p.Assets.Text.Plugins, p.Theme.Colors, p.uiColors()
+	l, colors := p.Assets.Text.Plugins, p.Theme.Colors
 
 	p.region("plugin-install-actions", nil)
 	ctxLine := st.item.Manifest.Name
@@ -374,16 +395,7 @@ func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 				ui.Text(c, permIntro).FillWidth().Margin(24, 0, 14, 0).
 					FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))
 				if len(st.item.Permissions) > 0 {
-					ui.Column(c).FillWidth().Gap(8).Children(func() {
-						limit := min(len(st.item.Permissions), 6)
-						for _, domain := range st.item.Permissions[:limit] {
-							ui.Row(c).FillWidth().MinHeight(54).Padding(12, 18).Radius(10).
-								Background(d.subtleFill).AlignItems(ui.Center).Justify(ui.SpaceBetween).Gap(16).Children(func() {
-								ui.Text(c, domain).Grow(1).MinWidth(0).SingleLine().FontSize(19).TextColor(paint(colors.Text.Primary))
-								ui.Icon(c, p.Assets.Icon("lock")).Size(20, 20).TextColor(paint(colors.Text.Secondary))
-							})
-						}
-					})
+					p.renderPluginPermissionList(c, st.item.Permissions, nil)
 				}
 			}
 			ui.Row(c.Key("plugin-install-actions")).Margin(36, 0, 0, 0).Gap(16).Children(func() {

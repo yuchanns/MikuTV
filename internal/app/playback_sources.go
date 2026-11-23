@@ -7,81 +7,49 @@ import (
 )
 
 func (c *Catalog) ReadPlaybackDanmaku(query provider.DanmakuQuery, accept func([]provider.Danmaku, error)) context.CancelFunc {
-	source, _ := c.session.(provider.PlaybackDanmaku)
-	return catalogResult(c, func(ctx context.Context) ([]provider.Danmaku, error) {
-		if source == nil {
-			return nil, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, source provider.PlaybackDanmaku) ([]provider.Danmaku, error) {
 		return source.Danmaku(ctx, query)
 	}, accept)
 }
 
 func (c *Catalog) PostPlaybackDanmaku(draft provider.DanmakuPost, accept func(error)) context.CancelFunc {
-	source, _ := c.session.(provider.PlaybackDanmaku)
-	return catalogResult(c, func(ctx context.Context) (struct{}, error) {
-		if source == nil {
-			return struct{}{}, &provider.Error{Code: provider.Unsupported}
-		}
-		return struct{}{}, source.PostDanmaku(ctx, draft)
-	}, func(_ struct{}, err error) { accept(err) })
+	return catalogAction(c, func(ctx context.Context, source provider.PlaybackDanmaku) error {
+		return source.PostDanmaku(ctx, draft)
+	}, accept)
 }
 
 func (c *Catalog) ReadDanmakuRules(accept func([]provider.DanmakuRule, error)) context.CancelFunc {
-	source, _ := c.session.(provider.DanmakuRulesProvider)
-	return catalogResult(c, func(ctx context.Context) ([]provider.DanmakuRule, error) {
-		if source == nil {
-			return nil, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, source provider.DanmakuRulesProvider) ([]provider.DanmakuRule, error) {
 		return source.DanmakuRules(ctx)
 	}, accept)
 }
 
 func (c *Catalog) AddDanmakuRule(draft provider.DanmakuRuleDraft, accept func(provider.DanmakuRule, error)) context.CancelFunc {
-	source, _ := c.session.(provider.DanmakuRulesProvider)
-	return catalogResult(c, func(ctx context.Context) (provider.DanmakuRule, error) {
-		if source == nil {
-			return provider.DanmakuRule{}, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, source provider.DanmakuRulesProvider) (provider.DanmakuRule, error) {
 		return source.AddDanmakuRule(ctx, draft)
 	}, accept)
 }
 
 func (c *Catalog) RemoveDanmakuRule(removal provider.DanmakuRuleRemoval, accept func(error)) context.CancelFunc {
-	source, _ := c.session.(provider.DanmakuRulesProvider)
-	return catalogResult(c, func(ctx context.Context) (struct{}, error) {
-		if source == nil {
-			return struct{}{}, &provider.Error{Code: provider.Unsupported}
-		}
-		return struct{}{}, source.RemoveDanmakuRule(ctx, removal)
-	}, func(_ struct{}, err error) { accept(err) })
+	return catalogAction(c, func(ctx context.Context, source provider.DanmakuRulesProvider) error {
+		return source.RemoveDanmakuRule(ctx, removal)
+	}, accept)
 }
 
 func (c *Catalog) ReadPlaybackSubtitles(query provider.PlaybackSubtitleQuery, accept func([]provider.SubtitleCue, error)) context.CancelFunc {
-	source, _ := c.session.(provider.PlaybackSubtitleReader)
-	return catalogResult(c, func(ctx context.Context) ([]provider.SubtitleCue, error) {
-		if source == nil {
-			return nil, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, source provider.PlaybackSubtitleReader) ([]provider.SubtitleCue, error) {
 		return source.PlaybackSubtitles(ctx, query)
 	}, accept)
 }
 
 func (c *Catalog) ReadVideoFavoriteFolders(ref provider.MediaRef, accept func([]provider.VideoFavoriteFolder, error)) context.CancelFunc {
-	source, _ := c.session.(provider.VideoFavoriteEditor)
-	return catalogResult(c, func(ctx context.Context) ([]provider.VideoFavoriteFolder, error) {
-		if source == nil {
-			return nil, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, source provider.VideoFavoriteEditor) ([]provider.VideoFavoriteFolder, error) {
 		return source.VideoFavoriteFolders(ctx, ref)
 	}, accept)
 }
 
 func (c *Catalog) EditVideoFavoriteFolders(edit provider.VideoFavoriteEdit, accept func(error)) context.CancelFunc {
-	source, _ := c.session.(provider.VideoFavoriteEditor)
-	return catalogResult(c, func(ctx context.Context) (struct{}, error) {
-		if source == nil {
-			return struct{}{}, &provider.Error{Code: provider.Unsupported}
-		}
-		return struct{}{}, source.EditVideoFavoriteFolders(ctx, edit)
-	}, func(_ struct{}, err error) { accept(err) })
+	return catalogAction(c, func(ctx context.Context, source provider.VideoFavoriteEditor) error {
+		return source.EditVideoFavoriteFolders(ctx, edit)
+	}, accept)
 }

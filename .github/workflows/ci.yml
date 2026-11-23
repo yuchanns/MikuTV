@@ -23,10 +23,10 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -85,7 +85,7 @@ jobs:
           shasum -a 256 "$ipa"
 
       - name: Upload unsigned IPA artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: MikuTV-tvOS-unsigned-build-${{ github.run_number }}
           path: .build/tvos/MikuTV-unsigned.ipa

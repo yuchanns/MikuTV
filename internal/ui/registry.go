@@ -193,7 +193,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Initial: focus(creatorFollowFocus), RequiresEntry: true, Capability: provider.ReadCreator, Transient: true},
 			Component: creatorPage{}, FullScreen: true, PreserveFocusUnderlay: true,
 			Transition: &videoDetailTransition, ScreenInsets: &[4]float32{},
-			Sync: syncCreator, Back: (*View).backFromCreator, Leave: (*View).leaveCreator},
+			Sync: syncCreator, Leave: (*View).leaveCreator},
 		{Policy: app.RouteSpec{Route: app.Route{Page: app.Player},
 			Initial: focus(playerToggle), RequiresEntry: true, Capability: provider.ResolvePlayback, Transient: true},
 			Component: playbackPage{}, FullScreen: true, RawScreen: true, TransparentCanvas: true,
@@ -319,12 +319,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				v.Auth.CancelSignIn()
 				v.qrPayload, v.qrImage = "", nil
 				v.qrHasAction = false
-				v.videoDetail.signInAction = nil
-				if v.creator != nil {
-					v.creator.signInAction = nil
-				}
-				v.series.signInAction = nil
-				v.player.content.afterLogin = nil
+				v.clearSignInActions()
 			}},
 		Registration{Policy: app.RouteSpec{
 			Route: app.Route{Page: app.SignInCredentials}, Parent: app.Route{Page: app.Account},
@@ -342,12 +337,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Leave: func(v *View) {
 				v.Auth.CancelSignIn()
 				v.credDraft.clear()
-				v.videoDetail.signInAction = nil
-				if v.creator != nil {
-					v.creator.signInAction = nil
-				}
-				v.series.signInAction = nil
-				v.player.content.afterLogin = nil
+				v.clearSignInActions()
 			}},
 		Registration{Policy: authModal(app.SignOut, app.Account, app.CloseModal), Component: signOutDialog{},
 			ModalPresentation: modalFrameless, ModalWidth: 760},
@@ -420,104 +410,41 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		}
 		registrations = append(registrations, reg)
 	}
+	settingsModal := func(page app.Page, section string, initial app.FocusID, component Component, presentation modalPresentation, width float32, configure ...func(*Registration)) Registration {
+		reg := Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: page, Section: section},
+				Parent: app.Route{Page: app.Settings, Section: section},
+				Modal:  true, Initial: focus(initial),
+			},
+			Component: component, ModalPresentation: presentation, ModalWidth: width,
+		}
+		for _, fn := range configure {
+			fn(&reg)
+		}
+		return reg
+	}
 	registrations = append(registrations,
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.PlaybackSettingPicker, Section: "playback"},
-				Parent: app.Route{Page: app.Settings, Section: "playback"},
-				Modal:  true, Initial: focus(playbackPickerOptionID(0)),
-			},
-			Component: playbackSettingPickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 560,
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route: app.Route{Page: app.DanmakuSettingPicker, Section: "danmaku"},
-				Parent: app.Route{Page: app.Settings, Section: "danmaku"},
-				Modal: true, Initial: focus(danmakuPickerOptionID(0)),
-			},
-			Component: danmakuSettingPickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 560,
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route: app.Route{Page: app.DanmakuRuleEditor, Section: "danmaku"},
-				Parent: app.Route{Page: app.Settings, Section: "danmaku"},
-				Modal: true, Initial: focus(danmakuEditorField),
-			},
-			Component: danmakuRuleEditorPage{}, ModalPresentation: modalFrameless, ModalWidth: 820,
-			Back: func(v *View) bool {
-				return v.DanmakuRules != nil && v.DanmakuRules.Snapshot().Busy
-			},
-			Leave: func(v *View) {
-				v.danmakuUI.draft.editing = false
-			},
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.LanguagePicker, Section: "appearance"},
-				Parent: app.Route{Page: app.Settings, Section: "appearance"},
-				Modal:  true, Initial: focus(languagePickerOptionID(app.LocaleModeSystem)),
-			},
-			Component: languagePickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 620,
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.AppearanceModePicker, Section: "appearance"},
-				Parent: app.Route{Page: app.Settings, Section: "appearance"},
-				Modal:  true, Initial: focus(appearanceModeOptionID(app.AppearanceModeDark)),
-			},
-			Component: appearanceModePickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 560,
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.ThemePicker, Section: "appearance"},
-				Parent: app.Route{Page: app.Settings, Section: "appearance"},
-				Modal:  true, Initial: focus(themePickerOptionID("mikutv-dark")),
-			},
-			Component: themePickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 640,
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.ThemeError, Section: "appearance"},
-				Parent: app.Route{Page: app.Settings, Section: "appearance"},
-				Modal:  true, Initial: focus(themeErrorReselectBtn),
-			},
-			Component: themeErrorPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.PrivacyConfirm, Section: "privacy"},
-				Parent: app.Route{Page: app.Settings, Section: "privacy"},
-				Modal:  true, Initial: focus(app.CloseModal),
-			},
-			Component: privacyConfirmPage{}, ModalPresentation: modalFrameless, ModalWidth: 800,
-			Leave: func(v *View) {
-				v.privacyUI = privacySettingsUI{}
-			},
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.PrivacyDetails, Section: "about"},
-				Parent: app.Route{Page: app.Settings, Section: "about"},
-				Modal:  true, Initial: focus(privacyManageAction),
-			},
-			Component: privacyDetailsPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
-		},
-		Registration{
-			Policy:    app.RouteSpec{Route: app.Route{Page: app.Licenses, Section: "about"}, Parent: app.Route{Page: app.Settings, Section: "about"}, Modal: true, Initial: focus(app.LicenseText)},
-			Component: licensesPage{}, Title: assets.Text.Licenses, ModalPresentation: modalDrawer, ModalWidth: 880,
-		},
-		Registration{
-			Policy:    app.RouteSpec{Route: app.Route{Page: app.AboutProject, Section: "about"}, Parent: app.Route{Page: app.Settings, Section: "about"}, Modal: true, Initial: focus(app.CloseModal)},
-			Component: aboutProjectPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.PluginRepoInput, Section: "plugins"},
-				Parent: app.Route{Page: app.Settings, Section: "plugins"},
-				Modal:  true, Initial: focus(pluginRepoField),
-			},
-			Component: pluginRepoInputPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
-			Back: func(v *View) bool {
+		settingsModal(app.PlaybackSettingPicker, "playback", playbackPickerOptionID(0), playbackSettingPickerPage{}, modalDrawer, 560),
+		settingsModal(app.DanmakuSettingPicker, "danmaku", danmakuPickerOptionID(0), danmakuSettingPickerPage{}, modalDrawer, 560),
+		settingsModal(app.DanmakuRuleEditor, "danmaku", danmakuEditorField, danmakuRuleEditorPage{}, modalFrameless, 820, func(r *Registration) {
+			r.Back = func(v *View) bool { return v.DanmakuRules != nil && v.DanmakuRules.Snapshot().Busy }
+			r.Leave = func(v *View) { v.danmakuUI.draft.editing = false }
+		}),
+		settingsModal(app.LanguagePicker, "appearance", languagePickerOptionID(app.LocaleModeSystem), languagePickerPage{}, modalDrawer, 620),
+		settingsModal(app.AppearanceModePicker, "appearance", appearanceModeOptionID(app.AppearanceModeDark), appearanceModePickerPage{}, modalDrawer, 560),
+		settingsModal(app.ThemePicker, "appearance", themePickerOptionID("mikutv-dark"), themePickerPage{}, modalDrawer, 640),
+		settingsModal(app.ThemeError, "appearance", themeErrorReselectBtn, themeErrorPage{}, modalFrameless, 780),
+		settingsModal(app.PrivacyConfirm, "privacy", app.CloseModal, privacyConfirmPage{}, modalFrameless, 800, func(r *Registration) {
+			r.Leave = func(v *View) { v.privacyUI = privacySettingsUI{} }
+		}),
+		settingsModal(app.PrivacyDetails, "about", privacyManageAction, privacyDetailsPage{}, modalFrameless, 780),
+		settingsModal(app.Licenses, "about", app.LicenseText, licensesPage{}, modalDrawer, 880, func(r *Registration) {
+			r.Title = assets.Text.Licenses
+		}),
+		settingsModal(app.AboutProject, "about", app.CloseModal, aboutProjectPage{}, modalFrameless, 780),
+		settingsModal(app.PluginRepoInput, "plugins", pluginRepoField, pluginRepoInputPage{}, modalFrameless, 780, func(r *Registration) {
+			r.Back = func(v *View) bool {
 				if v.pluginsUI.repo.editing {
 					v.pluginsUI.repo.editing = false
 					v.pluginsUI.repo.input = v.pluginsUI.repo.text
@@ -525,57 +452,31 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 					return true
 				}
 				return false
-			},
-			Leave: func(v *View) {
+			}
+			r.Leave = func(v *View) {
 				if v.PluginCatalog != nil {
 					v.PluginCatalog.CancelResolve()
 				}
 				v.pluginsUI.repo.editing = false
 				v.pluginsUI.repo.busy = false
-			},
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.PluginInstallDialog, Section: "plugins"},
-				Parent: app.Route{Page: app.Settings, Section: "plugins"},
-				Modal:  true, Initial: focus(pluginInstallConfirmBtn),
-			},
-			Component: pluginInstallDialogPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
-			Leave: func(v *View) {
+			}
+		}),
+		settingsModal(app.PluginInstallDialog, "plugins", pluginInstallConfirmBtn, pluginInstallDialogPage{}, modalFrameless, 780, func(r *Registration) {
+			r.Leave = func(v *View) {
 				if v.PluginCatalog != nil {
 					v.PluginCatalog.CancelInstall()
 				}
-			},
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.PluginUpdateDialog, Section: "plugins"},
-				Parent: app.Route{Page: app.Settings, Section: "plugins"},
-				Modal:  true, Initial: focus(pluginUpdateConfirmBtn),
-			},
-			Component: pluginUpdateDialogPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
-			Leave: func(v *View) {
+			}
+		}),
+		settingsModal(app.PluginUpdateDialog, "plugins", pluginUpdateConfirmBtn, pluginUpdateDialogPage{}, modalFrameless, 780, func(r *Registration) {
+			r.Leave = func(v *View) {
 				if v.PluginCatalog != nil {
 					v.PluginCatalog.CancelUpdate()
 				}
-			},
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.PluginDisableDialog, Section: "plugins"},
-				Parent: app.Route{Page: app.Settings, Section: "plugins"},
-				Modal:  true, Initial: focus(pluginDisableConfirmBtn),
-			},
-			Component: pluginDisableDialogPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
-		},
-		Registration{
-			Policy: app.RouteSpec{
-				Route:  app.Route{Page: app.PluginRemoveDialog, Section: "plugins"},
-				Parent: app.Route{Page: app.Settings, Section: "plugins"},
-				Modal:  true, Initial: focus(pluginRemoveConfirmBtn),
-			},
-			Component: pluginRemoveDialogPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
-		},
+			}
+		}),
+		settingsModal(app.PluginDisableDialog, "plugins", pluginDisableConfirmBtn, pluginDisableDialogPage{}, modalFrameless, 780),
+		settingsModal(app.PluginRemoveDialog, "plugins", pluginRemoveConfirmBtn, pluginRemoveDialogPage{}, modalFrameless, 780),
 	)
 	registrations = append(registrations, additional...)
 	p := &Pages{components: make(map[app.Route]Registration)}
@@ -594,6 +495,15 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	var err error
 	p.Routes, err = app.NewRoutes(app.Route{Page: app.Home}, app.Route{Page: app.Entries}, policies)
 	return p, err
+}
+
+func (v *View) clearSignInActions() {
+	v.videoDetail.signInAction = nil
+	if v.creator != nil {
+		v.creator.signInAction = nil
+	}
+	v.series.signInAction = nil
+	v.player.content.afterLogin = nil
 }
 
 func (p *Pages) RefreshLabels(assets *Assets) {

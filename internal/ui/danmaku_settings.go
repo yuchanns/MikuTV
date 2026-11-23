@@ -199,42 +199,40 @@ func (danmakuSettingsPage) Render(c *ui.Context, p *PageContext) {
 
 func (p *PageContext) renderDanmakuPreferences(c *ui.Context) {
 	v := p.host
-	l, colors, d := p.Assets.Text.Danmaku, p.Theme.Colors, p.uiColors()
+	l := p.Assets.Text.Danmaku
 	display := v.danmakuDisplay()
 	p.region("content", nil)
 
-	ui.Text(c, l.Title).Height(45).FontSize(32).FontWeight(550).LineHeight(1.4).Margin(0, 0, 13, 0)
-	ui.Text(c, l.Intro).Height(32).FontSize(19).LineHeight(1.7).TextColor(paint(colors.Text.Muted)).Margin(0, 0, 27, 0)
-	ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
+	p.settingsSectionHeader(c, l.Title, l.Intro)
 
-	p.danmakuToggleRow(c, danmakuPrefShow, "comment", l.DefaultShow, "", display.Show, func() {
+	p.settingsToggleRow(c, danmakuPrefShow, "comment", l.DefaultShow, "", display.Show, func() {
 		if v.DanmakuRules != nil {
 			if err := v.DanmakuRules.UpdateDisplay(func(cfg *app.DanmakuDisplay) { cfg.Show = !cfg.Show }); err != nil {
 				v.notice = p.Assets.Text.SaveFailed
 			}
 		}
 	})
-	p.danmakuValueRow(c, danmakuPrefDensity, "comment", l.Density, "", fmt.Sprintf("%d%%", display.Density), func() {
+	p.settingsValueRow(c, danmakuPrefDensity, "comment", l.Density, "", fmt.Sprintf("%d%%", display.Density), func() {
 		v.danmakuUI.pickerKind = danmakuSettingDensity
 		p.State.Push(app.Route{Page: app.DanmakuSettingPicker, Section: "danmaku"})
 		p.State.Focus, v.reveal = v.danmakuPickerInitialFocus(), true
 	})
-	p.danmakuValueRow(c, danmakuPrefArea, "following", l.Area, "", p.danmakuAreaLabel(display.Area), func() {
+	p.settingsValueRow(c, danmakuPrefArea, "following", l.Area, "", p.danmakuAreaLabel(display.Area), func() {
 		v.danmakuUI.pickerKind = danmakuSettingArea
 		p.State.Push(app.Route{Page: app.DanmakuSettingPicker, Section: "danmaku"})
 		p.State.Focus, v.reveal = v.danmakuPickerInitialFocus(), true
 	})
-	p.danmakuValueRow(c, danmakuPrefOpacity, "comment", l.Opacity, "", fmt.Sprintf("%d%%", display.Opacity), func() {
+	p.settingsValueRow(c, danmakuPrefOpacity, "comment", l.Opacity, "", fmt.Sprintf("%d%%", display.Opacity), func() {
 		v.danmakuUI.pickerKind = danmakuSettingOpacity
 		p.State.Push(app.Route{Page: app.DanmakuSettingPicker, Section: "danmaku"})
 		p.State.Focus, v.reveal = v.danmakuPickerInitialFocus(), true
 	})
-	p.danmakuValueRow(c, danmakuPrefSize, "captions", l.FontSize, "", p.danmakuSizeLabel(display.FontSize), func() {
+	p.settingsValueRow(c, danmakuPrefSize, "captions", l.FontSize, "", p.danmakuSizeLabel(display.FontSize), func() {
 		v.danmakuUI.pickerKind = danmakuSettingSize
 		p.State.Push(app.Route{Page: app.DanmakuSettingPicker, Section: "danmaku"})
 		p.State.Focus, v.reveal = v.danmakuPickerInitialFocus(), true
 	})
-	p.danmakuValueRow(c, danmakuPrefBlocklist, "lock", l.Blocklist, l.BlocklistNote, "", func() {
+	p.settingsValueRow(c, danmakuPrefBlocklist, "lock", l.Blocklist, l.BlocklistNote, "", func() {
 		v.danmakuUI.rulesOpen = true
 		if v.danmakuUI.filter == "" {
 			v.danmakuUI.filter = danmakuFilterAll
@@ -243,90 +241,6 @@ func (p *PageContext) renderDanmakuPreferences(c *ui.Context) {
 			v.DanmakuRules.EnsureSynced()
 		}
 		p.State.Focus, v.reveal = danmakuRulesAdd, true
-	})
-}
-
-func (p *PageContext) danmakuToggleRow(c *ui.Context, id app.FocusID, iconName, label, note string, enabled bool, action func()) {
-	colors, d := p.Theme.Colors, p.uiColors()
-	status := p.Assets.Text.Activity.Disabled
-	if enabled {
-		status = p.Assets.Text.Activity.Enabled
-	}
-	focused := p.paintFocus() == id
-	fill, ink, noteColor, iconColor := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Muted), paint(colors.Text.Secondary)
-	borderW, borderColor := float32(0), ui.Transparent
-	if focused {
-		fill, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
-		noteColor, iconColor = d.focusSubtext, d.focusSubtext
-		if !p.Theme.Dark {
-			borderW, borderColor = 1, d.focusBorder
-		}
-	}
-	control := ui.Button(c.Key(string(id)), "").FillWidth().MinHeight(88).
-		Radius(7).Border(borderW, borderColor).Padding(0).Role(ui.RoleSwitch).
-		Label(label + " " + status).OnClick(func() { p.dispatch(action) })
-	p.animateFocus(control, fill, ink)
-	p.applyFocusElevation(control, focused)
-	p.bind(control, id, "content")
-	control.Children(func() {
-		ui.Row(c).Fill().Padding(14, 20).Gap(20).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(36, 36).Shrink(0).Center().Children(func() {
-				ui.Icon(c, p.Assets.Icon(iconName)).Size(24, 24).TextColor(iconColor)
-			})
-			ui.Column(c).Grow(1).Gap(6).Children(func() {
-				ui.Text(c, label).FontSize(23).FontWeight(450).LineHeight(1.4)
-				if note != "" {
-					ui.Text(c, note).FontSize(16).LineHeight(1.6).TextColor(noteColor)
-				}
-			})
-			p.preferenceSwitch(c, enabled)
-		})
-		if !focused || p.Theme.Dark {
-			ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
-		}
-	})
-}
-
-func (p *PageContext) danmakuValueRow(c *ui.Context, id app.FocusID, iconName, label, note, value string, action func()) {
-	colors, d := p.Theme.Colors, p.uiColors()
-	focused := p.paintFocus() == id
-	fill, ink, noteColor, iconColor, valColor := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Muted), paint(colors.Text.Secondary), paint(colors.Text.Secondary)
-	borderW, borderColor := float32(0), ui.Transparent
-	if focused {
-		fill, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
-		noteColor, iconColor, valColor = d.focusSubtext, d.focusSubtext, d.focusSubtext
-		if !p.Theme.Dark {
-			borderW, borderColor = 1, d.focusBorder
-		}
-	}
-	fullLabel := label
-	if value != "" {
-		fullLabel += " " + value
-	}
-	control := ui.Button(c.Key(string(id)), "").FillWidth().MinHeight(88).
-		Radius(7).Border(borderW, borderColor).Padding(0).Label(fullLabel).
-		OnClick(func() { p.dispatch(action) })
-	p.animateFocus(control, fill, ink)
-	p.applyFocusElevation(control, focused)
-	p.bind(control, id, "content")
-	control.Children(func() {
-		ui.Row(c).Fill().Padding(14, 20).Gap(20).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(36, 36).Shrink(0).Center().Children(func() {
-				ui.Icon(c, p.Assets.Icon(iconName)).Size(24, 24).TextColor(iconColor)
-			})
-			ui.Column(c).Grow(1).Gap(6).Children(func() {
-				ui.Text(c, label).FontSize(23).FontWeight(450).LineHeight(1.4)
-				if note != "" {
-					ui.Text(c, note).FontSize(16).LineHeight(1.6).TextColor(noteColor)
-				}
-			})
-			if value != "" {
-				ui.Text(c, value).FontSize(21).Shrink(0).TextColor(valColor)
-			}
-		})
-		if !focused || p.Theme.Dark {
-			ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
-		}
 	})
 }
 
@@ -600,25 +514,25 @@ type danmakuSettingPickerPage struct{}
 
 func (danmakuSettingPickerPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
-	title, choices := v.danmakuChoices(v.danmakuUI.pickerKind)
-	p.region("modal", nil)
-	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
-		p.drawerHeader(c, "DANMAKU \u00b7 PREFERENCES", title, "", "")
-		ui.Column(c).FillWidth().Grow(1).Children(func() {
-			for i, choice := range choices {
-				apply := choice.apply
-				p.drawerOptionRow(c, danmakuPickerOptionID(i), "modal", choice.label, "", choice.selected, func() {
-					if v.DanmakuRules != nil {
-						if err := v.DanmakuRules.UpdateDisplay(apply); err != nil {
-							v.showSettingsFeedback(p.Assets.Text.SaveFailed)
-						}
+	title, rawChoices := v.danmakuChoices(v.danmakuUI.pickerKind)
+	choices := make([]settingsPickerChoice, len(rawChoices))
+	for i, choice := range rawChoices {
+		apply := choice.apply
+		choices[i] = settingsPickerChoice{
+			id:       danmakuPickerOptionID(i),
+			label:    choice.label,
+			selected: choice.selected,
+			onSelect: func() {
+				if v.DanmakuRules != nil {
+					if err := v.DanmakuRules.UpdateDisplay(apply); err != nil {
+						v.showSettingsFeedback(p.Assets.Text.SaveFailed)
 					}
-					p.State.Back()
-				})
-			}
-		})
-		p.drawerFooter(c, p.Assets.Text.Modal.HintSelect, p.Assets.Text.Modal.HintApply)
-	})
+				}
+				p.State.Back()
+			},
+		}
+	}
+	p.renderSettingsPickerDrawer(c, "DANMAKU \u00b7 PREFERENCES", title, choices)
 }
 
 type danmakuRuleEditorPage struct{}

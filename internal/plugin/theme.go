@@ -2,12 +2,10 @@ package plugin
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/yuchanns/MikuTV/internal/theme"
-	"golang.org/x/mod/semver"
 )
 
 type themeManifest struct {
@@ -29,21 +27,8 @@ func (p *ThemePackage) Cover() []byte        { return append([]byte(nil), p.cove
 func (p *ThemePackage) LicenseText() string  { return p.licenseText }
 
 func decodeThemeManifest(data []byte, appVersion string) (themeManifest, error) {
-	var header Manifest
-	if err := json.Unmarshal(data, &header); err != nil {
-		return themeManifest{}, fmt.Errorf("plugin manifest: %w", err)
-	}
-	if !validPluginID(header.ID) || strings.TrimSpace(header.Name) == "" {
-		return themeManifest{}, fmt.Errorf("invalid plugin identity")
-	}
-	if !validVersion(header.Version) || !validVersion(header.MinAppVersion) || !validVersion(appVersion) {
-		return themeManifest{}, fmt.Errorf("invalid semantic version")
-	}
-	if header.APIVersion != protocolVersion || semver.Compare("v"+appVersion, "v"+header.MinAppVersion) < 0 {
-		return themeManifest{}, fmt.Errorf("%w: host or protocol version", ErrIncompatible)
-	}
-	if header.Kind != ThemeKind {
-		return themeManifest{}, fmt.Errorf("%w: expected theme kind, got %q", ErrIncompatible, header.Kind)
+	if _, err := validateManifestHeader(data, appVersion, ThemeKind); err != nil {
+		return themeManifest{}, err
 	}
 
 	// Strict decode rejects content-source fields (main, authentication, permissions, capabilities, presentation).

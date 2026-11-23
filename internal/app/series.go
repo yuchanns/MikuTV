@@ -64,20 +64,6 @@ type SeriesCalendarSnapshot struct {
 	Selected int
 }
 
-type pendingSeriesCall struct {
-	gen    uint64
-	cancel context.CancelFunc
-}
-
-func (p *pendingSeriesCall) stop() bool {
-	if p.cancel == nil {
-		return false
-	}
-	p.cancel()
-	p.cancel = nil
-	return true
-}
-
 // SeriesCatalog is owned by the UI thread. Provider calls run in workers and re-enter via post.
 type SeriesCatalog struct {
 	post    func(func())
@@ -90,9 +76,9 @@ type SeriesCatalog struct {
 	reader    provider.SeriesReader
 
 	sessionGen   uint64
-	hubCall      pendingSeriesCall
-	indexCall    pendingSeriesCall
-	calendarCall pendingSeriesCall
+	hubCall      pendingCall
+	indexCall    pendingCall
+	calendarCall pendingCall
 	hub          SeriesHubSnapshot
 	index        SeriesIndexSnapshot
 	calendar     SeriesCalendarSnapshot
@@ -192,18 +178,6 @@ func (s *SeriesCatalog) RetryHub() {
 	}
 }
 
-func (s *SeriesCatalog) CancelHub() {
-	if s == nil {
-		return
-	}
-	if s.hubCall.stop() {
-		s.hub.Phase = CatalogCanceled
-		s.hub.Appending = false
-		s.hub.Revision++
-		s.changed()
-	}
-}
-
 func (s *SeriesCatalog) EnsureIndex() {
 	if s == nil || !s.canBrowse || s.reader == nil {
 		return
@@ -288,18 +262,6 @@ func (s *SeriesCatalog) RetryIndex() {
 	}
 }
 
-func (s *SeriesCatalog) CancelIndex() {
-	if s == nil {
-		return
-	}
-	if s.indexCall.stop() {
-		s.index.Phase = CatalogCanceled
-		s.index.Appending = false
-		s.index.Revision++
-		s.changed()
-	}
-}
-
 func (s *SeriesCatalog) EnsureCalendar() {
 	if s == nil || !s.canBrowse || s.reader == nil {
 		return
@@ -327,17 +289,6 @@ func (s *SeriesCatalog) RetryCalendar() {
 	}
 	if s.calendar.Phase == CatalogFailed || s.calendar.Phase == CatalogCanceled {
 		s.loadCalendar()
-	}
-}
-
-func (s *SeriesCatalog) CancelCalendar() {
-	if s == nil {
-		return
-	}
-	if s.calendarCall.stop() {
-		s.calendar.Phase = CatalogCanceled
-		s.calendar.Revision++
-		s.changed()
 	}
 }
 

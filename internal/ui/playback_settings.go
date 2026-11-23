@@ -115,30 +115,28 @@ type playbackSettingsPage struct{}
 
 func (playbackSettingsPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
-	l, colors, d := p.Assets.Text.PlaybackPrefs, p.Theme.Colors, p.uiColors()
+	l := p.Assets.Text.PlaybackPrefs
 	prefs := v.playbackPreferences()
 	p.region("content", nil)
 
-	ui.Text(c, l.Title).Height(45).FontSize(32).FontWeight(550).LineHeight(1.4).Margin(0, 0, 13, 0)
-	ui.Text(c, l.Intro).Height(32).FontSize(19).LineHeight(1.7).TextColor(paint(colors.Text.Muted)).Margin(0, 0, 27, 0)
-	ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
+	p.settingsSectionHeader(c, l.Title, l.Intro)
 
-	p.danmakuValueRow(c, playbackPrefQuality, "play", l.Quality, l.QualityNote, p.playbackQualityPrefLabel(prefs.Quality), func() {
+	p.settingsValueRow(c, playbackPrefQuality, "play", l.Quality, l.QualityNote, p.playbackQualityPrefLabel(prefs.Quality), func() {
 		v.playbackUI.pickerKind = playbackSettingQuality
 		p.State.Push(app.Route{Page: app.PlaybackSettingPicker, Section: "playback"})
 		p.State.Focus, v.reveal = v.playbackPickerInitialFocus(), true
 	})
-	p.danmakuValueRow(c, playbackPrefSpeed, "play", l.Speed, "", playbackRateLabel(prefs.Speed), func() {
+	p.settingsValueRow(c, playbackPrefSpeed, "play", l.Speed, "", playbackRateLabel(prefs.Speed), func() {
 		v.playbackUI.pickerKind = playbackSettingSpeed
 		p.State.Push(app.Route{Page: app.PlaybackSettingPicker, Section: "playback"})
 		p.State.Focus, v.reveal = v.playbackPickerInitialFocus(), true
 	})
-	p.danmakuValueRow(c, playbackPrefSubtitles, "captions", l.Subtitles, "", p.playbackSubtitlePrefLabel(prefs.Subtitle), func() {
+	p.settingsValueRow(c, playbackPrefSubtitles, "captions", l.Subtitles, "", p.playbackSubtitlePrefLabel(prefs.Subtitle), func() {
 		v.playbackUI.pickerKind = playbackSettingSubtitles
 		p.State.Push(app.Route{Page: app.PlaybackSettingPicker, Section: "playback"})
 		p.State.Focus, v.reveal = v.playbackPickerInitialFocus(), true
 	})
-	p.danmakuToggleRow(c, playbackPrefAutoplay, "skip-forward", l.Autoplay, l.AutoplayNote, prefs.Autoplay, func() {
+	p.settingsToggleRow(c, playbackPrefAutoplay, "skip-forward", l.Autoplay, l.AutoplayNote, prefs.Autoplay, func() {
 		if v.PlaybackSettings != nil {
 			if err := v.PlaybackSettings.Update(func(cfg *app.PlaybackPreferences) { cfg.Autoplay = !cfg.Autoplay }); err != nil {
 				v.showSettingsFeedback(p.Assets.Text.SaveFailed)
@@ -151,23 +149,23 @@ type playbackSettingPickerPage struct{}
 
 func (playbackSettingPickerPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
-	title, choices := v.playbackChoices(v.playbackUI.pickerKind)
-	p.region("modal", nil)
-	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
-		p.drawerHeader(c, "PLAYBACK \u00b7 PREFERENCES", title, "", "")
-		ui.Column(c).FillWidth().Grow(1).Children(func() {
-			for i, choice := range choices {
-				apply := choice.apply
-				p.drawerOptionRow(c, playbackPickerOptionID(i), "modal", choice.label, "", choice.selected, func() {
-					if v.PlaybackSettings != nil {
-						if err := v.PlaybackSettings.Update(apply); err != nil {
-							v.showSettingsFeedback(p.Assets.Text.SaveFailed)
-						}
+	title, rawChoices := v.playbackChoices(v.playbackUI.pickerKind)
+	choices := make([]settingsPickerChoice, len(rawChoices))
+	for i, choice := range rawChoices {
+		apply := choice.apply
+		choices[i] = settingsPickerChoice{
+			id:       playbackPickerOptionID(i),
+			label:    choice.label,
+			selected: choice.selected,
+			onSelect: func() {
+				if v.PlaybackSettings != nil {
+					if err := v.PlaybackSettings.Update(apply); err != nil {
+						v.showSettingsFeedback(p.Assets.Text.SaveFailed)
 					}
-					p.State.Back()
-				})
-			}
-		})
-		p.drawerFooter(c, p.Assets.Text.Modal.HintSelect, p.Assets.Text.Modal.HintApply)
-	})
+				}
+				p.State.Back()
+			},
+		}
+	}
+	p.renderSettingsPickerDrawer(c, "PLAYBACK \u00b7 PREFERENCES", title, choices)
 }

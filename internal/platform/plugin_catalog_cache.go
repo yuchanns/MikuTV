@@ -31,10 +31,6 @@ func NewPluginCatalogCacheNamed(filename string) *PluginCatalogFileCache {
 	}
 }
 
-func NewPluginCatalogCacheAt(path string) *PluginCatalogFileCache {
-	return &PluginCatalogFileCache{path: path}
-}
-
 func (c *PluginCatalogFileCache) Load() (app.PluginCatalogCacheData, error) {
 	if c == nil || c.path == "" {
 		return app.PluginCatalogCacheData{}, nil

@@ -270,17 +270,6 @@ func (s Snapshot) ItemCount() int {
 	return n
 }
 
-func (s Snapshot) AllItems() []Item {
-	if len(s.Sections) == 0 {
-		return append([]Item(nil), s.Items...)
-	}
-	out := make([]Item, 0, s.ItemCount())
-	for _, sec := range s.Sections {
-		out = append(out, sec.Items...)
-	}
-	return out
-}
-
 func (s Snapshot) Find(entryID, kind, id string) (Item, bool) {
 	for _, sec := range s.Sections {
 		for _, item := range sec.Items {

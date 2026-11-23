@@ -28,11 +28,7 @@ func parseDanmakuDisplay(raw string) (app.DanmakuDisplay, bool) {
 }
 
 func encodeDanmakuDisplay(display app.DanmakuDisplay) (string, error) {
-	data, err := json.Marshal(display.Normalize())
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+	return marshalJSONString(display.Normalize())
 }
 
 type danmakuRulesBucket struct {
@@ -48,14 +44,7 @@ type danmakuRulesStore struct {
 }
 
 func parseDanmakuRulesStore(raw string) danmakuRulesStore {
-	if raw == "" {
-		return danmakuRulesStore{}
-	}
-	var store danmakuRulesStore
-	if err := json.Unmarshal([]byte(raw), &store); err != nil {
-		return danmakuRulesStore{}
-	}
-	return store
+	return unmarshalJSONOrZero[danmakuRulesStore](raw)
 }
 
 func normalizeDanmakuRuleSlice(rules []provider.DanmakuRule) []provider.DanmakuRule {
@@ -103,41 +92,21 @@ func (s *danmakuRulesStore) put(entryID, owner string, rules []provider.DanmakuR
 	s.Buckets = append(s.Buckets, danmakuRulesBucket{
 		Entry: entryID, Owner: owner, Rules: cleaned, Order: s.NextOrder,
 	})
-	if len(s.Buckets) > maxDanmakuRuleBuckets {
-		slices.SortFunc(s.Buckets, func(a, b danmakuRulesBucket) int {
-			switch {
-			case a.Order < b.Order:
-				return -1
-			case a.Order > b.Order:
-				return 1
-			default:
-				return 0
-			}
-		})
-		s.Buckets = slices.Clone(s.Buckets[len(s.Buckets)-maxDanmakuRuleBuckets:])
-	}
+	s.Buckets = trimRecentByOrder(s.Buckets, maxDanmakuRuleBuckets, func(b danmakuRulesBucket) int64 { return b.Order })
 }
 
 func (s *danmakuRulesStore) clearAccount(entryID, owner string) bool {
-	before := len(s.Buckets)
-	s.Buckets = slices.DeleteFunc(s.Buckets, func(bucket danmakuRulesBucket) bool {
+	return deleteMatching(&s.Buckets, func(bucket danmakuRulesBucket) bool {
 		return bucket.Entry == entryID && bucket.Owner == owner
 	})
-	return len(s.Buckets) != before
 }
 
 func (s *danmakuRulesStore) clearEntry(entryID string) bool {
-	before := len(s.Buckets)
-	s.Buckets = slices.DeleteFunc(s.Buckets, func(bucket danmakuRulesBucket) bool {
+	return deleteMatching(&s.Buckets, func(bucket danmakuRulesBucket) bool {
 		return bucket.Entry == entryID
 	})
-	return len(s.Buckets) != before
 }
 
 func (s *danmakuRulesStore) encode() (string, error) {
-	data, err := json.Marshal(s)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
+	return marshalJSONString(s)
 }

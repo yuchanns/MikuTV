@@ -25,16 +25,14 @@ func (s *Session) ReadSeries(ctx context.Context, request provider.SeriesRequest
 			return provider.SeriesPage{}, &provider.Error{Code: provider.Denied}
 		}
 	}
-	s.requests.RLock()
-	client, scope, owner := s.active, s.scope, s.accountID
-	s.requests.RUnlock()
+	auth := s.snapshotAuth()
 	input := struct {
 		provider.SeriesRequest
 		SignedIn bool   `json:"signedIn,omitempty"`
 		Owner    string `json:"owner,omitempty"`
-	}{request, owner != "", owner}
+	}{request, auth.signedIn(), auth.owner}
 	var page provider.SeriesPage
-	if err := s.invoke(ctx, scope, client, provider.BrowseSeries, "readSeries", input, &page); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.BrowseSeries, "readSeries", input, &page); err != nil {
 		return provider.SeriesPage{}, err
 	}
 	if len(page.NextCursor) > maxSearchCursorLength || (page.Total != nil && *page.Total < 0) {
@@ -79,29 +77,24 @@ func (s *Session) TrackSeries(ctx context.Context, request provider.SeriesTrackR
 	if !s.ownsVideo(request.Ref) || request.Ref.Kind != provider.Series {
 		return provider.SeriesTrackResult{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
-	s.requests.RUnlock()
-	if owner == "" {
-		return provider.SeriesTrackResult{}, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return provider.SeriesTrackResult{}, err
 	}
 	input := struct {
 		provider.SeriesTrackRequest
 		Owner  string          `json:"owner"`
 		Secret json.RawMessage `json:"secret"`
-	}{request, owner, secret}
+	}{request, auth.owner, auth.secret}
 	var result provider.SeriesTrackResult
-	if err := s.invoke(ctx, scope, client, provider.TrackSeries, "trackSeries", input, &result); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.TrackSeries, "trackSeries", input, &result); err != nil {
 		return provider.SeriesTrackResult{}, err
 	}
 	return result, nil
 }
 
 func (s *Session) sanitizeSeriesEntry(entry *provider.SeriesEntry) error {
-	if entry.Item.VideoDetails != nil {
-		return &provider.Error{Code: provider.PluginFailed}
-	}
-	if err := s.ownItem(&entry.Item); err != nil {
+	if err := s.ownSummaryItem(&entry.Item); err != nil {
 		return err
 	}
 	entry.Badge = strings.TrimSpace(entry.Badge)

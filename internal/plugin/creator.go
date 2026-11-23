@@ -18,15 +18,13 @@ func (s *Session) ReadCreator(ctx context.Context, request provider.CreatorReque
 		!request.Tab.Valid() || len(request.Cursor) > maxSearchCursorLength {
 		return provider.CreatorPage{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, signedIn := s.active, s.scope, s.accountID != ""
-	s.requests.RUnlock()
+	auth := s.snapshotAuth()
 	input := struct {
 		provider.CreatorRequest
 		SignedIn bool `json:"signedIn,omitempty"`
-	}{request, signedIn}
+	}{request, auth.signedIn()}
 	var page provider.CreatorPage
-	if err := s.invoke(ctx, scope, client, provider.ReadCreator, "readCreator", input, &page); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.ReadCreator, "readCreator", input, &page); err != nil {
 		return provider.CreatorPage{}, err
 	}
 	if len(page.NextCursor) > maxSearchCursorLength {
@@ -37,13 +35,8 @@ func (s *Session) ReadCreator(ctx context.Context, request provider.CreatorReque
 			return provider.CreatorPage{}, err
 		}
 	}
-	for index := range page.Items {
-		if page.Items[index].VideoDetails != nil {
-			return provider.CreatorPage{}, &provider.Error{Code: provider.PluginFailed}
-		}
-		if err := s.ownItem(&page.Items[index]); err != nil {
-			return provider.CreatorPage{}, err
-		}
+	if err := s.ownSummaryItems(page.Items); err != nil {
+		return provider.CreatorPage{}, err
 	}
 	for index := range page.Posts {
 		post := &page.Posts[index]
@@ -54,10 +47,7 @@ func (s *Session) ReadCreator(ctx context.Context, request provider.CreatorReque
 			post.ImageURL = ""
 		}
 		if post.Item != nil {
-			if post.Item.VideoDetails != nil {
-				return provider.CreatorPage{}, &provider.Error{Code: provider.PluginFailed}
-			}
-			if err := s.ownItem(post.Item); err != nil {
+			if err := s.ownSummaryItem(post.Item); err != nil {
 				return provider.CreatorPage{}, err
 			}
 		}
@@ -68,13 +58,8 @@ func (s *Session) ReadCreator(ctx context.Context, request provider.CreatorReque
 			strings.TrimSpace(collection.Title) == "" || collection.Count != nil && *collection.Count < 0 {
 			return provider.CreatorPage{}, &provider.Error{Code: provider.PluginFailed}
 		}
-		for itemIndex := range collection.Items {
-			if collection.Items[itemIndex].VideoDetails != nil {
-				return provider.CreatorPage{}, &provider.Error{Code: provider.PluginFailed}
-			}
-			if err := s.ownItem(&collection.Items[itemIndex]); err != nil {
-				return provider.CreatorPage{}, err
-			}
+		if err := s.ownSummaryItems(collection.Items); err != nil {
+			return provider.CreatorPage{}, err
 		}
 	}
 	return page, nil
@@ -130,18 +115,16 @@ func (s *Session) FollowCreator(ctx context.Context, request provider.CreatorFol
 	if strings.TrimSpace(request.CreatorID) == "" || len(request.CreatorID) > maxCreatorIDLength {
 		return result, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
-	s.requests.RUnlock()
-	if owner == "" {
-		return result, &provider.Error{Code: provider.NeedsSignIn}
+	auth, err := s.requireSignedIn()
+	if err != nil {
+		return result, err
 	}
 	input := struct {
 		provider.CreatorFollowRequest
 		Owner  string          `json:"owner"`
 		Secret json.RawMessage `json:"secret"`
-	}{request, owner, secret}
-	if err := s.invoke(ctx, scope, client, provider.FollowCreator, "followCreator", input, &result); err != nil {
+	}{request, auth.owner, auth.secret}
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.FollowCreator, "followCreator", input, &result); err != nil {
 		return provider.CreatorFollowResult{}, err
 	}
 	return result, nil

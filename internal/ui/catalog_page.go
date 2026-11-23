@@ -126,8 +126,7 @@ func (catalogPage) Render(c *ui.Context, p *PageContext) {
 	catalog := p.host.Catalog
 	entry, _ := p.State.Current()
 	if !entry.Capabilities.Has(provider.BrowseCatalog) {
-		ui.Column(c).FillWidth().Padding(148, 83, 0, 103).Gap(44).
-			Children(func() { contentPage{}.Render(c, p) })
+		p.renderUnavailableContent(c)
 		return
 	}
 	home := &p.host.home
@@ -474,7 +473,6 @@ func (p *PageContext) catalogHeader(c *ui.Context) {
 					Radius(30).Border(borderW, borderColor).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
 					OnClick(func() { p.dispatch(func() { p.host.showHomeTab(tab, "") }) })
 				p.animateFocus(button, background, ink)
-				p.applyFocusElevation(button, focused)
 				p.bind(button, id, homeHeader)
 				button.Children(func() {
 					ui.Text(c, titles[idx]).FontSize(24).LetterSpacing(1)

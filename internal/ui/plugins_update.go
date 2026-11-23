@@ -1,7 +1,6 @@
 package tvui
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -138,7 +137,7 @@ func (v *View) startPluginUpdate() {
 		}
 		if out.Err != nil {
 			st.phase = pluginUpdateError
-			st.failure = v.pluginUpdateErrorMessage(out.Err)
+			st.failure = v.pluginTransferErrorMessage(out.Err)
 			st.retryable = out.Retryable
 			if out.Retryable {
 				v.State.Focus, v.reveal = pluginUpdateRetryBtn, true
@@ -162,30 +161,12 @@ func (v *View) startPluginUpdate() {
 	})
 }
 
-func (v *View) pluginUpdateErrorMessage(err error) string {
-	l := v.Assets.Text.Plugins
-	switch {
-	case errors.Is(err, plugin.ErrKindChanged):
-		return l.UpdateErrKindChanged
-	case errors.Is(err, plugin.ErrDigestMismatch):
-		return l.InstallErrDigest
-	case errors.Is(err, plugin.ErrSourceConflict):
-		return l.InstallErrConflict
-	case errors.Is(err, plugin.ErrVersionTagMismatch):
-		return l.RepoVersionMismatchErr
-	case errors.Is(err, plugin.ErrIncompatible):
-		return l.InstallErrIncompatible
-	default:
-		return l.InstallErrNetwork
-	}
-}
-
 type pluginUpdateDialogPage struct{}
 
 func (pluginUpdateDialogPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
 	st := &v.pluginsUI.update
-	l, colors, d := p.Assets.Text.Plugins, p.Theme.Colors, p.uiColors()
+	l, colors := p.Assets.Text.Plugins, p.Theme.Colors
 
 	p.region("plugin-update-actions", nil)
 
@@ -228,21 +209,7 @@ func (pluginUpdateDialogPage) Render(c *ui.Context, p *PageContext) {
 			} else if expanded && len(domains) > 0 {
 				ui.Text(c, l.InstallPermissionsIntro).FillWidth().Margin(24, 0, 14, 0).
 					FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))
-				ui.Column(c).FillWidth().Gap(8).Children(func() {
-					limit := min(len(domains), 6)
-					for _, domain := range domains[:limit] {
-						isNew := addedSet[strings.ToLower(strings.TrimSpace(domain))]
-						ui.Row(c).FillWidth().MinHeight(54).Padding(12, 18).Radius(10).
-							Background(d.subtleFill).AlignItems(ui.Center).Justify(ui.SpaceBetween).Gap(16).Children(func() {
-							ui.Text(c, domain).Grow(1).MinWidth(0).SingleLine().FontSize(19).TextColor(paint(colors.Text.Primary))
-							if isNew {
-								ui.Text(c, l.UpdateAddedPermission).Shrink(0).FontSize(17).FontWeight(500).TextColor(paint(colors.Accent.Soft))
-							} else {
-								ui.Icon(c, p.Assets.Icon("lock")).Size(20, 20).TextColor(paint(colors.Text.Secondary))
-							}
-						})
-					}
-				})
+				p.renderPluginPermissionList(c, domains, addedSet)
 			} else {
 				ui.Text(c, l.UpdateNoNewPermissions).FillWidth().Margin(24, 0, 0, 0).
 					FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))

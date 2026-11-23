@@ -13,16 +13,14 @@ func (s *Session) ReadLive(ctx context.Context, request provider.LiveRequest) (p
 	if !request.Section.Valid() || len(request.Area) > 128 || len(request.Cursor) > maxSearchCursorLength {
 		return provider.LivePage{}, &provider.Error{Code: provider.Denied}
 	}
-	s.requests.RLock()
-	client, scope, owner := s.active, s.scope, s.accountID
-	s.requests.RUnlock()
+	auth := s.snapshotAuth()
 	input := struct {
 		provider.LiveRequest
 		SignedIn bool   `json:"signedIn,omitempty"`
 		Owner    string `json:"owner,omitempty"`
-	}{request, owner != "", owner}
+	}{request, auth.signedIn(), auth.owner}
 	var page provider.LivePage
-	if err := s.invoke(ctx, scope, client, provider.BrowseLive, "readLive", input, &page); err != nil {
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.BrowseLive, "readLive", input, &page); err != nil {
 		return provider.LivePage{}, err
 	}
 	if len(page.NextCursor) > maxSearchCursorLength || len(page.FollowingCursor) > maxSearchCursorLength {

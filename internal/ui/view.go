@@ -234,8 +234,7 @@ func (v *View) Render(c *ui.Context) {
 	}
 	fromVideo := rootReg.PreserveFocusUnderlay
 	top := layers[len(layers)-1]
-	fromMedia := fromVideo || isSignInPage(top.Page) && rootReg.TransparentCanvas
-	if blur := v.modalBlur(top.Route, fromMedia); blur != 0 {
+	if blur := v.modalBlur(top.Route); blur != 0 {
 		screen.Cache().Blur(blur)
 	}
 	screen.Children(func() {
@@ -259,54 +258,15 @@ func (v *View) Render(c *ui.Context) {
 		})
 		if fromVideo && len(layers) == 1 {
 			if layers[0].Page == app.Creator {
-				v.renderCreatorEntrance(c, width, height)
+				if v.creator != nil {
+					v.renderPageEntrance(c, &v.creator.entrance, width, height)
+				}
 			} else {
-				v.renderVideoDetailEntrance(c, width, height)
+				v.renderPageEntrance(c, &v.videoDetail.entrance, width, height)
 			}
 		}
 		v.renderRootPage(c, layers[0], len(layers) == 1, width, height)
-		switch top.Page {
-		case app.VideoDetail:
-			v.renderVideoDetailFeedback(c)
-			v.series.feedback = videoDetailFeedback{}
-		case app.Creator:
-			v.videoDetail.feedback = videoDetailFeedback{}
-			v.series.feedback = videoDetailFeedback{}
-			if v.creator != nil {
-				v.renderFeedbackToast(c, &v.creator.feedback)
-			}
-		case app.Series, app.SeriesCalendar, app.SeriesIndex, app.SeriesAll:
-			v.videoDetail.feedback = videoDetailFeedback{}
-			v.noticeFeedback = videoDetailFeedback{}
-			if v.creator != nil {
-				v.creator.feedback = videoDetailFeedback{}
-			}
-			v.renderFeedbackToast(c, &v.series.feedback)
-		case app.AccountMessages:
-			v.videoDetail.feedback = videoDetailFeedback{}
-			v.series.feedback = videoDetailFeedback{}
-			v.settingsFeedback = videoDetailFeedback{}
-			if v.creator != nil {
-				v.creator.feedback = videoDetailFeedback{}
-			}
-			v.renderFeedbackToast(c, &v.noticeFeedback)
-		case app.Settings:
-			v.videoDetail.feedback = videoDetailFeedback{}
-			v.series.feedback = videoDetailFeedback{}
-			v.noticeFeedback = videoDetailFeedback{}
-			if v.creator != nil {
-				v.creator.feedback = videoDetailFeedback{}
-			}
-			v.renderFeedbackToast(c, &v.settingsFeedback)
-		default:
-			v.videoDetail.feedback = videoDetailFeedback{}
-			v.series.feedback = videoDetailFeedback{}
-			v.noticeFeedback = videoDetailFeedback{}
-			v.settingsFeedback = videoDetailFeedback{}
-			if v.creator != nil {
-				v.creator.feedback = videoDetailFeedback{}
-			}
-		}
+		v.renderActiveFeedback(c, top.Page)
 		if v.notice != "" {
 			ui.Text(c, v.notice).Absolute().Right(32).Bottom(28).Padding(18, 24).
 				Background(paint(v.Theme.Colors.Surface.Raised)).Radius(12).FontSize(20)
@@ -314,7 +274,7 @@ func (v *View) Render(c *ui.Context) {
 		v.renderPluginRecoveryBanner(c, width)
 	})
 	for index, location := range layers[1:] {
-		v.renderModal(c, v.context(location, index == len(layers)-2, width, height), fromMedia)
+		v.renderModal(c, v.context(location, index == len(layers)-2, width, height))
 	}
 	if v.Trace {
 		next := navigationTrace{entry: v.State.CurrentEntry, route: v.State.Route, focus: v.State.Focus}
@@ -325,6 +285,43 @@ func (v *View) Render(c *ui.Context) {
 	}
 	v.drawnRevision = v.State.Revision
 	v.reveal = false
+}
+
+func (v *View) renderActiveFeedback(c *ui.Context, page app.Page) {
+	var active *videoDetailFeedback
+	switch page {
+	case app.VideoDetail:
+		active = &v.videoDetail.feedback
+	case app.Creator:
+		if v.creator != nil {
+			active = &v.creator.feedback
+		}
+	case app.Series, app.SeriesCalendar, app.SeriesIndex, app.SeriesAll:
+		active = &v.series.feedback
+	case app.AccountMessages:
+		active = &v.noticeFeedback
+	case app.Settings:
+		active = &v.settingsFeedback
+	}
+	slots := []*videoDetailFeedback{
+		&v.videoDetail.feedback,
+		&v.series.feedback,
+		&v.noticeFeedback,
+		&v.settingsFeedback,
+	}
+	if v.creator != nil {
+		slots = append(slots, &v.creator.feedback)
+	}
+	for _, slot := range slots {
+		if slot != active {
+			*slot = videoDetailFeedback{}
+		}
+	}
+	if active == &v.videoDetail.feedback {
+		v.renderVideoDetailFeedback(c)
+	} else if active != nil {
+		v.renderFeedbackToast(c, active)
+	}
 }
 
 func (v *View) renderPluginRecoveryBanner(c *ui.Context, width float32) {

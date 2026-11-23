@@ -224,10 +224,6 @@ func (v *View) leaveCreator() {
 	}
 }
 
-func (v *View) backFromCreator() bool {
-	return false
-}
-
 func syncCreator(v *View) {
 	state := v.creator
 	if state == nil {
@@ -245,30 +241,6 @@ func syncCreator(v *View) {
 		state.afterLoad = nil
 		v.loadCreatorInitial(state)
 	}
-}
-
-func (v *View) renderCreatorEntrance(c *ui.Context, width, height float32) {
-	if v.creator == nil {
-		return
-	}
-	entrance := &v.creator.entrance
-	if entrance.from.Page == "" {
-		return
-	}
-	if c.Preferences().ReduceMotion {
-		*entrance = videoDetailEntrance{}
-		return
-	}
-	now := c.Now()
-	if entrance.until.IsZero() {
-		entrance.until = now.Add(videoDetailTransition.Duration)
-	}
-	if remaining := entrance.until.Sub(now); remaining > 0 {
-		v.renderRootPage(c, entrance.from, false, width, height)
-		c.After(remaining)
-		return
-	}
-	*entrance = videoDetailEntrance{}
 }
 
 func (v *View) loadCreatorInitial(state *creatorState) {
@@ -955,15 +927,8 @@ func creatorVisibleVideoRows(scrollY, viewportHeight float32, count int) (int, i
 	if count == 0 {
 		return 0, 0
 	}
-	stride := float32(creatorVideoHeight + creatorVideoGapY)
 	totalRows := (count + creatorVideoCols - 1) / creatorVideoCols
-	y := max(0, scrollY-creatorContentTop)
-	first := max(0, int(y/stride)-1)
-	end := min(totalRows, int((y+viewportHeight)/stride)+2)
-	if first > end {
-		first = end
-	}
-	return first, end
+	return visibleItemRange(max(0, scrollY-creatorContentTop), viewportHeight, float32(creatorVideoHeight+creatorVideoGapY), totalRows, 1)
 }
 
 func (p *PageContext) creatorItemWithOwner(state *creatorState, item provider.MediaItem) provider.MediaItem {

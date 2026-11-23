@@ -89,3 +89,17 @@ func (p *PageContext) uiFont() string {
 	}
 	return "system-ui, PingFang SC, Hiragino Sans"
 }
+
+type contentPage struct{}
+
+func (contentPage) Render(c *ui.Context, p *PageContext) {
+	p.region("content", nil)
+	p.heading(c, p.Title, "")
+	p.empty(c, p.Assets.Text.EmptyTitle, p.Assets.Text.EmptyNote, p.Assets.Text.SwitchEntry, app.ContentAction, "content", func() { p.State.OpenEntries("") })
+}
+
+func (p *PageContext) renderUnavailableContent(c *ui.Context) {
+	ui.Column(c).FillWidth().Padding(148, 83, 0, 103).Gap(44).Children(func() {
+		contentPage{}.Render(c, p)
+	})
+}

@@ -91,26 +91,32 @@ func InspectManifest(data []byte) (Manifest, error) {
 	return header, nil
 }
 
-func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
-	var header Manifest
-	if err := json.Unmarshal(data, &header); err != nil {
-		return sourceManifest{}, fmt.Errorf("plugin manifest: %w", err)
+func validateManifestHeader(data []byte, appVersion string, expectedKind Kind) (Manifest, error) {
+	header, err := InspectManifest(data)
+	if err != nil {
+		return Manifest{}, err
 	}
-	if !validPluginID(header.ID) || strings.TrimSpace(header.Name) == "" {
-		return sourceManifest{}, fmt.Errorf("invalid plugin identity")
-	}
-	if !validVersion(header.Version) || !validVersion(header.MinAppVersion) || !validVersion(appVersion) {
-		return sourceManifest{}, fmt.Errorf("invalid semantic version")
+	if !validVersion(appVersion) {
+		return Manifest{}, fmt.Errorf("invalid semantic version")
 	}
 	if header.APIVersion != protocolVersion || semver.Compare("v"+appVersion, "v"+header.MinAppVersion) < 0 {
-		return sourceManifest{}, fmt.Errorf("%w: host or protocol version", ErrIncompatible)
+		return Manifest{}, fmt.Errorf("%w: host or protocol version", ErrIncompatible)
 	}
-	switch header.Kind {
-	case SourceKind:
-	case ThemeKind:
-		return sourceManifest{}, fmt.Errorf("%w: theme loading is unavailable", ErrIncompatible)
-	default:
-		return sourceManifest{}, fmt.Errorf("%w: unknown kind %q", ErrIncompatible, header.Kind)
+	if header.Kind != expectedKind {
+		if expectedKind == SourceKind {
+			if header.Kind == ThemeKind {
+				return Manifest{}, fmt.Errorf("%w: theme loading is unavailable", ErrIncompatible)
+			}
+			return Manifest{}, fmt.Errorf("%w: unknown kind %q", ErrIncompatible, header.Kind)
+		}
+		return Manifest{}, fmt.Errorf("%w: expected %s kind, got %q", ErrIncompatible, expectedKind, header.Kind)
+	}
+	return header, nil
+}
+
+func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
+	if _, err := validateManifestHeader(data, appVersion, SourceKind); err != nil {
+		return sourceManifest{}, err
 	}
 
 	var manifest sourceManifest

@@ -53,7 +53,6 @@ const (
 	followingShelfHeaderGap   float32 = 25
 	followingShelfBottomGap   float32 = 65
 	followingShelfCardTopPad  float32 = 6
-	followingShelfHeight      float32 = followingShelfHeaderH + followingShelfHeaderGap + followingShelfCardTopPad + homeCardHeight + followingShelfBottomGap
 )
 
 type followingViewState struct {
@@ -154,8 +153,7 @@ func (followingPage) Render(c *ui.Context, p *PageContext) {
 	feed := p.host.Following
 	entry, _ := p.State.Current()
 	if feed == nil || !entry.Capabilities.Has(provider.BrowseFollowing) {
-		ui.Column(c).FillWidth().Padding(148, 83, 0, 103).Gap(44).
-			Children(func() { contentPage{}.Render(c, p) })
+		p.renderUnavailableContent(c)
 		return
 	}
 	snapshot := feed.Snapshot()
@@ -436,7 +434,6 @@ func (p *PageContext) followingHeader(c *ui.Context, activeTab followingTab, sup
 					Radius(30).Border(borderW, borderColor).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
 					OnClick(func() { p.dispatch(func() { p.host.showFollowingTab(item.tab) }) })
 				p.animateFocus(button, background, ink)
-				p.applyFocusElevation(button, focused)
 				p.bind(button, item.id, followingHeaderRegion)
 				button.Children(func() {
 					ui.Text(c, item.label).FontSize(24).LetterSpacing(1)

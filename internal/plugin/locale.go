@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
-
-	"golang.org/x/mod/semver"
 )
 
 const MaxLocaleJSONBytes = 256 << 10
@@ -147,21 +145,8 @@ func MatchLocaleTag(preferred, available []string) string {
 }
 
 func decodeLocaleManifest(data []byte, appVersion string) (localeManifest, error) {
-	var header Manifest
-	if err := json.Unmarshal(data, &header); err != nil {
-		return localeManifest{}, fmt.Errorf("plugin manifest: %w", err)
-	}
-	if !validPluginID(header.ID) || strings.TrimSpace(header.Name) == "" {
-		return localeManifest{}, fmt.Errorf("invalid plugin identity")
-	}
-	if !validVersion(header.Version) || !validVersion(header.MinAppVersion) || !validVersion(appVersion) {
-		return localeManifest{}, fmt.Errorf("invalid semantic version")
-	}
-	if header.APIVersion != protocolVersion || semver.Compare("v"+appVersion, "v"+header.MinAppVersion) < 0 {
-		return localeManifest{}, fmt.Errorf("%w: host or protocol version", ErrIncompatible)
-	}
-	if header.Kind != LocaleKind {
-		return localeManifest{}, fmt.Errorf("%w: expected locale kind, got %q", ErrIncompatible, header.Kind)
+	if _, err := validateManifestHeader(data, appVersion, LocaleKind); err != nil {
+		return localeManifest{}, err
 	}
 
 	var manifest localeManifest

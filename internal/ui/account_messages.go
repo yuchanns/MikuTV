@@ -248,7 +248,6 @@ func (p *PageContext) messagesHeaderTabs(c *ui.Context, hasNotifications, hasPri
 			Size(98, 61).Center().Radius(30).Border(borderW, borderColor).Background(background).
 			OnClick(func() { p.dispatch(func() { p.host.selectMessagesTab(kind) }) })
 		p.animateFocus(tab, background, ink)
-		p.applyFocusElevation(tab, focused)
 		p.bind(tab, id, noticeTabs)
 		tab.Children(func() {
 			ui.Text(c, label).FontSize(24).LetterSpacing(1)

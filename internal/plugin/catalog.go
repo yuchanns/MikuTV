@@ -23,7 +23,7 @@ import (
 const (
 	DefaultGitHubAPIBase   = "https://api.github.com"
 	DiscoveryTopic         = "mikutv-plugin"
-	DiscoveryQuery         = "topic:mikutv-plugin archived:false"
+	DiscoveryQuery         = "topic:" + DiscoveryTopic + " archived:false"
 	CatalogPageSize        = 20
 	MaxInspectArchiveBytes = 8 << 20
 	inspectConcurrency     = 4
@@ -555,6 +555,73 @@ func (c *CatalogClient) inspectRepositories(ctx context.Context, repos []githubR
 	return out, nil
 }
 
+// fetchGitHubJSON fetches a GitHub API JSON endpoint into dst.
+// Returns (false, nil) when the endpoint responds with 404 Not Found.
+func (c *CatalogClient) fetchGitHubJSON(ctx context.Context, endpoint string, dst any) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return false, err
+	}
+	c.setGitHubHeaders(req)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if err := checkGitHubResponse(resp); err != nil {
+		return false, err
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(dst); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (c *CatalogClient) inspectAndCacheRelease(ctx context.Context, repo githubRepoEntry, asset ReleaseAsset) (CatalogItem, error) {
+	zipBytes, err := c.downloadArchive(ctx, asset.DownloadURL)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	inspected, err := InspectPackage(zipBytes, c.AppVersion)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	if !ReleaseVersionMatches(asset.TagName, inspected.Manifest.Version) {
+		return CatalogItem{}, fmt.Errorf("%w: release %q vs manifest %q", ErrVersionTagMismatch, asset.TagName, inspected.Manifest.Version)
+	}
+	asset.SHA256 = fmt.Sprintf("%x", inspected.Digest)
+	item := CatalogItem{
+		Repository:       repo.FullName,
+		RepoID:           repo.ID,
+		Owner:            repo.Owner.Login,
+		HTMLURL:          repo.HTMLURL,
+		RepoDescription:  strings.TrimSpace(repo.Description),
+		Stars:            repo.Stars,
+		UpdatedAt:        repo.UpdatedAt,
+		Release:          asset,
+		Manifest:         inspected.Manifest,
+		Permissions:      inspected.NetworkPermissions,
+		UserServerOrigin: inspected.UserServerOrigin,
+		Swatches:         inspected.Swatches,
+		Language:         inspected.Language,
+		NativeName:       inspected.NativeName,
+		Compatibility:    inspected.Compatibility,
+	}
+	if key := inspectCacheKey(item.Repository, asset.ReleaseID, asset.AssetID); key != "" {
+		c.mu.Lock()
+		if c.inspectCache == nil {
+			c.inspectCache = make(map[string]CatalogItem)
+		}
+		c.inspectCache[key] = item
+		c.mu.Unlock()
+	}
+	return item, nil
+}
+
 func (c *CatalogClient) inspectRepository(ctx context.Context, repo githubRepoEntry) (CatalogItem, bool, error) {
 	parts := strings.Split(repo.FullName, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -562,26 +629,9 @@ func (c *CatalogClient) inspectRepository(ctx context.Context, repo githubRepoEn
 	}
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=10",
 		c.apiBase(), url.PathEscape(parts[0]), url.PathEscape(parts[1]))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return CatalogItem{}, false, err
-	}
-	c.setGitHubHeaders(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return CatalogItem{}, false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return CatalogItem{}, false, nil
-	}
-	if err := checkGitHubResponse(resp); err != nil {
-		return CatalogItem{}, false, err
-	}
-
 	var releases []githubReleaseEntry
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&releases); err != nil {
+	found, err := c.fetchGitHubJSON(ctx, endpoint, &releases)
+	if err != nil || !found {
 		return CatalogItem{}, false, err
 	}
 
@@ -611,52 +661,30 @@ func (c *CatalogClient) inspectRepository(ctx context.Context, repo githubRepoEn
 		}
 	}
 
-	zipBytes, err := c.downloadArchive(ctx, asset.DownloadURL)
+	item, err := c.inspectAndCacheRelease(ctx, repo, asset)
 	if err != nil {
-		return CatalogItem{}, false, err
-	}
-	inspected, err := InspectPackage(zipBytes, c.AppVersion)
-	if err != nil {
-		return CatalogItem{}, false, nil
-	}
-	if !ReleaseVersionMatches(asset.TagName, inspected.Manifest.Version) {
-		return CatalogItem{}, false, nil
-	}
-	asset.SHA256 = fmt.Sprintf("%x", inspected.Digest)
-	item := CatalogItem{
-		Repository:      repo.FullName,
-		RepoID:          repo.ID,
-		Owner:           repo.Owner.Login,
-		HTMLURL:         repo.HTMLURL,
-		RepoDescription: strings.TrimSpace(repo.Description),
-		Stars:           repo.Stars,
-		UpdatedAt:       repo.UpdatedAt,
-		Release:         asset,
-		Manifest:         inspected.Manifest,
-		Permissions:      inspected.NetworkPermissions,
-		UserServerOrigin: inspected.UserServerOrigin,
-		Swatches:         inspected.Swatches,
-		Language:        inspected.Language,
-		NativeName:      inspected.NativeName,
-		Compatibility:   inspected.Compatibility,
-	}
-	if cacheKey != "" {
-		c.mu.Lock()
-		if c.inspectCache == nil {
-			c.inspectCache = make(map[string]CatalogItem)
+		// Network/download failures propagate; invalid package manifests or mismatched tags are skipped in discovery.
+		var rateErr *RateLimitError
+		if errors.Is(err, ErrVersionTagMismatch) || (!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.As(err, &rateErr)) {
+			var netErr interface{ Timeout() bool }
+			if !errors.As(err, &netErr) && !strings.Contains(err.Error(), "download") && !strings.Contains(err.Error(), "HTTP") {
+				return CatalogItem{}, false, nil
+			}
 		}
-		c.inspectCache[cacheKey] = item
-		c.mu.Unlock()
+		return CatalogItem{}, false, err
 	}
 	return item, true, nil
 }
 
-func selectOfficialPluginAsset(releases []githubReleaseEntry) (ReleaseAsset, bool) {
+func matchPluginAsset(releases []githubReleaseEntry, assetID int64, allowPrerelease bool) (ReleaseAsset, bool) {
 	for _, rel := range releases {
-		if rel.Draft || rel.Prerelease {
+		if rel.Draft || (!allowPrerelease && rel.Prerelease) {
 			continue
 		}
 		for _, a := range rel.Assets {
+			if assetID > 0 && a.ID != assetID {
+				continue
+			}
 			if !strings.EqualFold(strings.TrimSpace(a.Name), "plugin.zip") {
 				continue
 			}
@@ -677,6 +705,10 @@ func selectOfficialPluginAsset(releases []githubReleaseEntry) (ReleaseAsset, boo
 	return ReleaseAsset{}, false
 }
 
+func selectOfficialPluginAsset(releases []githubReleaseEntry) (ReleaseAsset, bool) {
+	return matchPluginAsset(releases, 0, false)
+}
+
 func (c *CatalogClient) ResolveRepository(ctx context.Context, rawRepo string) (CatalogItem, error) {
 	canonical, ok := ParseRepository(rawRepo)
 	if !ok {
@@ -684,25 +716,13 @@ func (c *CatalogClient) ResolveRepository(ctx context.Context, rawRepo string) (
 	}
 	parts := strings.Split(canonical, "/")
 	repoEndpoint := fmt.Sprintf("%s/repos/%s/%s", c.apiBase(), url.PathEscape(parts[0]), url.PathEscape(parts[1]))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, repoEndpoint, nil)
-	if err != nil {
-		return CatalogItem{}, err
-	}
-	c.setGitHubHeaders(req)
-	resp, err := c.httpClient().Do(req)
-	if err != nil {
-		return CatalogItem{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return CatalogItem{}, ErrNoOfficialRelease
-	}
-	if err := checkGitHubResponse(resp); err != nil {
-		return CatalogItem{}, err
-	}
 	var repo githubRepoEntry
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&repo); err != nil {
-		return CatalogItem{}, fmt.Errorf("decode repository: %w", err)
+	found, err := c.fetchGitHubJSON(ctx, repoEndpoint, &repo)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	if !found {
+		return CatalogItem{}, ErrNoOfficialRelease
 	}
 	if repo.FullName == "" {
 		repo.FullName = canonical
@@ -713,68 +733,19 @@ func (c *CatalogClient) ResolveRepository(ctx context.Context, rawRepo string) (
 
 	relEndpoint := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=10",
 		c.apiBase(), url.PathEscape(parts[0]), url.PathEscape(parts[1]))
-	relReq, err := http.NewRequestWithContext(ctx, http.MethodGet, relEndpoint, nil)
-	if err != nil {
-		return CatalogItem{}, err
-	}
-	c.setGitHubHeaders(relReq)
-	relResp, err := c.httpClient().Do(relReq)
-	if err != nil {
-		return CatalogItem{}, err
-	}
-	defer relResp.Body.Close()
-	if relResp.StatusCode == http.StatusNotFound {
-		return CatalogItem{}, ErrNoOfficialRelease
-	}
-	if err := checkGitHubResponse(relResp); err != nil {
-		return CatalogItem{}, err
-	}
 	var releases []githubReleaseEntry
-	if err := json.NewDecoder(io.LimitReader(relResp.Body, 2<<20)).Decode(&releases); err != nil {
-		return CatalogItem{}, fmt.Errorf("decode releases: %w", err)
+	found, err = c.fetchGitHubJSON(ctx, relEndpoint, &releases)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	if !found {
+		return CatalogItem{}, ErrNoOfficialRelease
 	}
 	asset, ok := selectOfficialPluginAsset(releases)
 	if !ok {
 		return CatalogItem{}, ErrNoOfficialRelease
 	}
-	zipBytes, err := c.downloadArchive(ctx, asset.DownloadURL)
-	if err != nil {
-		return CatalogItem{}, err
-	}
-	inspected, err := InspectPackage(zipBytes, c.AppVersion)
-	if err != nil {
-		return CatalogItem{}, err
-	}
-	if !ReleaseVersionMatches(asset.TagName, inspected.Manifest.Version) {
-		return CatalogItem{}, fmt.Errorf("%w: release %q vs manifest %q", ErrVersionTagMismatch, asset.TagName, inspected.Manifest.Version)
-	}
-	asset.SHA256 = fmt.Sprintf("%x", inspected.Digest)
-	item := CatalogItem{
-		Repository:      repo.FullName,
-		RepoID:          repo.ID,
-		Owner:           repo.Owner.Login,
-		HTMLURL:         repo.HTMLURL,
-		RepoDescription: strings.TrimSpace(repo.Description),
-		Stars:           repo.Stars,
-		UpdatedAt:       repo.UpdatedAt,
-		Release:         asset,
-		Manifest:         inspected.Manifest,
-		Permissions:      inspected.NetworkPermissions,
-		UserServerOrigin: inspected.UserServerOrigin,
-		Swatches:         inspected.Swatches,
-		Language:        inspected.Language,
-		NativeName:      inspected.NativeName,
-		Compatibility:   inspected.Compatibility,
-	}
-	if key := inspectCacheKey(item.Repository, asset.ReleaseID, asset.AssetID); key != "" {
-		c.mu.Lock()
-		if c.inspectCache == nil {
-			c.inspectCache = make(map[string]CatalogItem)
-		}
-		c.inspectCache[key] = item
-		c.mu.Unlock()
-	}
-	return item, nil
+	return c.inspectAndCacheRelease(ctx, repo, asset)
 }
 
 func (c *CatalogClient) DownloadAsset(ctx context.Context, asset ReleaseAsset) ([]byte, [sha256.Size]byte, error) {
@@ -800,94 +771,36 @@ func (c *CatalogClient) DownloadReleaseAsset(ctx context.Context, rawRepo, tagNa
 		return nil, [sha256.Size]byte{}, ErrInvalidRepository
 	}
 	parts := strings.Split(canonical, "/")
-	var release *githubReleaseEntry
+	var candidates []githubReleaseEntry
 	if tag := strings.TrimSpace(tagName); tag != "" {
 		endpoint := fmt.Sprintf("%s/repos/%s/%s/releases/tags/%s",
 			c.apiBase(), url.PathEscape(parts[0]), url.PathEscape(parts[1]), url.PathEscape(tag))
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		var rel githubReleaseEntry
+		found, err := c.fetchGitHubJSON(ctx, endpoint, &rel)
 		if err != nil {
 			return nil, [sha256.Size]byte{}, err
 		}
-		c.setGitHubHeaders(req)
-		resp, err := c.httpClient().Do(req)
-		if err != nil {
-			return nil, [sha256.Size]byte{}, err
-		}
-		if resp.StatusCode == http.StatusOK {
-			var rel githubReleaseEntry
-			decErr := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&rel)
-			resp.Body.Close()
-			if decErr != nil {
-				return nil, [sha256.Size]byte{}, fmt.Errorf("decode release tag: %w", decErr)
-			}
-			release = &rel
-		} else {
-			err := checkGitHubResponse(resp)
-			status := resp.StatusCode
-			resp.Body.Close()
-			if status != http.StatusNotFound {
-				return nil, [sha256.Size]byte{}, err
-			}
+		if found {
+			candidates = []githubReleaseEntry{rel}
 		}
 	}
 
-	var candidates []githubReleaseEntry
-	if release != nil {
-		candidates = []githubReleaseEntry{*release}
-	} else {
+	if len(candidates) == 0 {
 		endpoint := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=20",
 			c.apiBase(), url.PathEscape(parts[0]), url.PathEscape(parts[1]))
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		found, err := c.fetchGitHubJSON(ctx, endpoint, &candidates)
 		if err != nil {
 			return nil, [sha256.Size]byte{}, err
 		}
-		c.setGitHubHeaders(req)
-		resp, err := c.httpClient().Do(req)
-		if err != nil {
-			return nil, [sha256.Size]byte{}, err
-		}
-		if resp.StatusCode == http.StatusNotFound {
-			resp.Body.Close()
+		if !found {
 			return nil, [sha256.Size]byte{}, ErrNoOfficialRelease
-		}
-		if err := checkGitHubResponse(resp); err != nil {
-			resp.Body.Close()
-			return nil, [sha256.Size]byte{}, err
-		}
-		decErr := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&candidates)
-		resp.Body.Close()
-		if decErr != nil {
-			return nil, [sha256.Size]byte{}, fmt.Errorf("decode releases: %w", decErr)
 		}
 	}
 
 	var matched ReleaseAsset
-	found := false
+	var found bool
 	if assetID > 0 {
-		for _, rel := range candidates {
-			if rel.Draft {
-				continue
-			}
-			for _, a := range rel.Assets {
-				if a.ID == assetID && strings.EqualFold(strings.TrimSpace(a.Name), "plugin.zip") &&
-					a.Size > 0 && a.Size <= MaxInspectArchiveBytes && strings.TrimSpace(a.BrowserDownloadURL) != "" {
-					matched = ReleaseAsset{
-						ReleaseID:   rel.ID,
-						TagName:     strings.TrimSpace(rel.TagName),
-						PublishedAt: strings.TrimSpace(rel.PublishedAt),
-						AssetID:     a.ID,
-						AssetName:   a.Name,
-						DownloadURL: strings.TrimSpace(a.BrowserDownloadURL),
-						Size:        a.Size,
-					}
-					found = true
-					break
-				}
-			}
-			if found {
-				break
-			}
-		}
+		matched, found = matchPluginAsset(candidates, assetID, true)
 	}
 	if !found {
 		matched, found = selectOfficialPluginAsset(candidates)

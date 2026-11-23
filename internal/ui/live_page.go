@@ -115,8 +115,7 @@ func (livePage) Render(c *ui.Context, p *PageContext) {
 	catalog := p.host.Live
 	entry, _ := p.State.Current()
 	if catalog == nil || !entry.Capabilities.Has(provider.BrowseLive) {
-		ui.Column(c).FillWidth().Padding(148, 83, 0, 103).Gap(44).
-			Children(func() { contentPage{}.Render(c, p) })
+		p.renderUnavailableContent(c)
 		return
 	}
 	snap := catalog.Snapshot()
@@ -487,7 +486,6 @@ func (p *PageContext) liveHeader(c *ui.Context, snap app.LiveSnapshot) {
 						Radius(30).Border(borderW, borderColor).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
 						OnClick(func() { p.dispatch(func() { p.host.selectLiveArea(val) }) })
 					p.animateFocus(btn, background, ink)
-					p.applyFocusElevation(btn, focused)
 					p.bind(btn, id, liveHeaderRegion)
 					btn.Children(func() {
 						ui.Text(c, area.Label).FontSize(24).LetterSpacing(1).SingleLine()

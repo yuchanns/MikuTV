@@ -139,8 +139,7 @@ func (p *PageContext) searchKindLabel(kind provider.SearchKind) string {
 func (searchPage) Render(c *ui.Context, p *PageContext) {
 	entry, _ := p.State.Current()
 	if !entry.Capabilities.Has(provider.SearchCatalog) || p.host.Search == nil {
-		ui.Column(c).FillWidth().Padding(148, 83, 0, 103).Gap(44).
-			Children(func() { contentPage{}.Render(c, p) })
+		p.renderUnavailableContent(c)
 		return
 	}
 	current := p.host.Search.Snapshot()

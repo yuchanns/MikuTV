@@ -112,11 +112,7 @@ func (c *Catalog) LiveChatClient() provider.LiveChatClient {
 }
 
 func (c *Catalog) SendLiveChat(post provider.LiveChatPost, accept func(provider.LiveChatSendResult, error)) context.CancelFunc {
-	writer, _ := c.session.(provider.LiveChatWriter)
-	return catalogResult(c, func(ctx context.Context) (provider.LiveChatSendResult, error) {
-		if writer == nil {
-			return provider.LiveChatSendResult{}, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, writer provider.LiveChatWriter) (provider.LiveChatSendResult, error) {
 		return writer.SendLiveChat(ctx, post)
 	}, accept)
 }
@@ -146,53 +142,66 @@ func (c *Catalog) readItem(ref provider.MediaRef, read func(context.Context, pro
 }
 
 func (c *Catalog) EditVideo(request provider.VideoEdit, accept func(provider.VideoEditResult, error)) context.CancelFunc {
-	editor, _ := c.session.(provider.VideoEditor)
-	return catalogResult(c, func(ctx context.Context) (provider.VideoEditResult, error) {
-		if editor == nil {
-			return provider.VideoEditResult{}, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, editor provider.VideoEditor) (provider.VideoEditResult, error) {
 		return editor.EditVideo(ctx, request)
 	}, accept)
 }
 
 func (c *Catalog) ReadVideoComments(query provider.VideoCommentQuery, accept func(provider.VideoCommentPage, error)) context.CancelFunc {
-	reader, _ := c.session.(provider.VideoCommentReader)
-	return catalogResult(c, func(ctx context.Context) (provider.VideoCommentPage, error) {
-		if reader == nil {
-			return provider.VideoCommentPage{}, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, reader provider.VideoCommentReader) (provider.VideoCommentPage, error) {
 		return reader.VideoComments(ctx, query)
 	}, accept)
 }
 
 func (c *Catalog) ReadCreator(request provider.CreatorRequest, accept func(provider.CreatorPage, error)) context.CancelFunc {
-	reader, _ := c.session.(provider.CreatorReader)
-	return catalogResult(c, func(ctx context.Context) (provider.CreatorPage, error) {
-		if reader == nil {
-			return provider.CreatorPage{}, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, reader provider.CreatorReader) (provider.CreatorPage, error) {
 		return reader.ReadCreator(ctx, request)
 	}, accept)
 }
 
 func (c *Catalog) FollowCreator(request provider.CreatorFollowRequest, accept func(provider.CreatorFollowResult, error)) context.CancelFunc {
-	follower, _ := c.session.(provider.CreatorFollower)
-	return catalogResult(c, func(ctx context.Context) (provider.CreatorFollowResult, error) {
-		if follower == nil {
-			return provider.CreatorFollowResult{}, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, follower provider.CreatorFollower) (provider.CreatorFollowResult, error) {
 		return follower.FollowCreator(ctx, request)
 	}, accept)
 }
 
 func (c *Catalog) TrackSeries(request provider.SeriesTrackRequest, accept func(provider.SeriesTrackResult, error)) context.CancelFunc {
-	tracker, _ := c.session.(provider.SeriesTracker)
-	return catalogResult(c, func(ctx context.Context) (provider.SeriesTrackResult, error) {
-		if tracker == nil {
-			return provider.SeriesTrackResult{}, &provider.Error{Code: provider.Unsupported}
-		}
+	return catalogDispatch(c, func(ctx context.Context, tracker provider.SeriesTracker) (provider.SeriesTrackResult, error) {
 		return tracker.TrackSeries(ctx, request)
 	}, accept)
+}
+
+type pendingCall struct {
+	gen    uint64
+	cancel context.CancelFunc
+}
+
+func (p *pendingCall) stop() bool {
+	if p.cancel == nil {
+		return false
+	}
+	p.cancel()
+	p.cancel = nil
+	return true
+}
+
+func catalogDispatch[S any, T any](c *Catalog, fn func(context.Context, S) (T, error), accept func(T, error)) context.CancelFunc {
+	source, ok := c.session.(S)
+	return catalogResult(c, func(ctx context.Context) (T, error) {
+		if !ok {
+			var zero T
+			return zero, &provider.Error{Code: provider.Unsupported}
+		}
+		return fn(ctx, source)
+	}, accept)
+}
+
+func catalogAction[S any](c *Catalog, fn func(context.Context, S) error, accept func(error)) context.CancelFunc {
+	return catalogDispatch(c, func(ctx context.Context, source S) (struct{}, error) {
+		return struct{}{}, fn(ctx, source)
+	}, func(_ struct{}, err error) {
+		accept(err)
+	})
 }
 
 func catalogResult[T any](c *Catalog, operation func(context.Context) (T, error), accept func(T, error)) context.CancelFunc {
