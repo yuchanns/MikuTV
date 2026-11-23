@@ -39,7 +39,17 @@ type labels struct {
 	Playback                                                              playbackLabels
 	PlaybackPrefs                                                         playbackSettingsLabels
 	Danmaku                                                               danmakuSettingsLabels
+	Privacy                                                               privacySettingsLabels
 	Modal                                                                 modalLabels
+}
+
+type privacySettingsLabels struct {
+	ClearSearch, ClearHistory                      string
+	ClearSearchTitle, ClearSearchBody              string
+	ClearHistoryTitle, ClearHistoryBody            string
+	ConfirmClear, Cleared                          string
+	ClearFailed, SyncSaveFailed                    string
+	DetailsTitle, DetailsBody, ManageAction        string
 }
 
 type playbackSettingsLabels struct {

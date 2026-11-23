@@ -158,6 +158,25 @@ func (p *Preferences) SavePlaybackPosition(owner string, target provider.Playbac
 	return saveErr
 }
 
+func (p *Preferences) ClearPlaybackPositions(entryID, owner string) error {
+	var clearErr error
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		store := p.loadPlaybackPositionsLocked()
+		if !store.clearAccount(entryID, owner) {
+			return
+		}
+		encoded, err := store.encode()
+		if err != nil {
+			clearErr = err
+			return
+		}
+		clearErr = p.saveStringLocked(p.positionsKey, nsStringObj(encoded), "", 0)
+	})
+	return clearErr
+}
+
 func (p *Preferences) loadSearchHistoryLocked() searchHistoryStore {
 	value := p.defaults.Send(objc.RegisterName("stringForKey:"), p.searchHistoryKey)
 	if value == 0 {

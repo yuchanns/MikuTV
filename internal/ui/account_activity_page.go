@@ -151,54 +151,6 @@ func (libraryContent) Render(c *ui.Context, p *PageContext) {
 	p.renderLibrary(c, libraryQueryFor(p.host, p.Location.Section))
 }
 
-type privacySettingsPage struct{}
-
-func (privacySettingsPage) Render(c *ui.Context, p *PageContext) {
-	if !p.host.Activity.Available(provider.AccountHistory) {
-		settingsEmptyPage{}.Render(c, p)
-		return
-	}
-	l, colors, d := p.Assets.Text.Activity, p.Theme.Colors, p.uiColors()
-	p.region("content", nil)
-	ui.Text(c, p.Title).Height(45).FontSize(32).FontWeight(550).LineHeight(1.4).Margin(0, 0, 13, 0)
-	ui.Text(c, l.PrivacyIntro).Height(32).FontSize(19).LineHeight(1.7).TextColor(paint(colors.Text.Muted)).Margin(0, 0, 27, 0)
-	ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
-	enabled := p.host.Activity.HistorySync()
-	status := l.Disabled
-	if enabled {
-		status = l.Enabled
-	}
-	fill, ink, note, icon := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Muted), paint(colors.Text.Secondary)
-	if p.State.Focus == app.HistorySync {
-		fill, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
-		note, icon = d.focusSubtext, d.focusSubtext
-	}
-	control := ui.Button(c.Key(string(app.HistorySync)), "").FillWidth().Height(110).
-		Radius(7).Border(0, ui.Transparent).Padding(0).Role(ui.RoleSwitch).
-		Label(l.HistorySync + " " + status).OnClick(func() {
-		p.dispatch(func() {
-			if err := p.host.Activity.ToggleHistorySync(); err != nil {
-				p.host.notice = p.Assets.Text.SaveFailed
-			}
-		})
-	})
-	p.animateFocus(control, fill, ink)
-	p.bind(control, app.HistorySync, "content")
-	control.Children(func() {
-		ui.Row(c).Fill().Padding(0, 20).Gap(20).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(36, 36).Shrink(0).Center().Children(func() {
-				ui.Icon(c, p.Assets.Icon("history")).Size(24, 24).TextColor(icon)
-			})
-			ui.Column(c).Grow(1).Gap(9).Children(func() {
-				ui.Text(c, l.HistorySync).FontSize(23).FontWeight(450).LineHeight(1.4)
-				ui.Text(c, l.HistorySyncNote).FontSize(16).LineHeight(1.6).TextColor(note)
-			})
-			p.preferenceSwitch(c, enabled)
-		})
-		ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
-	})
-}
-
 func (p *PageContext) preferenceSwitch(c *ui.Context, enabled bool) {
 	colors, d := p.Theme.Colors, p.uiColors()
 	fill := d.switchOff

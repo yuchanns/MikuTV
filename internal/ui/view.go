@@ -114,6 +114,7 @@ type View struct {
 	favorites        favoritesUI
 	playbackUI       playbackSettingsUI
 	danmakuUI        danmakuSettingsUI
+	privacyUI        privacySettingsUI
 	settingsFeedback videoDetailFeedback
 
 	accountDetailsPhone bool
@@ -499,6 +500,9 @@ func (v *View) SyncAccountActivity() {
 				v.State.Back()
 			}
 		}
+	}
+	if v.State.Page == app.PrivacyConfirm && (v.privacyUI.confirmEntry != entry.ID || v.privacyUI.confirmOwner != owner) {
+		v.State.Back()
 	}
 	if sync := v.Pages.components[v.State.Route].Sync; sync != nil {
 		sync(v)

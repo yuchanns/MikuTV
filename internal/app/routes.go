@@ -33,6 +33,8 @@ const (
 	PlaybackSettingPicker Page = "playbackSettingPicker"
 	DanmakuSettingPicker  Page = "danmakuSettingPicker"
 	DanmakuRuleEditor     Page = "danmakuRuleEditor"
+	PrivacyConfirm        Page = "privacyConfirm"
+	PrivacyDetails        Page = "privacyDetails"
 	Account             Page = "account"
 	AccountDetails        Page = "accountDetails"
 	AccountMessages       Page = "accountMessages"
@@ -47,9 +49,10 @@ type FocusID string
 
 const (
 	ManagePlugins FocusID = "entries/manage"
-	ContentAction FocusID = "content/entries"
-	ShowLicenses  FocusID = "about/licenses"
-	LicenseText   FocusID = "licenses/text"
+	ContentAction      FocusID = "content/entries"
+	ShowLicenses       FocusID = "about/licenses"
+	ShowPrivacyDetails FocusID = "about/privacy-details"
+	LicenseText        FocusID = "licenses/text"
 	CloseModal    FocusID = "modal/close"
 	AccountAction FocusID = "account/action"
 	AccountInfo   FocusID = "account/info"

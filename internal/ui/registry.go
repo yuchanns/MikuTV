@@ -392,6 +392,25 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			},
 		},
 		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.PrivacyConfirm, Section: "privacy"},
+				Parent: app.Route{Page: app.Settings, Section: "privacy"},
+				Modal:  true, Initial: focus(app.CloseModal),
+			},
+			Component: privacyConfirmPage{}, ModalPresentation: modalFrameless, ModalWidth: 800,
+			Leave: func(v *View) {
+				v.privacyUI = privacySettingsUI{}
+			},
+		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.PrivacyDetails, Section: "about"},
+				Parent: app.Route{Page: app.Settings, Section: "about"},
+				Modal:  true, Initial: focus(privacyManageAction),
+			},
+			Component: privacyDetailsPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
+		},
+		Registration{
 			Policy:    app.RouteSpec{Route: app.Route{Page: app.Licenses, Section: "about"}, Parent: app.Route{Page: app.Settings, Section: "about"}, Modal: true, Initial: focus(app.LicenseText)},
 			Component: licensesPage{}, Title: assets.Text.Licenses, ModalPresentation: modalDrawer, ModalWidth: 880,
 		},

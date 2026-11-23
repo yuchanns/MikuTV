@@ -1138,6 +1138,28 @@ func (p *Playback) Suspend() {
 	}
 }
 
+// ClearLocalPositions drops cached preloaded streams and resets saved-position
+// tracking when matching (entryID, owner) after local watch history is cleared.
+func (p *Playback) ClearLocalPositions(entryID, owner string) {
+	if p == nil {
+		return
+	}
+	if p.preloaded != nil && p.preloaded.target.Ref.EntryID == entryID && p.preloaded.owner == owner {
+		if p.preloaded.media != nil {
+			p.preloaded.media.Close()
+		}
+		p.preloaded = nil
+	}
+	if p.preloadCancel != nil && p.preloadTarget.Ref.EntryID == entryID && p.preloadOwner == owner {
+		p.preloadCancel()
+		p.preloadCancel = nil
+	}
+	if p.active && p.state.Target.Ref.EntryID == entryID && p.owner == owner {
+		p.lastSaved = -1
+		p.savedAsEnd = false
+	}
+}
+
 func (p *Playback) save() {
 	if !p.loaded || p.isLive() || p.state.PreviewPending || p.state.Target.Ref.ID == "" ||
 		p.state.Resolution.Plan.Branch != nil || p.state.BranchHistory > 0 {

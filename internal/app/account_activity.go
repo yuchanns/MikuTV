@@ -207,13 +207,29 @@ func (a *AccountActivity) ToggleHistorySync() error {
 		return &provider.Error{Code: provider.Unsupported}
 	}
 	next := !a.sync
-	if err := a.store.SaveHistorySync(a.entry.ID, a.owner, next); err != nil {
-		return err
+	if a.store != nil {
+		if err := a.store.SaveHistorySync(a.entry.ID, a.owner, next); err != nil {
+			return err
+		}
 	}
 	a.sync = next
 	a.remove(provider.AccountQuery{Section: provider.AccountHistory})
 	a.changed()
 	return nil
+}
+
+// ClearHistoryCache drops the cached in-memory watch history list and metadata
+// for (entryID, owner) without modifying remote account history.
+func (a *AccountActivity) ClearHistoryCache(entryID, owner string) {
+	if a == nil || a.entry.ID != entryID || a.owner != owner {
+		return
+	}
+	if views := a.historyViews; views != nil {
+		views.cancel()
+		a.historyViews = nil
+	}
+	a.remove(provider.AccountQuery{Section: provider.AccountHistory})
+	a.changed()
 }
 
 func (a *AccountActivity) SetFolder(row provider.AccountRow)      { a.folder = row }

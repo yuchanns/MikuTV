@@ -274,15 +274,21 @@ func (s *CatalogSearch) Suggest(query string) {
 	}()
 }
 
+func (s *CatalogSearch) MatchesScope(entryID, owner string) bool {
+	return s != nil && s.entryID == entryID && s.owner == owner
+}
+
 func (s *CatalogSearch) ClearHistory() error {
 	if s == nil {
 		return nil
 	}
+	if s.store != nil && s.entryID != "" {
+		if err := s.store.SaveSearchHistory(s.entryID, s.owner, nil); err != nil {
+			return err
+		}
+	}
 	s.snapshot.History = nil
 	s.changed()
-	if s.store != nil && s.entryID != "" {
-		return s.store.SaveSearchHistory(s.entryID, s.owner, nil)
-	}
 	return nil
 }
 

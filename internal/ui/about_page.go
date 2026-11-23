@@ -30,23 +30,31 @@ func (aboutPage) Render(c *ui.Context, p *PageContext) {
 					ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
 				})
 			}
-			background, ink := ui.Transparent, d.secondaryText
-			if p.State.Focus == app.ShowLicenses {
-				background, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
-			}
-			button := ui.Button(c.Key(string(app.ShowLicenses)), "").Label(text.Licenses).
-				FillWidth().Height(76).Radius(8).Border(0, ui.Transparent).Padding(0).
-				OnClick(func() {
-					p.dispatch(func() { p.State.Push(app.Route{Page: app.Licenses, Section: "about"}) })
-				})
-			p.animateFocus(button, background, ink)
-			p.bind(button, app.ShowLicenses, "content")
-			button.Children(func() {
-				ui.Row(c).Fill().Padding(0, 19).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, text.Licenses).FontSize(21)
-				})
-				ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
+			p.aboutActionRow(c, app.ShowLicenses, text.Licenses, func() {
+				p.State.Push(app.Route{Page: app.Licenses, Section: "about"})
+			})
+			p.aboutActionRow(c, app.ShowPrivacyDetails, text.Privacy.DetailsTitle, func() {
+				p.State.Push(app.Route{Page: app.PrivacyDetails, Section: "about"})
 			})
 		})
+	})
+}
+
+func (p *PageContext) aboutActionRow(c *ui.Context, id app.FocusID, label string, action func()) {
+	colors, d := p.Theme.Colors, p.uiColors()
+	background, ink := ui.Transparent, d.secondaryText
+	if p.paintFocus() == id {
+		background, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+	}
+	button := ui.Button(c.Key(string(id)), "").Label(label).
+		FillWidth().Height(76).Radius(8).Border(0, ui.Transparent).Padding(0).
+		OnClick(func() { p.dispatch(action) })
+	p.animateFocus(button, background, ink)
+	p.bind(button, id, "content")
+	button.Children(func() {
+		ui.Row(c).Fill().Padding(0, 19).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, label).FontSize(21)
+		})
+		ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
 	})
 }
