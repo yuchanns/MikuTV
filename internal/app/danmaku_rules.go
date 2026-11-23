@@ -244,6 +244,13 @@ func (r *DanmakuRules) SetScope(entryID string, caps provider.Capabilities, owne
 		loaded = normalizeStoredRules(r.rulesStore.DanmakuRules(entryID, owner))
 	}
 	r.rules = loaded
+	for _, rule := range loaded {
+		if rawID, ok := strings.CutPrefix(rule.ID, "local:"); ok {
+			if n, err := strconv.ParseUint(rawID, 10, 64); err == nil && n > r.nextLocalID {
+				r.nextLocalID = n
+			}
+		}
+	}
 	r.revision++
 	r.mu.Unlock()
 	r.notify()
@@ -353,9 +360,16 @@ func (r *DanmakuRules) Add(kind provider.DanmakuRuleKind, raw string, done func(
 	useCloud := r.cloudAvailable && owner != "" && r.catalog != nil
 	catalog := r.catalog
 	if !useCloud {
-		r.nextLocalID++
+		var localID string
+		for {
+			r.nextLocalID++
+			localID = fmt.Sprintf("local:%d", r.nextLocalID)
+			if !slices.ContainsFunc(r.rules, func(existing provider.DanmakuRule) bool { return existing.ID == localID }) {
+				break
+			}
+		}
 		rule := provider.DanmakuRule{
-			ID:      fmt.Sprintf("local:%d", r.nextLocalID),
+			ID:      localID,
 			Kind:    kind,
 			Pattern: pattern,
 			Enabled: true,

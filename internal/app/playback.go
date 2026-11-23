@@ -994,16 +994,20 @@ func (p *Playback) ChooseAudioTrack(trackID string) bool {
 	go func() {
 		media, err := player.OpenMediaWithAudio(ctx, resolution, trackID)
 		p.post(func() {
-			if !p.active || p.audioRequest != reqID || ctx.Err() != nil {
+			if !p.active || p.audioRequest != reqID {
 				if media != nil {
 					media.Close()
 				}
 				return
 			}
+			ctxErr := ctx.Err()
 			cancel()
 			p.audioCancel = nil
 			p.state.Switching = false
-			if err != nil || media == nil {
+			if err != nil || media == nil || ctxErr != nil {
+				if media != nil {
+					media.Close()
+				}
 				p.changed()
 				return
 			}

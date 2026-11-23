@@ -762,16 +762,22 @@ func (m *Media) fetchPlaylist(ctx context.Context, resource provider.PlaybackRes
 	var body strings.Builder
 	scanner := bufio.NewScanner(&countingReader{r: res.Body, meter: &m.speed})
 	scanner.Buffer(make([]byte, 4096), 1<<20)
+	nextIsPlaylist := false
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		switch {
 		case strings.HasPrefix(line, "#"):
+			if strings.HasPrefix(line, "#EXT-X-STREAM-INF") {
+				nextIsPlaylist = true
+			}
+			uriIsPlaylist := strings.HasPrefix(line, "#EXT-X-MEDIA:") || strings.HasPrefix(line, "#EXT-X-I-FRAME-STREAM-INF:")
 			line = playlistURI.ReplaceAllStringFunc(line, func(pattern string) string {
 				match := playlistURI.FindStringSubmatch(pattern)
-				return "URI=" + strconv.Quote(m.playlistChild(res.Request.URL, match[1], resource.Headers))
+				return "URI=" + strconv.Quote(m.playlistChild(res.Request.URL, match[1], resource.Headers, uriIsPlaylist))
 			})
 		case line != "":
-			line = m.playlistChild(res.Request.URL, line, resource.Headers)
+			line = m.playlistChild(res.Request.URL, line, resource.Headers, nextIsPlaylist)
+			nextIsPlaylist = false
 		}
 		body.WriteString(line)
 		body.WriteByte('\n')
@@ -837,7 +843,7 @@ func (m *Media) serveHLSChild(w http.ResponseWriter, r *http.Request) {
 	m.serveDirectResource(w, r, entry.resource, "")
 }
 
-func (m *Media) playlistChild(base *url.URL, value string, headers map[string]string) string {
+func (m *Media) playlistChild(base *url.URL, value string, headers map[string]string, isPlaylist bool) string {
 	ref, err := base.Parse(value)
 	allowedScheme := err == nil && (ref.Scheme == "https" ||
 		(ref.Scheme == "http" && base != nil && base.Scheme == "http" && strings.EqualFold(ref.Host, base.Host)))
@@ -863,12 +869,16 @@ func (m *Media) playlistChild(base *url.URL, value string, headers map[string]st
 	if len(ext) > 10 {
 		ext = ""
 	}
+	playlist := isPlaylist || strings.EqualFold(ext, ".m3u8") || strings.EqualFold(ext, ".m3u")
 	name := fmt.Sprintf("%x%s", sum[:16], ext)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.hlsSeq++
 	if existing, ok := m.hlsChildren[name]; ok {
 		existing.usedAt = m.hlsSeq
+		if playlist {
+			existing.playlist = true
+		}
 		m.hlsChildren[name] = existing
 		return m.prefix + "c/" + name
 	}
@@ -886,7 +896,7 @@ func (m *Media) playlistChild(base *url.URL, value string, headers map[string]st
 	}
 	m.hlsChildren[name] = hlsChildEntry{
 		resource: provider.PlaybackResource{URLs: []string{ref.String()}, Headers: headers},
-		playlist: ext == ".m3u8",
+		playlist: playlist,
 		usedAt:   m.hlsSeq,
 	}
 	return m.prefix + "c/" + name

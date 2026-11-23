@@ -84,9 +84,10 @@ type Auth struct {
 	record         accountRecord
 	accounts       AccountsSnapshot
 	signIn         SignInSnapshot
-	work           *authWork
-	confirmWork    *authWork
-	avatarLoad     *avatarLoad
+	work             *authWork
+	confirmWork      *authWork
+	confirmAccountID string
+	avatarLoad       *avatarLoad
 	avatar         *AccountAvatar
 	selecting      bool
 }
@@ -373,6 +374,7 @@ func (a *Auth) confirm(credential provider.Credential) {
 	ctx, cancel := context.WithCancel(context.Background())
 	work := &authWork{Context: ctx, cancel: cancel}
 	a.confirmWork = work
+	a.confirmAccountID = credential.Account.ID
 	service := a.service
 	go func() {
 		updated, err := service.RestoreAccount(work, credential)
@@ -381,6 +383,9 @@ func (a *Auth) confirm(credential provider.Credential) {
 				return
 			}
 			a.finishConfirm()
+			if a.find(credential.Account.ID) == nil && a.find(updated.Account.ID) == nil {
+				return
+			}
 			if err == nil {
 				err = a.saveAccount(updated)
 			}
@@ -434,6 +439,9 @@ func (a *Auth) forgetAccount(id string) error {
 	if err := a.save(record); err != nil {
 		return err
 	}
+	if a.confirmAccountID == id {
+		a.finishConfirm()
+	}
 	if a.cleaner != nil {
 		_ = a.cleaner.ClearAccount(a.entry.ID, id)
 	}
@@ -462,6 +470,7 @@ func (a *Auth) finishConfirm() {
 		a.confirmWork.cancel()
 		a.confirmWork = nil
 	}
+	a.confirmAccountID = ""
 }
 
 func (a *Auth) find(id string) *provider.Credential {

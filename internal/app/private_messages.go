@@ -426,7 +426,6 @@ func (m *PrivateMessages) loadMessagesLocked(conversationID, cursor string, prep
 	state.cancel = cancel
 	state.cursor = cursor
 	state.appending = prepending
-	previous := state.snapshot.Messages
 	state.snapshot.Phase = CatalogLoading
 	state.snapshot.Prepending = prepending
 	state.snapshot.Error = ""
@@ -455,7 +454,7 @@ func (m *PrivateMessages) loadMessagesLocked(conversationID, cursor string, prep
 			}
 			var merged []provider.PrivateMessage
 			if prepending {
-				merged = mergePrivateMessages(page.Messages, previous)
+				merged = mergePrivateMessages(page.Messages, state.snapshot.Messages)
 			} else {
 				merged = mergePrivateMessages(nil, page.Messages)
 			}

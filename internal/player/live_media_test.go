@@ -96,9 +96,9 @@ func TestLiveHLSChildEvictionAndPreflightFallback(t *testing.T) {
 	base, _ := url.Parse("https://live.example.com/live/index.m3u8")
 	for i := range hlsMaxChildren + 32 {
 		if i%500 == 0 {
-			media.playlistChild(base, "h0.m4s", nil)
+			media.playlistChild(base, "h0.m4s", nil, false)
 		}
-		media.playlistChild(base, fmt.Sprintf("rot-%d.m4s", i), nil)
+		media.playlistChild(base, fmt.Sprintf("rot-%d.m4s", i), nil, false)
 	}
 	media.mu.Lock()
 	childCount := len(media.hlsChildren)
@@ -212,14 +212,14 @@ func TestHLSLocalHTTPOriginAndLongVOD(t *testing.T) {
 
 	// Verify scheme downgrade and cross-origin HTTP children remain blocked.
 	httpsBase, _ := url.Parse("https://media.example.com/videos/1/master.m3u8")
-	if got := media.playlistChild(httpsBase, "http://media.example.com/videos/1/main.m3u8", nil); got != "unavailable" {
+	if got := media.playlistChild(httpsBase, "http://media.example.com/videos/1/main.m3u8", nil, true); got != "unavailable" {
 		t.Fatalf("https->http downgrade allowed: %q", got)
 	}
 	httpBase, _ := url.Parse("http://192.168.1.50:8096/videos/1/master.m3u8")
-	if got := media.playlistChild(httpBase, "http://192.168.1.51:8096/videos/1/main.m3u8", nil); got != "unavailable" {
+	if got := media.playlistChild(httpBase, "http://192.168.1.51:8096/videos/1/main.m3u8", nil, true); got != "unavailable" {
 		t.Fatalf("cross-host http child allowed: %q", got)
 	}
-	if got := media.playlistChild(httpBase, "http://192.168.1.50:8080/videos/1/main.m3u8", nil); got != "unavailable" {
+	if got := media.playlistChild(httpBase, "http://192.168.1.50:8080/videos/1/main.m3u8", nil, true); got != "unavailable" {
 		t.Fatalf("cross-port http child allowed: %q", got)
 	}
 }
