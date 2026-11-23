@@ -23,6 +23,16 @@ APP = BUILD / "Payload/MikuTV.app"
 APP_ICON = "MikuTVHomeIcon@2x"
 MINIMUM = "18.0"
 APP_VERSION = "0.1.0"
+VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def resolve_app_version():
+    version = os.environ.get("APP_VERSION", APP_VERSION).strip()
+    if version.startswith(("v", "V")):
+        version = version[1:]
+    if not VERSION_PATTERN.fullmatch(version):
+        raise RuntimeError(f"APP_VERSION must be semantic X.Y.Z, got {version!r}")
+    return version
 
 
 def run(args, *, env=None):
@@ -66,6 +76,7 @@ def prepare():
 
 
 def build():
+    app_version = resolve_app_version()
     number = os.environ.get("BUILD_NUMBER", "1")
     if not number.isascii() or not number.isdecimal() or int(number) < 1:
         raise RuntimeError("BUILD_NUMBER must be a positive integer")
@@ -91,7 +102,7 @@ def build():
         commit = output(["git", "rev-parse", "--short=12", "HEAD"])
     except subprocess.CalledProcessError:
         commit = ""
-    ldflags = f"-s -w -X main.appVersion={APP_VERSION} -X main.appBuild={number}"
+    ldflags = f"-s -w -X main.appVersion={app_version} -X main.appBuild={number}"
     if commit:
         ldflags += f" -X main.appCommit={commit}"
     run(["go", "build", "-trimpath", "-tags=tvos,mygo_noinspector",
@@ -102,7 +113,7 @@ def build():
         "CFBundleExecutable": "MikuTV", "CFBundleIdentifier": "dev.yuchanns.MikuTV",
         "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "MikuTV",
         "CFBundleIcons": {"CFBundlePrimaryIcon": APP_ICON},
-        "CFBundlePackageType": "APPL", "CFBundleShortVersionString": APP_VERSION,
+        "CFBundlePackageType": "APPL", "CFBundleShortVersionString": app_version,
         "CFBundleVersion": number, "CFBundleSupportedPlatforms": ["AppleTVOS"],
         "CFBundleLocalizations": ["zh-Hans", "en"],
         "LSApplicationCategoryType": "public.app-category.entertainment",
@@ -121,13 +132,13 @@ def build():
     icon = ROOT / "resources/tvos" / f"{APP_ICON}.psd"
     run(["xcrun", "--sdk", "appletvos", "layerutil", "-c", "-l", "1",
          "-o", str(APP / "Assets.car"), str(icon)])
-    bundle_topshelf(environment, number)
-    bundle_plugins()
+    bundle_topshelf(environment, app_version, number)
+    bundle_plugins(app_version)
     bundle_licenses(environment)
     print(APP)
 
 
-def bundle_topshelf(build_env, number):
+def bundle_topshelf(build_env, app_version, number):
     ext = APP / "PlugIns/TopShelf.appex"
     ext.mkdir(parents=True, exist_ok=True)
     run(["go", "build", "-trimpath", "-tags=tvos,mygo_noinspector",
@@ -141,7 +152,7 @@ def bundle_topshelf(build_env, number):
         "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundleName": "TopShelf",
         "CFBundlePackageType": "XPC!",
-        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleShortVersionString": app_version,
         "CFBundleVersion": number,
         "CFBundleSupportedPlatforms": ["AppleTVOS"],
         "CFBundleLocalizations": ["zh-Hans", "en"],
@@ -245,7 +256,7 @@ def bundle_licenses(build_env):
     destination.write_text(json.dumps(records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def bundle_plugins():
+def bundle_plugins(app_version=APP_VERSION):
     destination = APP / "assets/plugins"
     destination.mkdir(parents=True)
     records = []
@@ -274,7 +285,7 @@ def bundle_plugins():
         record = {
             "id": plugin_id,
             "version": manifest["version"],
-            "appVersion": APP_VERSION,
+            "appVersion": app_version,
             "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
         }
         if not output(["git", "status", "--porcelain", "--untracked-files=all", "--", source_path]):

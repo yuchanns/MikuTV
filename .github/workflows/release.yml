@@ -1,0 +1,152 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to publish (e.g. v0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish tvOS Release
+    runs-on: macos-15
+    steps:
+      - name: Resolve release version
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="$REF_NAME"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Release tag must match vX.Y.Z, got '$tag'"
+            exit 1
+          fi
+          ver="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "app_version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && steps.version.outputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Select Xcode with AppleTVOS SDK
+        run: |
+          set -euo pipefail
+          if xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
+            echo "Using default Xcode: $(xcode-select -p)"
+            xcodebuild -version
+            exit 0
+          fi
+          selected=""
+          for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
+            if DEVELOPER_DIR="$app/Contents/Developer" xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
+              selected="$app/Contents/Developer"
+              break
+            fi
+          done
+          if [ -z "$selected" ]; then
+            echo "::error::No installed Xcode contains the appletvos SDK"
+            ls -la /Applications
+            exit 1
+          fi
+          sudo xcode-select -s "$selected"
+          xcodebuild -version
+          xcrun --sdk appletvos --show-sdk-path
+
+      - name: Build unsigned tvOS IPA
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: python3 scripts/tvos.py package
+
+      - name: Run unit tests before release
+        run: |
+          go vet -mod=vendor ./...
+          go test -mod=vendor -race -count=1 ./...
+
+      - name: Verify artifacts and generate SHA256SUMS
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          app=".build/tvos/Payload/MikuTV.app"
+          src=".build/tvos/MikuTV-unsigned.ipa"
+          got_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")"
+          if [ "$got_ver" != "$APP_VERSION" ]; then
+            echo "::error::CFBundleShortVersionString mismatch: got '$got_ver', expected '$APP_VERSION'"
+            exit 1
+          fi
+          for bin in "$app/MikuTV" "$app/PlugIns/TopShelf.appex/TopShelf"; do
+            file "$bin" | grep -q "arm64"
+            non_sys="$(otool -L "$bin" | tail -n +2 | awk '{print $1}' | grep -Ev '^(/usr/lib/|/System/Library/Frameworks/)' || true)"
+            if [ -n "$non_sys" ]; then
+              echo "::error::Unexpected non-system dynamic libraries in $bin: $non_sys"
+              exit 1
+            fi
+          done
+          mkdir -p dist
+          cp "$src" "dist/MikuTV-tvOS.ipa"
+          cp "$src" "dist/MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa"
+          (
+            cd dist
+            shasum -a 256 "MikuTV-tvOS.ipa" "MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa" > SHA256SUMS.txt
+            cat SHA256SUMS.txt
+          )
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          notes="$(cat <<'EOF'
+          Unsigned tvOS `.ipa` package built natively for Apple TV (`arm64`, tvOS 18.0+).
+
+          ### Assets
+          - `MikuTV-tvOS.ipa` — Stable asset name for automatic tracking and 7-day auto-refresh in [ATVLoadly](https://github.com/bitxeno/atvloadly).
+          - `MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa` — Versioned unsigned archive (identical content).
+          - `SHA256SUMS.txt` — SHA-256 verification checksums.
+
+          See the [Installation & Sideloading Guide](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/install.md) for setup instructions.
+          EOF
+          )"
+          notes="${notes//\$\{RELEASE_TAG\}/$RELEASE_TAG}"
+          notes="${notes//\$\{GITHUB_REPOSITORY\}/$GITHUB_REPOSITORY}"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "dist/MikuTV-tvOS.ipa" \
+              "dist/MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa" \
+              "dist/SHA256SUMS.txt" \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              "dist/MikuTV-tvOS.ipa" \
+              "dist/MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa" \
+              "dist/SHA256SUMS.txt" \
+              --title "MikuTV ${RELEASE_TAG}" \
+              --notes "$notes" \
+              --generate-notes
+          fi
