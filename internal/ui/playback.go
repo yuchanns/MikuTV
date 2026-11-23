@@ -79,6 +79,7 @@ type playbackView struct {
 	feedback         playbackFeedback
 	feedbackFocus    app.FocusID
 	accessVisible    bool
+	branchVisible    bool
 	blurredState     *app.PlaybackState
 	showAccessHelp   bool
 	loginAttempted   bool
@@ -359,6 +360,12 @@ func (v *View) backFromPlayback() bool {
 		return true
 	}
 	state := v.Playback.State()
+	if playbackHasBranchOverlay(state) {
+		v.Playback.DismissBranch()
+		s.show(v)
+		v.State.Focus, v.reveal = playerToggle, true
+		return true
+	}
 	if playbackHasAccessDialog(state) {
 		if s.showAccessHelp {
 			s.showAccessHelp = false
@@ -391,7 +398,7 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 	state := v.Playback.State()
 	liveMode := isLivePlayback(state, s.current())
 	if !liveMode && state.Clock.Ended && state.Resolution.Plan.Access != provider.VideoAccessPreview &&
-		state.Failure == "" && !playbackHasAccessDialog(state) &&
+		state.Failure == "" && !playbackHasAccessDialog(state) && !playbackHasBranchChoices(state) && !playbackAutoAdvancingBranch(state) &&
 		s.index+1 < len(s.items) && p.active && !s.content.overlay() {
 		s.panel, s.controlFocus = "", ""
 		s.scrubbing, s.selectingChapter = false, false
@@ -457,39 +464,51 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 	if s.content.needsAnimationFrame(v, state, now, surfaceWidth) ||
 		(liveMode && s.content.needsLiveDanmakuFrame(v, state, now)) {
 		c.AnimationFrame()
+	} else if !liveMode && state.Playing && !state.BranchPending && plan.Branch != nil && len(plan.Branch.Options) > 0 {
+		c.After(100 * time.Millisecond)
 	} else {
 		c.After(s.content.refresh(v, state))
 	}
-	wasBlocking := s.feedback != playbackFeedbackNone || s.accessVisible
+	wasBlocking := s.feedback != playbackFeedbackNone || s.accessVisible || s.branchVisible
 	s.feedback = s.feedbackFor(c, state)
 	if s.feedback != playbackFeedbackNone {
 		s.accessVisible = false
+		s.branchVisible = false
 		p.playbackFeedbackScreen(c, s.feedback, state, item.item.CoverURL)
 		return
 	}
 	contentModal := s.content.overlay()
 	access := playbackHasAccessDialog(state) && !contentModal && p.State.Page != app.SignInQR
+	branchVisible := playbackHasBranchOverlay(state) && !access && !contentModal && p.State.Page != app.SignInQR
+	if branchVisible && s.panel != "" {
+		s.panel = ""
+	}
 	s.accessVisible = access
-	if p.active && wasBlocking && !access {
+	s.branchVisible = branchVisible
+	if p.active && wasBlocking && !access && !branchVisible {
 		if v.State.Focus == playerBuffer {
 			v.State.Focus = s.feedbackFocus
 		}
-		if v.State.Focus == "" || strings.HasPrefix(string(v.State.Focus), string(playerStatus)) {
-			v.State.Focus = playerToggle
+		if v.State.Focus == "" || strings.HasPrefix(string(v.State.Focus), string(playerStatus)) ||
+			strings.HasPrefix(string(v.State.Focus), string(playerBranchControl)+"/") {
+			v.State.Focus = playerWake
+			if s.visible {
+				v.State.Focus = playerToggle
+			}
 		}
 		// A blocking surface unmounts the native focus target. Restore it even
 		// when the logical player control is unchanged.
 		v.reveal = true
 		s.feedbackFocus = ""
 	}
-	if p.active && !access && !contentModal && s.panel == "" && v.State.Focus == "" {
+	if p.active && !access && !branchVisible && !contentModal && s.panel == "" && v.State.Focus == "" {
 		v.State.Focus = playerWake
 		if s.visible {
 			v.State.Focus = playerToggle
 		}
 		v.reveal = true
 	}
-	if p.active && s.visible && !access && !contentModal && s.panel == "" && s.controlFocus != "" {
+	if p.active && s.visible && !access && !branchVisible && !contentModal && s.panel == "" && s.controlFocus != "" {
 		// The popover or seek preview can relinquish native focus during removal.
 		// Keep the requested control until the replacement focus is committed.
 		if s.controlFocus == ui.FocusedValue(c, &v.State.Focus) {
@@ -548,10 +567,10 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 			if !hasBackdrop && (!state.Clock.HasFrame || backdropBlur > 0) {
 				surface.playbackPoster(c, item.item.CoverURL)
 			}
-			if s.visible {
+			if !branchVisible && s.visible {
 				surface.playbackShade(c, showChapters)
 				surface.playbackTop(c, item, display, state)
-			} else if playbackShowNetworkSpeed(state, s) {
+			} else if !branchVisible && playbackShowNetworkSpeed(state, s) {
 				ui.Box(c.Key("player-network-speed")).Absolute().Right(playerInset).Top(67).IgnoreInput(true).Children(func() {
 					surface.playbackNetworkSpeed(c, state, true)
 				})
@@ -559,22 +578,27 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 			if backdropBlur == 0 {
 				surface.playbackTextLayers(c, state)
 			}
-			if display.Resolution.Plan.Access == provider.VideoAccessPreview && !display.PreviewPending {
+			if !branchVisible && display.Resolution.Plan.Access == provider.VideoAccessPreview && !display.PreviewPending {
 				surface.playbackPreviewBanner(c, display)
 			}
-			if s.visible {
-				surface.playbackControls(c, display, item)
-				if showChapters {
-					surface.playbackChapters(c, display)
-				} else if s.scrubbing {
-					surface.playbackSeekPreview(c, display, item.item.CoverURL)
+			if !branchVisible {
+				if s.visible {
+					surface.playbackControls(c, display, item)
+					if showChapters {
+						surface.playbackChapters(c, display)
+					} else if s.scrubbing {
+						surface.playbackSeekPreview(c, display, item.item.CoverURL)
+					}
+				} else {
+					surface.playbackWake(c)
 				}
-			} else {
-				surface.playbackWake(c)
 			}
 		})
-		if s.panel != "" && !access && !contentModal {
+		if s.panel != "" && !access && !branchVisible && !contentModal {
 			p.playbackPanel(c, state, item)
+		}
+		if branchVisible {
+			p.drawPlaybackBranch(c, state)
 		}
 		if access {
 			p.drawPlaybackAccess(c, state, item)
@@ -664,7 +688,9 @@ func (p *PageContext) playbackTop(c *ui.Context, item playbackItem, display, liv
 	ui.Row(c).Absolute().Left(playerInset).Right(playerInset).Top(67).Gap(20).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Gap(13).Shrink(1).Children(func() {
 			title := item.item.Title
-			if item.label != "" && item.label != title {
+			if branch := display.Resolution.Plan.Branch; branch != nil && branch.NodeTitle != "" && branch.NodeTitle != title {
+				title += " · " + branch.NodeTitle
+			} else if item.label != "" && item.label != title {
 				title += " · " + item.label
 			}
 			ui.Text(c, title).FontSize(29).FontWeight(450).MaxLines(1).TextColor(paint(colors.Foreground))
@@ -795,6 +821,11 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 					}
 					controls.playerButton(c, playerFavorite, icon, p.Assets.Text.Detail.Favorite, "", false, p.openPlayerFavorites)
 				}
+				if playbackHasBranchChoices(state) {
+					controls.playerButton(c, playerBranchControl, "", text.BranchButton, text.BranchButton, false, func() {
+						v.Playback.OpenBranch()
+					})
+				}
 				if entry.Capabilities.Has(provider.ReadDanmaku) {
 					controls.playerButton(c, playerDanmaku, "", text.Danmaku, text.Danmaku, false, func() { s.openPanel(v, playerDanmaku) })
 				}
@@ -820,6 +851,8 @@ func (p *PageContext) playerButton(c *ui.Context, id app.FocusID, icon, title, l
 		border, borderWidth = withAlpha(color.Playback.Foreground, 0x25), 1
 		if id == playerQuality {
 			width = 97
+		} else if id == playerBranchControl {
+			width = 112
 		}
 	}
 	if id == playerToggle || id == playerPrevious || id == playerNext {

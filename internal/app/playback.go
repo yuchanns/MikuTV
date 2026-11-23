@@ -54,9 +54,12 @@ type PlaybackState struct {
 	Loading        bool
 	Switching      bool
 	NeedsReload    bool
-	VideoRange     string
-	PreviewPending bool
-	BytesPerSecond float64
+	VideoRange      string
+	PreviewPending  bool
+	BranchPending   bool
+	BranchDismissed bool
+	BranchHistory   int
+	BytesPerSecond  float64
 }
 
 type Playback struct {
@@ -86,6 +89,9 @@ type Playback struct {
 	liveEndChecked   bool
 	previewConfirmed bool
 	hdrBlocked       bool
+	branchID         string
+	branchState      string
+	branchTriggered  bool
 	reporting        bool
 	reports          []queuedPlaybackReport
 
@@ -157,6 +163,7 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 	p.loaded, p.didEnd, p.refreshed = false, false, false
 	p.liveEndChecked, p.pausedAt = false, time.Time{}
 	p.previewConfirmed, p.hdrBlocked = false, false
+	p.branchID, p.branchState, p.branchTriggered = "", "", false
 	p.lastSaved, p.savedAsEnd = -1, false
 	p.resetAutoQuality(true)
 	if p.rate == 0 || target.Ref.Kind == provider.Live {
@@ -184,6 +191,7 @@ func (p *Playback) Close() {
 		p.engine.Fullscreen(false)
 	}
 	p.active = false
+	p.branchID, p.branchState, p.branchTriggered = "", "", false
 	p.state = PlaybackState{Revision: p.state.Revision}
 	p.rate = 1
 	p.resetAutoQuality(true)
@@ -333,7 +341,8 @@ func (p *Playback) resolveMode(selected, requestQuality, selectedLine string, pr
 	}
 	resolver, _ := p.catalog.session.(provider.PlaybackReader)
 	input := provider.PlaybackRequest{
-		PlaybackTarget: p.state.Target, Quality: requestQuality, Line: selectedLine, HDR: caps.HDR, HEVC: caps.HEVC,
+		PlaybackTarget: p.state.Target, Quality: requestQuality, Line: selectedLine,
+		BranchID: p.branchID, BranchState: p.branchState, HDR: caps.HDR, HEVC: caps.HEVC,
 	}
 	go func() {
 		var result provider.Playback
@@ -442,6 +451,10 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	if plan.Live {
 		position = 0
 		p.rate = 1
+	} else if plan.Branch != nil {
+		if !preserve {
+			position = 0
+		}
 	} else if useResume {
 		if p.syncSource && position == 0 {
 			position = plan.ResumeSeconds
@@ -476,6 +489,20 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	p.media = media
 	p.liveEndChecked = false
 	p.state.LiveEnded = false
+	if plan.Branch != nil {
+		if plan.Branch.State != "" {
+			p.branchState = plan.Branch.State
+		}
+		if !preserve {
+			p.branchTriggered = false
+			p.state.BranchPending = false
+			p.state.BranchDismissed = false
+		}
+	} else if !preserve {
+		p.branchTriggered = false
+		p.state.BranchPending = false
+		p.state.BranchDismissed = false
+	}
 	if endedPreview || p.state.PreviewPending && plan.Access != provider.VideoAccessPreview {
 		p.didEnd, p.state.Playing = false, true
 	}
@@ -516,6 +543,32 @@ func (p *Playback) Tick(now time.Time) {
 	p.state.Clock = clock
 	p.loaded = p.loaded || clock.HasFrame
 	live := p.isLive()
+	if !live && !p.state.Loading && !p.state.Switching && !p.state.PreviewPending && p.state.Failure == "" {
+		if branch := p.state.Resolution.Plan.Branch; branch != nil && len(branch.Options) > 0 {
+			if branch.AutoAdvance && len(branch.Options) == 1 {
+				if clock.Ended || (p.state.Duration > 0 && clock.HasFrame && p.state.Position >= p.state.Duration-0.15) {
+					p.SelectBranch(branch.Options[0].ID)
+					return
+				}
+			} else {
+				trigger := branch.TriggerSeconds
+				if trigger <= 0 || (p.state.Duration > 0 && trigger > p.state.Duration) {
+					trigger = max(0, p.state.Duration-0.3)
+				}
+				reached := !p.branchTriggered && p.state.Playing && clock.HasFrame && p.state.Position >= trigger
+				if reached || (clock.Ended && !p.state.BranchPending) {
+					p.branchTriggered = true
+					p.state.BranchPending = true
+					p.state.BranchDismissed = false
+					p.state.Playing = false
+					p.didEnd = false
+					p.applyRate()
+					p.changed()
+					return
+				}
+			}
+		}
+	}
 	if clock.Ended && !p.didEnd {
 		if live && !p.liveEndChecked {
 			p.liveEndChecked = true
@@ -714,8 +767,16 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 }
 
 func (p *Playback) Toggle() {
-	if !p.active || p.state.Loading || p.state.PreviewPending || p.state.LiveEnded {
+	if !p.active || p.state.Loading || p.state.PreviewPending || p.state.BranchPending || p.state.LiveEnded {
 		return
+	}
+	if p.state.BranchDismissed && !p.state.Playing {
+		if branch := p.state.Resolution.Plan.Branch; branch != nil && len(branch.Options) > 0 && !branch.AutoAdvance {
+			if p.state.Clock.Ended || (p.state.Duration > 0 && p.state.Position >= p.state.Duration-0.2) {
+				p.OpenBranch()
+				return
+			}
+		}
 	}
 	if p.didEnd || p.state.Failure != "" {
 		p.Retry()
@@ -770,6 +831,17 @@ func (p *Playback) Seek(seconds float64) {
 		p.state.Position = min(p.state.Duration, p.state.Position)
 		if p.state.Duration-p.state.Position > 30 {
 			p.clearPreload()
+		}
+	}
+	if branch := p.state.Resolution.Plan.Branch; branch != nil && len(branch.Options) > 0 {
+		trigger := branch.TriggerSeconds
+		if trigger <= 0 || (p.state.Duration > 0 && trigger > p.state.Duration) {
+			trigger = max(0, p.state.Duration-0.3)
+		}
+		if p.state.Position < trigger-0.8 {
+			p.branchTriggered = false
+			p.state.BranchPending = false
+			p.state.BranchDismissed = false
 		}
 	}
 	p.autoHealthyAt = time.Time{}
@@ -832,6 +904,72 @@ func (p *Playback) RefreshAccess() {
 	p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
 }
 
+func (p *Playback) OpenBranch() {
+	if !p.active || p.state.Loading || p.state.Switching || p.state.PreviewPending || p.state.LiveEnded {
+		return
+	}
+	branch := p.state.Resolution.Plan.Branch
+	if branch == nil || len(branch.Options) == 0 || branch.AutoAdvance {
+		return
+	}
+	p.branchTriggered = true
+	p.state.BranchPending = true
+	p.state.BranchDismissed = false
+	p.state.Playing = false
+	p.applyRate()
+	p.changed()
+}
+
+func (p *Playback) DismissBranch() {
+	if !p.state.BranchPending {
+		return
+	}
+	p.state.BranchPending = false
+	p.state.BranchDismissed = true
+	p.changed()
+}
+
+func (p *Playback) SelectBranch(optionID string) bool {
+	if !p.active || p.state.Loading || p.state.Switching {
+		return false
+	}
+	branch := p.state.Resolution.Plan.Branch
+	if branch == nil {
+		return false
+	}
+	var chosen *provider.PlaybackBranchOption
+	for i := range branch.Options {
+		if branch.Options[i].ID == optionID {
+			chosen = &branch.Options[i]
+			break
+		}
+	}
+	if chosen == nil {
+		return false
+	}
+	p.clearPreload()
+	p.clearStream()
+	if chosen.PartID != "" {
+		p.state.Target.PartID = chosen.PartID
+	}
+	p.branchID = chosen.ID
+	if chosen.State != "" {
+		p.branchState = chosen.State
+	}
+	p.branchTriggered = false
+	p.state.BranchPending = false
+	p.state.BranchDismissed = false
+	p.state.BranchHistory++
+	p.state.Position = 0
+	p.state.Duration = 0
+	p.state.Clock = player.Status{Buffering: true}
+	p.state.Playing = true
+	p.state.Limit = ""
+	p.loaded, p.didEnd, p.refreshed, p.liveEndChecked = false, false, false, false
+	p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
+	return true
+}
+
 func (p *Playback) Retry() {
 	if !p.active {
 		return
@@ -839,6 +977,15 @@ func (p *Playback) Retry() {
 	p.state.Playing = true
 	p.state.Limit = ""
 	p.state.LiveEnded = false
+	if p.didEnd && p.state.BranchHistory > 0 {
+		p.branchID, p.branchState, p.branchTriggered = "", "", false
+		p.state.BranchPending, p.state.BranchDismissed, p.state.BranchHistory = false, false, 0
+		p.state.Target.PartID = ""
+		p.state.Position = 0
+		p.loaded, p.didEnd, p.refreshed, p.liveEndChecked = false, false, false, false
+		p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
+		return
+	}
 	if !p.isLive() && p.didEnd && p.media != nil && p.state.Resolution.Plan.Access != provider.VideoAccessPreview {
 		p.Seek(0)
 		return
@@ -858,7 +1005,8 @@ func (p *Playback) Suspend() {
 }
 
 func (p *Playback) save() {
-	if !p.loaded || p.isLive() || p.state.PreviewPending || p.state.Target.Ref.ID == "" {
+	if !p.loaded || p.isLive() || p.state.PreviewPending || p.state.Target.Ref.ID == "" ||
+		p.state.Resolution.Plan.Branch != nil || p.state.BranchHistory > 0 {
 		return
 	}
 	target := p.state.Target

@@ -20,7 +20,8 @@ import (
 
 func (s *Session) ResolvePlayback(ctx context.Context, request provider.PlaybackRequest) (provider.Playback, error) {
 	var result provider.Playback
-	if !s.ownsPlayback(request.PlaybackTarget) || len(request.Quality) > 512 || len(request.Line) > 128 {
+	if !s.ownsPlayback(request.PlaybackTarget) || len(request.Quality) > 512 || len(request.Line) > 128 ||
+		len(request.BranchID) > 256 || len(request.BranchState) > 4096 {
 		return result, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
@@ -198,7 +199,39 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 			return false
 		}
 	}
+	if !ownPlaybackBranch(plan.Branch) {
+		return false
+	}
 	return s.ownVideoSections(&provider.VideoDetails{Segments: plan.Episodes}) == nil
+}
+
+func ownPlaybackBranch(branch *provider.PlaybackBranch) bool {
+	if branch == nil {
+		return true
+	}
+	branch.NodeTitle = strings.TrimSpace(branch.NodeTitle)
+	branch.Question = strings.TrimSpace(branch.Question)
+	if len(branch.NodeID) > 256 || len(branch.NodeTitle) > 256 || len(branch.Question) > 512 ||
+		len(branch.State) > 4096 || len(branch.Options) > 16 ||
+		branch.TriggerSeconds < 0 || math.IsInf(branch.TriggerSeconds, 0) || math.IsNaN(branch.TriggerSeconds) {
+		return false
+	}
+	seen := make(map[string]bool, len(branch.Options))
+	for i := range branch.Options {
+		opt := &branch.Options[i]
+		opt.Title = strings.TrimSpace(opt.Title)
+		opt.Subtitle = strings.TrimSpace(opt.Subtitle)
+		if opt.ID == "" || len(opt.ID) > 256 || seen[opt.ID] ||
+			len(opt.Title) > 256 || len(opt.Subtitle) > 256 ||
+			len(opt.PartID) > 512 || len(opt.State) > 4096 {
+			return false
+		}
+		if opt.Title == "" && !(branch.AutoAdvance && len(branch.Options) == 1) {
+			return false
+		}
+		seen[opt.ID] = true
+	}
+	return true
 }
 
 func validPlaybackLimit(limit provider.PlaybackLimit) bool {

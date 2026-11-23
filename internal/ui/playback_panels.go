@@ -650,7 +650,7 @@ func (p *PageContext) playbackDiscussion(c *ui.Context, drawer ui.Element) {
 }
 
 func playbackBlocking(state app.PlaybackState) bool {
-	return playbackHasAccessDialog(state) || state.Failure != "" || state.Clock.Ended || state.LiveEnded
+	return playbackHasAccessDialog(state) || playbackHasBranchOverlay(state) || state.Failure != "" || state.Clock.Ended || state.LiveEnded
 }
 
 func (p *PageContext) playbackLimitLabel(limit provider.PlaybackLimit) string {

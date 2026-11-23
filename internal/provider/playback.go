@@ -21,10 +21,12 @@ type PlaybackTarget struct {
 
 type PlaybackRequest struct {
 	PlaybackTarget
-	Quality string `json:"quality,omitempty"`
-	Line    string `json:"line,omitempty"`
-	HDR     bool   `json:"hdr,omitempty"`
-	HEVC    bool   `json:"hevc,omitempty"`
+	Quality     string `json:"quality,omitempty"`
+	Line        string `json:"line,omitempty"`
+	BranchID    string `json:"branchID,omitempty"`
+	BranchState string `json:"branchState,omitempty"`
+	HDR         bool   `json:"hdr,omitempty"`
+	HEVC        bool   `json:"hevc,omitempty"`
 }
 
 type PlaybackTransport interface {
@@ -69,6 +71,27 @@ type PlaybackPlan struct {
 	Subtitles             []PlaybackTrack     `json:"subtitles,omitempty"`
 	Episodes              []VideoSegment      `json:"episodes,omitempty"`
 	Thumbnails            *PlaybackThumbnails `json:"thumbnails,omitempty"`
+	Branch                *PlaybackBranch     `json:"branch,omitempty"`
+}
+
+type PlaybackBranch struct {
+	NodeID         string                 `json:"nodeID,omitempty"`
+	NodeTitle      string                 `json:"nodeTitle,omitempty"`
+	Question       string                 `json:"question,omitempty"`
+	TriggerSeconds float64                `json:"triggerSeconds,omitempty"`
+	PauseVideo     bool                   `json:"pauseVideo,omitempty"`
+	AutoAdvance    bool                   `json:"autoAdvance,omitempty"`
+	State          string                 `json:"state,omitempty"`
+	Options        []PlaybackBranchOption `json:"options,omitempty"`
+}
+
+type PlaybackBranchOption struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Subtitle string `json:"subtitle,omitempty"`
+	PartID   string `json:"partID,omitempty"`
+	State    string `json:"state,omitempty"`
+	Default  bool   `json:"default,omitempty"`
 }
 
 type PlaybackLimit string

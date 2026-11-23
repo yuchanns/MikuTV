@@ -109,6 +109,7 @@ type playbackLabels struct {
 	LiveChatTitle, LiveChatViewers, LiveChatSend, LiveChatMuted                                           string
 	LiveChatConnecting, LiveChatReconnecting, LiveChatDisconnected, LiveChatEmpty, LiveChatGuest          string
 	LiveChatSendFailed, LiveChatRateLimited                                                               string
+	Interactive, BranchQuestion, BranchButton                                                             string
 }
 
 type playbackAccessLabels struct {

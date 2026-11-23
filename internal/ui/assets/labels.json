@@ -104,7 +104,10 @@
     "LiveChatEmpty": "\u6682\u65f6\u8fd8\u6ca1\u6709\u804a\u5929\u6d88\u606f",
     "LiveChatGuest": "\u89c2\u4f17",
     "LiveChatSendFailed": "\u53d1\u9001\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002",
-    "LiveChatRateLimited": "\u53d1\u9001\u592a\u9891\u7e41\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5\u3002"
+    "LiveChatRateLimited": "\u53d1\u9001\u592a\u9891\u7e41\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5\u3002",
+    "Interactive": "\u4e92\u52a8\u89c6\u9891",
+    "BranchQuestion": "\u63a5\u4e0b\u6765\uff0c\u505a\u51fa\u4f60\u7684\u9009\u62e9",
+    "BranchButton": "\u4e92\u52a8\u5206\u652f"
   },
   "Modal": {
     "CurrentPrefix": "\u5f53\u524d \u00b7 %s",

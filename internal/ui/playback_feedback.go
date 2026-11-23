@@ -87,7 +87,7 @@ func (s *playbackView) feedbackFor(c *ui.Context, state app.PlaybackState) playb
 	if !buffering {
 		s.bufferSince = time.Time{}
 	}
-	if s.content.overlay() || playbackHasAccessDialog(state) {
+	if s.content.overlay() || playbackHasAccessDialog(state) || playbackHasBranchOverlay(state) {
 		return playbackFeedbackNone
 	}
 	if state.LiveEnded {
@@ -97,6 +97,9 @@ func (s *playbackView) feedbackFor(c *ui.Context, state app.PlaybackState) playb
 		return playbackFeedbackFailed
 	}
 	if state.Clock.Ended {
+		if playbackAutoAdvancingBranch(state) || playbackHasBranchChoices(state) {
+			return playbackFeedbackNone
+		}
 		return playbackFeedbackEnded
 	}
 	if !buffering {
