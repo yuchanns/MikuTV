@@ -63,7 +63,7 @@ func TestPluginCatalogDisableEnableRemoveAndThemeLifecycleIsolation(t *testing.T
 		func(fn func()) { queue <- fn },
 		func() {},
 	)
-	cat.SetInstaller(pkgStore, "0.1.0", func(*plugin.Source, plugin.InstalledReceipt) error { return nil })
+	cat.SetInstaller(pkgStore, "0.1.0", func(plugin.InstalledPackage) error { return nil })
 
 	var disabledSources []string
 	var enabledSources []string

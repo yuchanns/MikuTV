@@ -56,6 +56,7 @@ type Options struct {
 	PrivateMessages  *app.PrivateMessages
 	DanmakuRules     *app.DanmakuRules
 	PlaybackSettings *app.PlaybackSettings
+	Appearance       *app.AppearanceSettings
 	PluginCatalog    *app.PluginCatalog
 	Pages            *Pages
 	Assets           *Assets
@@ -79,6 +80,7 @@ type View struct {
 	PrivateMessages  *app.PrivateMessages
 	DanmakuRules     *app.DanmakuRules
 	PlaybackSettings *app.PlaybackSettings
+	Appearance       *app.AppearanceSettings
 	PluginCatalog    *app.PluginCatalog
 	Playback         *app.Playback
 	Pages           *Pages
@@ -129,6 +131,7 @@ type View struct {
 	favorites        favoritesUI
 	playbackUI       playbackSettingsUI
 	danmakuUI        danmakuSettingsUI
+	appearanceUI     appearanceSettingsUI
 	privacyUI        privacySettingsUI
 	pluginsUI        pluginsSettingsUI
 	settingsFeedback videoDetailFeedback
@@ -150,7 +153,7 @@ func NewView(options Options) *View {
 		playbackSettings = app.NewPlaybackSettings(options.Preferences, nil)
 	}
 	v := &View{
-		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, PluginCatalog: options.PluginCatalog,
+		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, Appearance: options.Appearance, PluginCatalog: options.PluginCatalog,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Version: options.Version, About: options.About.Normalized(options.Version), TopShelf: options.TopShelf, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}
@@ -326,6 +329,9 @@ func (v *View) renderScreen(c *ui.Context, page *PageContext) {
 	if rootReg.Transition != nil {
 		transition = *rootReg.Transition
 		screen.Absolute().Left(0).Top(0).ZIndex(1).Background(paint(v.Theme.Colors.Surface.Canvas))
+	}
+	if v.reduceMotionEnabled(c) {
+		transition = ui.ElementTransition{}
 	}
 	curReg := v.Pages.components[page.Location.Route]
 	screen.Transition(transition).Children(func() {

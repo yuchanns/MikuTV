@@ -39,6 +39,7 @@ type labels struct {
 	Playback                                                              playbackLabels
 	PlaybackPrefs                                                         playbackSettingsLabels
 	Danmaku                                                               danmakuSettingsLabels
+	Appearance                                                            appearanceSettingsLabels
 	Privacy                                                               privacySettingsLabels
 	About                                                                 aboutLabels
 	Plugins                                                               pluginLabels
@@ -50,6 +51,7 @@ type pluginLabels struct {
 	InstalledTitle, InstalledNote                   string
 	DiscoverButton, AddRepoButton, CheckUpdates     string
 	BackInstalled, BackManage, BackDiscover         string
+	BackThemePicker                                 string
 	DiscoverTitle, DiscoverNote                     string
 	OfflineCachedNote, RateLimitedCachedNote        string
 	SearchPlaceholder                               string
@@ -57,6 +59,7 @@ type pluginLabels struct {
 	KindSource, KindTheme, KindUnknown              string
 	BuiltinTag, BuiltinRepo, BuiltinUpdateNote      string
 	StatusCurrentEntry, StatusEnabled, StatusOff    string
+	StatusCurrentTheme, StatusInstalled             string
 	StatusUninstalled, StatusNeedAppUpdate          string
 	StatusThemeUnavailable, StatusIncompatible      string
 	EnableLabel, EnableCurrentNote, EnableReadyNote string
@@ -105,6 +108,25 @@ type pluginLabels struct {
 	RemoveConfirmAction                             string
 	EnabledToast, DisabledToast, RemovedToast       string
 	ToggleFailedToast, RemoveFailedToast            string
+	ThemeEnableActiveNote, ThemeEnableReadyNote     string
+	ThemeInstallNote, ThemeInstallConfirmBody       string
+	ThemeInstallSuccessBody, ThemeOpenAppearance    string
+	ThemeUpdateConfirmBody, ThemeRemoveNote         string
+	ThemeRemoveActiveBody, ThemeRemoveInactiveBody  string
+	ThemeDisableActiveBody                          string
+}
+
+type appearanceSettingsLabels struct {
+	Title, Intro                                    string
+	ThemeLabel, ThemeNote                           string
+	HoverPreviewLabel, HoverPreviewNote             string
+	ReduceMotionLabel, ReduceMotionNote             string
+	PickerTitle, PickerSubtitle                     string
+	BuiltinThemeNote, InstalledThemeNote            string
+	BuiltinOnlyHint, DiscoverMoreThemes             string
+	ErrorTitle, ErrorBody                           string
+	ErrorReselect, ErrorReturn                      string
+	ThemeAppliedToast                               string
 }
 
 type topShelfLabels struct {

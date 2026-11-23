@@ -33,6 +33,8 @@ const (
 	PlaybackSettingPicker Page = "playbackSettingPicker"
 	DanmakuSettingPicker  Page = "danmakuSettingPicker"
 	DanmakuRuleEditor     Page = "danmakuRuleEditor"
+	ThemePicker           Page = "themePicker"
+	ThemeError            Page = "themeError"
 	PrivacyConfirm        Page = "privacyConfirm"
 	PrivacyDetails        Page = "privacyDetails"
 	PluginRepoInput       Page = "pluginRepoInput"

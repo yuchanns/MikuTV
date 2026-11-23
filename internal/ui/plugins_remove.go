@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/plugin"
 )
 
 const (
@@ -38,13 +39,17 @@ func (v *View) enablePlugin(item app.InstalledPlugin) {
 		v.showSettingsFeedback(l.ToggleFailedToast)
 		return
 	}
+	if item.Kind == plugin.ThemeKind {
+		v.showSettingsFeedback(fmt.Sprintf(v.Assets.Text.Appearance.ThemeAppliedToast, item.Name))
+		return
+	}
 	v.showSettingsFeedback(fmt.Sprintf(l.EnabledToast, item.Name))
 }
 
 func (v *View) confirmDisablePlugin() {
 	l := v.Assets.Text.Plugins
 	item := v.pluginsUI.pendingAction
-	wasCurrent := v.State != nil && strings.EqualFold(v.State.CurrentEntry, item.ID)
+	wasCurrent := item.Kind == plugin.SourceKind && v.State != nil && strings.EqualFold(v.State.CurrentEntry, item.ID)
 	v.State.Back()
 	if v.PluginCatalog == nil {
 		v.showSettingsFeedback(l.ToggleFailedToast)
@@ -67,7 +72,7 @@ func (v *View) confirmDisablePlugin() {
 func (v *View) confirmRemovePlugin() {
 	l := v.Assets.Text.Plugins
 	item := v.pluginsUI.pendingAction
-	wasCurrent := v.State != nil && strings.EqualFold(v.State.CurrentEntry, item.ID)
+	wasCurrent := item.Kind == plugin.SourceKind && v.State != nil && strings.EqualFold(v.State.CurrentEntry, item.ID)
 	v.State.Back()
 	if v.PluginCatalog == nil {
 		v.showSettingsFeedback(l.RemoveFailedToast)
@@ -107,12 +112,16 @@ func (pluginDisableDialogPage) Render(c *ui.Context, p *PageContext) {
 		ctxLine += " \u00b7 " + item.Version
 	}
 	body := l.DisableDialogBody
-	if p.State != nil && strings.EqualFold(p.State.CurrentEntry, item.ID) {
+	icon := "plug"
+	if item.Kind == plugin.ThemeKind {
+		body = l.ThemeDisableActiveBody
+		icon = "palette"
+	} else if p.State != nil && strings.EqualFold(p.State.CurrentEntry, item.ID) {
 		body += "\n" + l.DisableCurrentNote
 	}
 
 	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
-		p.framelessHeader(c, "PLUGINS \u00b7 DISABLE", "plug", l.DisableDialogTitle, ctxLine)
+		p.framelessHeader(c, "PLUGINS \u00b7 DISABLE", icon, l.DisableDialogTitle, ctxLine)
 		ui.Text(c, body).FillWidth().Margin(22, 0, 0, 0).
 			FontSize(20).LineHeight(1.75).TextColor(paint(colors.Text.Secondary))
 		ui.Row(c.Key("plugin-disable-actions")).Margin(36, 0, 0, 0).Gap(16).Children(func() {
@@ -140,7 +149,13 @@ func (pluginRemoveDialogPage) Render(c *ui.Context, p *PageContext) {
 		ctxLine += " \u00b7 " + item.Version
 	}
 	body := l.RemoveDialogBody
-	if p.State != nil && strings.EqualFold(p.State.CurrentEntry, item.ID) {
+	if item.Kind == plugin.ThemeKind {
+		if item.Enabled {
+			body = l.ThemeRemoveActiveBody
+		} else {
+			body = l.ThemeRemoveInactiveBody
+		}
+	} else if p.State != nil && strings.EqualFold(p.State.CurrentEntry, item.ID) {
 		body += "\n" + l.DisableCurrentNote
 	}
 

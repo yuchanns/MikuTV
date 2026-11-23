@@ -60,6 +60,12 @@ func (v *View) renderModal(c *ui.Context, page *PageContext, _ bool) {
 
 	ui.Overlay(c, func() {
 		shadeKey := struct{ Shade app.Route }{page.Location.Route}
+		fTrans := framelessTransition
+		dTrans := drawerTransition
+		if v.reduceMotionEnabled(c) {
+			fTrans = ui.ElementTransition{}
+			dTrans = ui.ElementTransition{}
+		}
 		if style == modalFrameless {
 			contentW := reg.ModalWidth
 			if contentW == 0 {
@@ -67,7 +73,7 @@ func (v *View) renderModal(c *ui.Context, page *PageContext, _ bool) {
 			}
 			contentW = min(contentW, page.Width-240)
 			ui.Box(c.Key(shadeKey)).Absolute().Left(0).Top(0).Size(page.Width, page.Height).
-				Background(d.framelessScrim).Transition(framelessTransition)
+				Background(d.framelessScrim).Transition(fTrans)
 			ui.Box(c).Absolute().Left(0).Top(0).Size(page.Width, page.Height).LinearGradient(ui.LinearGradient{
 				Angle: 155,
 				Stops: []ui.GradientStop{
@@ -76,7 +82,7 @@ func (v *View) renderModal(c *ui.Context, page *PageContext, _ bool) {
 				},
 			})
 			ui.Column(c.Key(page.Location.Route)).Absolute().Left(0).Top(0).Size(page.Width, page.Height).
-				Center().Modal().Transition(framelessTransition).Padding(80, 120).Children(func() {
+				Center().Modal().Transition(fTrans).Padding(80, 120).Children(func() {
 				ui.Column(c).Width(contentW).Children(func() {
 					reg.Component.Render(c, page)
 				})
@@ -101,10 +107,10 @@ func (v *View) renderModal(c *ui.Context, page *PageContext, _ bool) {
 					{Color: d.drawerScrimMid, At: 0.54},
 					{Color: d.drawerScrimRight, At: 1},
 				},
-			}).Transition(drawerTransition)
+			}).Transition(dTrans)
 
 		panel := ui.Box(c.Key(page.Location.Route)).Absolute().Right(0).Top(0).
-			Size(drawerW, page.Height).Modal().Transition(drawerTransition).
+			Size(drawerW, page.Height).Modal().Transition(dTrans).
 			Gradient(d.drawerStart, d.drawerEnd, 180).
 			Shadow(-36, 0, 90, 0, paint(colors.Overlay.Shadow))
 		panel.Children(func() {

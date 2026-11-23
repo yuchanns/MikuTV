@@ -67,13 +67,13 @@ func TestPackageStoreStageInstallReloadConflictCancelAndCleanup(t *testing.T) {
 	// 1. Digest mismatch cleans up staging dir!
 	badDigestItem := item
 	badDigestItem.Release.SHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
-	if _, _, err := store.StageAndInstall(context.Background(), validZip, badDigestItem, "0.1.0", nil); !errors.Is(err, ErrDigestMismatch) {
+	if _, err := store.StageAndInstall(context.Background(), validZip, badDigestItem, "0.1.0", nil); !errors.Is(err, ErrDigestMismatch) {
 		t.Fatalf("expected ErrDigestMismatch, got %v", err)
 	}
 	assertStagingEmpty(t, root)
 
 	// 2. Same-ID conflict against bundled plugin (bound repo "") is rejected!
-	if _, _, err := store.StageAndInstall(context.Background(), validZip, item, "0.1.0", map[string]string{"demo-media": ""}); !errors.Is(err, ErrSourceConflict) {
+	if _, err := store.StageAndInstall(context.Background(), validZip, item, "0.1.0", map[string]string{"demo-media": ""}); !errors.Is(err, ErrSourceConflict) {
 		t.Fatalf("expected ErrSourceConflict against bundled id, got %v", err)
 	}
 	assertStagingEmpty(t, root)
@@ -81,33 +81,55 @@ func TestPackageStoreStageInstallReloadConflictCancelAndCleanup(t *testing.T) {
 	// 3. Canceled context cleans up staging!
 	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := store.StageAndInstall(canceledCtx, validZip, item, "0.1.0", nil); !errors.Is(err, context.Canceled) {
+	if _, err := store.StageAndInstall(canceledCtx, validZip, item, "0.1.0", nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 	assertStagingEmpty(t, root)
 
-	// 4. Unsupported kind (theme before F45) is rejected cleanly!
-	themeZip := buildTestPluginZip(t, map[string]string{
+	// 4. Invalid theme JSON is rejected cleanly, valid theme installs with Enabled=false (not auto-applied)!
+	badThemeZip := buildTestPluginZip(t, map[string]string{
 		"plugin.json": `{
 			"id": "ocean", "name": "Ocean", "kind": "theme", "version": "1.0.0",
 			"apiVersion": 1, "minAppVersion": "0.1.0", "theme": "theme.json"
 		}`,
+		"theme.json": `{"schemaVersion":1,"base":"mikutv-dark","appearance":"dark","colors":{}}`,
 	})
-	themeItem := CatalogItem{
+	badThemeItem := CatalogItem{
 		Repository: "demo/ocean-theme",
-		Release:    ReleaseAsset{ReleaseID: 11, TagName: "v1.0.0", AssetID: 21, SHA256: fmt.Sprintf("%x", sha256.Sum256(themeZip))},
+		Release:    ReleaseAsset{ReleaseID: 11, TagName: "v1.0.0", AssetID: 21, SHA256: fmt.Sprintf("%x", sha256.Sum256(badThemeZip))},
 		Manifest:   Manifest{ID: "ocean", Name: "Ocean", Kind: ThemeKind, Version: "1.0.0"},
 	}
-	if _, _, err := store.StageAndInstall(context.Background(), themeZip, themeItem, "0.1.0", nil); !errors.Is(err, ErrIncompatible) {
-		t.Fatalf("expected ErrIncompatible for theme install, got %v", err)
+	if _, err := store.StageAndInstall(context.Background(), badThemeZip, badThemeItem, "0.1.0", nil); !errors.Is(err, ErrIncompatible) {
+		t.Fatalf("expected ErrIncompatible for invalid theme install, got %v", err)
 	}
 	assertStagingEmpty(t, root)
 
+	validThemeZip := buildTestPluginZip(t, map[string]string{
+		"plugin.json": `{
+			"id": "ocean", "name": "Ocean", "kind": "theme", "version": "1.0.0",
+			"apiVersion": 1, "minAppVersion": "0.1.0", "theme": "theme.json"
+		}`,
+		"theme.json": `{"schemaVersion":1,"base":"mikutv-dark","appearance":"dark","colors":{"accent":{"primary":"#60BFEC","soft":"#B2E5FF","strong":"#4AA4D2","foreground":"#072537"}}}`,
+	})
+	validThemeItem := CatalogItem{
+		Repository: "demo/ocean-theme",
+		Release:    ReleaseAsset{ReleaseID: 12, TagName: "v1.0.0", AssetID: 22, SHA256: fmt.Sprintf("%x", sha256.Sum256(validThemeZip))},
+		Manifest:   Manifest{ID: "ocean", Name: "Ocean", Kind: ThemeKind, Version: "1.0.0"},
+	}
+	themePkg, err := store.StageAndInstall(context.Background(), validThemeZip, validThemeItem, "0.1.0", nil)
+	if err != nil || themePkg.Theme == nil || themePkg.Receipt.Enabled {
+		t.Fatalf("expected valid theme installed without auto-enable, got pkg=%+v err=%v", themePkg, err)
+	}
+	if _, err := store.Remove("ocean"); err != nil {
+		t.Fatalf("remove test theme: %v", err)
+	}
+
 	// 5. Valid source installs atomically, persists receipt & zip, and reloads cleanly!
-	src, receipt, err := store.StageAndInstall(context.Background(), validZip, item, "0.1.0", nil)
+	pkg, err := store.StageAndInstall(context.Background(), validZip, item, "0.1.0", nil)
 	if err != nil {
 		t.Fatalf("StageAndInstall valid source: %v", err)
 	}
+	src, receipt := pkg.Source, pkg.Receipt
 	if src.Manifest().ID != "demo-media" || receipt.SHA256 != digestHex || receipt.ReleaseID != 10 || receipt.AssetID != 20 {
 		t.Fatalf("unexpected receipt/source: %+v", receipt)
 	}
@@ -116,7 +138,7 @@ func TestPackageStoreStageInstallReloadConflictCancelAndCleanup(t *testing.T) {
 	// 6. Same-ID conflict against a DIFFERENT repository is rejected!
 	otherRepoItem := item
 	otherRepoItem.Repository = "attacker/media-fork"
-	if _, _, err := store.StageAndInstall(context.Background(), validZip, otherRepoItem, "0.1.0", nil); !errors.Is(err, ErrSourceConflict) {
+	if _, err := store.StageAndInstall(context.Background(), validZip, otherRepoItem, "0.1.0", nil); !errors.Is(err, ErrSourceConflict) {
 		t.Fatalf("expected ErrSourceConflict from different repository, got %v", err)
 	}
 
@@ -180,10 +202,11 @@ func TestPackageStoreStageUpdatePreservesOriginalOnFailureAndBlocksKindChange(t 
 		Release:    ReleaseAsset{ReleaseID: 1, TagName: "v1.0.0", AssetID: 11, AssetName: "plugin.zip", SHA256: v1SHA},
 		Manifest:   Manifest{ID: "demo-video", Name: "Demo Video", Kind: SourceKind, Version: "1.0.0", APIVersion: 1, MinAppVersion: "0.1.0"},
 	}
-	_, receiptV1, err := store.StageAndInstall(context.Background(), v1Zip, v1Item, "0.1.0", nil)
+	pkgV1, err := store.StageAndInstall(context.Background(), v1Zip, v1Item, "0.1.0", nil)
 	if err != nil {
 		t.Fatalf("install v1: %v", err)
 	}
+	receiptV1 := pkgV1.Receipt
 
 	verifyOriginalIntact := func() {
 		t.Helper()
@@ -212,7 +235,7 @@ func TestPackageStoreStageUpdatePreservesOriginalOnFailureAndBlocksKindChange(t 
 		Release:    ReleaseAsset{ReleaseID: 2, TagName: "v1.1.0", AssetID: 12, AssetName: "plugin.zip", SHA256: fmt.Sprintf("%x", sha256.Sum256(kindChangeZip))},
 		Manifest:   Manifest{ID: "demo-video", Name: "Demo Video Theme", Kind: ThemeKind, Version: "1.1.0"},
 	}
-	if _, _, err := store.StageAndUpdate(context.Background(), kindChangeZip, receiptV1, kindChangeItem, "0.1.0"); !errors.Is(err, ErrKindChanged) {
+	if _, err := store.StageAndUpdate(context.Background(), kindChangeZip, receiptV1, kindChangeItem, "0.1.0"); !errors.Is(err, ErrKindChanged) {
 		t.Fatalf("expected ErrKindChanged, got %v", err)
 	}
 	verifyOriginalIntact()
@@ -242,7 +265,7 @@ func TestPackageStoreStageUpdatePreservesOriginalOnFailureAndBlocksKindChange(t 
 	}
 	badDigest := v2Item
 	badDigest.Release.SHA256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-	if _, _, err := store.StageAndUpdate(context.Background(), v2Zip, receiptV1, badDigest, "0.1.0"); !errors.Is(err, ErrDigestMismatch) {
+	if _, err := store.StageAndUpdate(context.Background(), v2Zip, receiptV1, badDigest, "0.1.0"); !errors.Is(err, ErrDigestMismatch) {
 		t.Fatalf("expected ErrDigestMismatch, got %v", err)
 	}
 	verifyOriginalIntact()
@@ -250,16 +273,17 @@ func TestPackageStoreStageUpdatePreservesOriginalOnFailureAndBlocksKindChange(t 
 	// 3. Repository hijack preserves v1!
 	badRepo := v2Item
 	badRepo.Repository = "other/video-fork"
-	if _, _, err := store.StageAndUpdate(context.Background(), v2Zip, receiptV1, badRepo, "0.1.0"); !errors.Is(err, ErrSourceConflict) {
+	if _, err := store.StageAndUpdate(context.Background(), v2Zip, receiptV1, badRepo, "0.1.0"); !errors.Is(err, ErrSourceConflict) {
 		t.Fatalf("expected ErrSourceConflict, got %v", err)
 	}
 	verifyOriginalIntact()
 
 	// 4. Valid update replaces atomically, preserves InstalledAt/Enabled, records UpdatedAt and new SHA256!
-	srcV2, receiptV2, err := store.StageAndUpdate(context.Background(), v2Zip, receiptV1, v2Item, "0.1.0")
+	pkgV2, err := store.StageAndUpdate(context.Background(), v2Zip, receiptV1, v2Item, "0.1.0")
 	if err != nil {
 		t.Fatalf("StageAndUpdate valid v2: %v", err)
 	}
+	srcV2, receiptV2 := pkgV2.Source, pkgV2.Receipt
 	if srcV2.Manifest().Version != "1.1.0" || receiptV2.SHA256 != v2SHA || receiptV2.ReleaseID != 3 || receiptV2.AssetID != 13 {
 		t.Fatalf("unexpected v2 receipt: %+v", receiptV2)
 	}
@@ -318,10 +342,10 @@ func TestPackageStoreDisableBundledExternalAndRemove(t *testing.T) {
 		Release:    ReleaseAsset{ReleaseID: 2, TagName: "v1.0.0", AssetID: 20, SHA256: fmt.Sprintf("%x", sha256.Sum256(zipB))},
 		Manifest:   Manifest{ID: "src-b", Name: "Source B", Kind: SourceKind, Version: "1.0.0"},
 	}
-	if _, _, err := store.StageAndInstall(context.Background(), zipA, itemA, "0.1.0", nil); err != nil {
+	if _, err := store.StageAndInstall(context.Background(), zipA, itemA, "0.1.0", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.StageAndInstall(context.Background(), zipB, itemB, "0.1.0", nil); err != nil {
+	if _, err := store.StageAndInstall(context.Background(), zipB, itemB, "0.1.0", nil); err != nil {
 		t.Fatal(err)
 	}
 

@@ -96,7 +96,7 @@ func TestPluginCatalogUpdateCheckPermissionsKindGuardRollbackAndDispatch(t *test
 		func(fn func()) { queue <- fn },
 		func() {},
 	)
-	cat.SetInstaller(pkgStore, "0.1.0", func(*plugin.Source, plugin.InstalledReceipt) error { return nil })
+	cat.SetInstaller(pkgStore, "0.1.0", func(plugin.InstalledPackage) error { return nil })
 	var beforeStoppedID string
 	var appliedVersion string
 	var themeHookCalled bool
@@ -106,7 +106,7 @@ func TestPluginCatalogUpdateCheckPermissionsKindGuardRollbackAndDispatch(t *test
 			appliedVersion = src.Manifest().Version + "@" + receipt.SHA256
 			return nil
 		},
-		ApplyThemeUpdate: func(plugin.InstalledReceipt, []byte) error {
+		ApplyThemeUpdate: func(*plugin.ThemePackage, plugin.InstalledReceipt) error {
 			themeHookCalled = true
 			return nil
 		},
@@ -218,11 +218,11 @@ func TestPluginCatalogUpdateCheckPermissionsKindGuardRollbackAndDispatch(t *test
 		PluginUpdateHooks{
 			BeforeSourceUpdate: func(string) { sourceStopCalled = true },
 			ApplySourceUpdate:  func(*plugin.Source, plugin.InstalledReceipt) error { sourceApplyCalled = true; return nil },
-			ApplyThemeUpdate:   func(r plugin.InstalledReceipt, _ []byte) error { themeAppliedID = r.ID; return nil },
+			ApplyThemeUpdate:   func(_ *plugin.ThemePackage, r plugin.InstalledReceipt) error { themeAppliedID = r.ID; return nil },
 		},
-		plugin.InstalledReceipt{ID: "tokyonight", Kind: plugin.ThemeKind, Version: "1.2.0"},
-		nil,
-		[]byte("theme-zip"),
+		plugin.InstalledPackage{
+			Receipt: plugin.InstalledReceipt{ID: "tokyonight", Kind: plugin.ThemeKind, Version: "1.2.0"},
+		},
 	)
 	if err != nil || sourceStopCalled || sourceApplyCalled || themeAppliedID != "tokyonight" {
 		t.Fatalf("theme update wrongly entered source stop/apply path: err=%v stop=%v apply=%v theme=%q",

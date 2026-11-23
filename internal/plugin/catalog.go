@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/yuchanns/MikuTV/internal/provider"
+	"github.com/yuchanns/MikuTV/internal/theme"
 	"golang.org/x/mod/semver"
 )
 
@@ -136,6 +137,7 @@ type Inspection struct {
 	Manifest           Manifest
 	NetworkPermissions []string
 	Capabilities       provider.Capabilities
+	Swatches           [6]theme.Color
 	Compatibility      Compatibility
 	Digest             [sha256.Size]byte
 }
@@ -160,9 +162,10 @@ type CatalogItem struct {
 	Stars           int           `json:"stars,omitempty"`
 	UpdatedAt       string        `json:"updatedAt,omitempty"`
 	Release         ReleaseAsset  `json:"release"`
-	Manifest        Manifest      `json:"manifest"`
-	Permissions     []string      `json:"permissions,omitempty"`
-	Compatibility   Compatibility `json:"compatibility"`
+	Manifest        Manifest        `json:"manifest"`
+	Permissions     []string        `json:"permissions,omitempty"`
+	Swatches        [6]theme.Color  `json:"swatches,omitempty"`
+	Compatibility   Compatibility   `json:"compatibility"`
 }
 
 type CatalogPage struct {
@@ -250,10 +253,21 @@ func InspectPackage(data []byte, appVersion string) (Inspection, error) {
 		result.Compatibility = Compatibility{Compatible: true, Code: CompatibleOK}
 		return result, nil
 	case ThemeKind:
-		result.Compatibility = Compatibility{
-			Compatible: false,
-			Code:       IncompatibleThemeUnavailable,
+		pkg, err := OpenTheme(data, appVersion)
+		if err != nil {
+			code := IncompatibleManifest
+			if errors.Is(err, ErrIncompatible) || errors.Is(err, theme.ErrUnsupportedSchema) {
+				code = IncompatibleProtocol
+			}
+			result.Compatibility = Compatibility{
+				Compatible: false,
+				Code:       code,
+				Detail:     err.Error(),
+			}
+			return result, nil
 		}
+		result.Swatches = pkg.Theme().Swatches()
+		result.Compatibility = Compatibility{Compatible: true, Code: CompatibleOK}
 		return result, nil
 	default:
 		result.Compatibility = Compatibility{
@@ -563,6 +577,11 @@ func (c *CatalogClient) inspectRepository(ctx context.Context, repo githubRepoEn
 			cached.RepoDescription = strings.TrimSpace(repo.Description)
 			cached.Stars = repo.Stars
 			cached.UpdatedAt = repo.UpdatedAt
+			cached.Release.TagName = asset.TagName
+			cached.Release.PublishedAt = asset.PublishedAt
+			cached.Release.AssetName = asset.AssetName
+			cached.Release.DownloadURL = asset.DownloadURL
+			cached.Release.Size = asset.Size
 			return cached, true, nil
 		}
 	}
@@ -590,6 +609,7 @@ func (c *CatalogClient) inspectRepository(ctx context.Context, repo githubRepoEn
 		Release:         asset,
 		Manifest:        inspected.Manifest,
 		Permissions:     inspected.NetworkPermissions,
+		Swatches:        inspected.Swatches,
 		Compatibility:   inspected.Compatibility,
 	}
 	if cacheKey != "" {
@@ -712,6 +732,7 @@ func (c *CatalogClient) ResolveRepository(ctx context.Context, rawRepo string) (
 		Release:         asset,
 		Manifest:        inspected.Manifest,
 		Permissions:     inspected.NetworkPermissions,
+		Swatches:        inspected.Swatches,
 		Compatibility:   inspected.Compatibility,
 	}
 	if key := inspectCacheKey(item.Repository, asset.ReleaseID, asset.AssetID); key != "" {

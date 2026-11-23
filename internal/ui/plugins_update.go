@@ -217,7 +217,11 @@ func (pluginUpdateDialogPage) Render(c *ui.Context, p *PageContext) {
 			expanded := len(st.offer.AddedPermissions) > 0
 			domains := st.offer.Item.Permissions
 
-			if expanded && len(domains) > 0 {
+			if st.installed.Kind == plugin.ThemeKind {
+				expanded = false
+				ui.Text(c, l.ThemeUpdateConfirmBody).FillWidth().Margin(24, 0, 0, 0).
+					FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))
+			} else if expanded && len(domains) > 0 {
 				ui.Text(c, l.InstallPermissionsIntro).FillWidth().Margin(24, 0, 14, 0).
 					FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))
 				ui.Column(c).FillWidth().Gap(8).Children(func() {

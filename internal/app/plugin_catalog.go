@@ -11,6 +11,7 @@ import (
 
 	"github.com/yuchanns/MikuTV/internal/plugin"
 	"github.com/yuchanns/MikuTV/internal/provider"
+	"github.com/yuchanns/MikuTV/internal/theme"
 )
 
 var ErrPluginAlreadyInstalled = errors.New("plugin is already installed")
@@ -61,6 +62,7 @@ type InstalledPlugin struct {
 	License         string
 	SourceCommit    string
 	Permissions     []string
+	Swatches        [6]theme.Color
 	Capabilities    provider.Capabilities
 	AvailableUpdate *PluginUpdateOffer
 }
@@ -84,7 +86,7 @@ type PluginUpdateOutcome struct {
 type PluginUpdateHooks struct {
 	BeforeSourceUpdate func(pluginID string)
 	ApplySourceUpdate  func(src *plugin.Source, receipt plugin.InstalledReceipt) error
-	ApplyThemeUpdate   func(receipt plugin.InstalledReceipt, data []byte) error
+	ApplyThemeUpdate   func(pkg *plugin.ThemePackage, receipt plugin.InstalledReceipt) error
 }
 
 // PluginLifecycleHooks dispatches disable, enable, and uninstall callbacks by
@@ -94,6 +96,7 @@ type PluginLifecycleHooks struct {
 	DisableSource func(pluginID string)
 	EnableSource  func(pluginID string) error
 	RemoveSource  func(pluginID string, clearData bool)
+	EnableTheme   func(pluginID string) error
 	DisableTheme  func(pluginID string)
 	RemoveTheme   func(pluginID string)
 }
@@ -140,7 +143,7 @@ type PluginCatalog struct {
 	cache          PluginCatalogCache
 	pkgStore       *plugin.PackageStore
 	appVersion     string
-	onMounted      func(*plugin.Source, plugin.InstalledReceipt) error
+	onMounted      func(plugin.InstalledPackage) error
 	updateHooks    PluginUpdateHooks
 	lifecycleHooks PluginLifecycleHooks
 	post           func(func())
@@ -176,13 +179,26 @@ type PluginCatalog struct {
 func (c *PluginCatalog) SetInstaller(
 	store *plugin.PackageStore,
 	appVersion string,
-	onMounted func(*plugin.Source, plugin.InstalledReceipt) error,
+	onMounted func(plugin.InstalledPackage) error,
 ) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pkgStore = store
 	c.appVersion = appVersion
 	c.onMounted = onMounted
+}
+
+// SyncActiveTheme keeps all installed theme plugins' Enabled flag synchronized
+// with the single global active theme selection (§7.2).
+func (c *PluginCatalog) SyncActiveTheme(activeThemeID string) {
+	c.mu.Lock()
+	for i := range c.installed {
+		if c.installed[i].Kind == plugin.ThemeKind {
+			c.installed[i].Enabled = activeThemeID != "" && strings.EqualFold(c.installed[i].ID, activeThemeID)
+		}
+	}
+	c.mu.Unlock()
+	c.notify()
 }
 
 func (c *PluginCatalog) SetUpdateHooks(hooks PluginUpdateHooks) {
@@ -510,7 +526,7 @@ func (c *PluginCatalog) Close() {
 }
 
 func (c *PluginCatalog) CheckInstallable(item plugin.CatalogItem) error {
-	if !item.Compatibility.Compatible || item.Manifest.Kind != plugin.SourceKind {
+	if !item.Compatibility.Compatible || (item.Manifest.Kind != plugin.SourceKind && item.Manifest.Kind != plugin.ThemeKind) {
 		return plugin.ErrIncompatible
 	}
 	c.mu.Lock()
@@ -664,7 +680,7 @@ func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInsta
 			}, onDone)
 			return
 		}
-		src, receipt, err := store.StageAndInstall(ctx, data, item, appVersion, bound)
+		pkg, err := store.StageAndInstall(ctx, data, item, appVersion, bound)
 		if err != nil {
 			canceled := errors.Is(err, context.Canceled) || ctx.Err() != nil
 			retryable := !errors.Is(err, plugin.ErrIncompatible) &&
@@ -679,6 +695,7 @@ func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInsta
 			}, onDone)
 			return
 		}
+		receipt := pkg.Receipt
 		c.post(func() {
 			c.mu.Lock()
 			if c.installGen != gen {
@@ -689,7 +706,7 @@ func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInsta
 			c.mu.Unlock()
 
 			if onMounted != nil {
-				if err := onMounted(src, receipt); err != nil {
+				if err := onMounted(pkg); err != nil {
 					if onDone != nil {
 						onDone(PluginInstallOutcome{Err: err, Retryable: false})
 					}
@@ -700,23 +717,26 @@ func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInsta
 
 			c.mu.Lock()
 			installed := InstalledPlugin{
-				ID:           receipt.ID,
-				Name:         receipt.Name,
-				Description:  receipt.Description,
-				Kind:         receipt.Kind,
-				Version:      receipt.Version,
-				Repository:   receipt.Repository,
-				ReleaseID:    receipt.ReleaseID,
-				TagName:      receipt.TagName,
-				AssetID:      receipt.AssetID,
-				SHA256:       receipt.SHA256,
-				Bundled:      false,
-				Enabled:      receipt.Enabled,
-				InstalledAt:  receipt.InstalledAt,
-				UpdatedAt:    receipt.UpdatedAt,
-				License:      receipt.License,
-				Permissions:  append([]string(nil), receipt.Permissions...),
-				Capabilities: src.Capabilities(),
+				ID:          receipt.ID,
+				Name:        receipt.Name,
+				Description: receipt.Description,
+				Kind:        receipt.Kind,
+				Version:     receipt.Version,
+				Repository:  receipt.Repository,
+				ReleaseID:   receipt.ReleaseID,
+				TagName:     receipt.TagName,
+				AssetID:     receipt.AssetID,
+				SHA256:      receipt.SHA256,
+				Bundled:     false,
+				Enabled:     receipt.Enabled,
+				InstalledAt: receipt.InstalledAt,
+				UpdatedAt:   receipt.UpdatedAt,
+				License:     receipt.License,
+				Permissions: append([]string(nil), receipt.Permissions...),
+				Swatches:    receipt.Swatches,
+			}
+			if pkg.Source != nil {
+				installed.Capabilities = pkg.Source.Capabilities()
 			}
 			replaced := false
 			for i, existing := range c.installed {
@@ -1013,7 +1033,7 @@ func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone 
 			}, onDone)
 			return
 		}
-		src, receipt, err := store.StageAndUpdate(ctx, data, existingReceipt, offer.Item, appVersion)
+		pkg, err := store.StageAndUpdate(ctx, data, existingReceipt, offer.Item, appVersion)
 		if err != nil {
 			canceled := errors.Is(err, context.Canceled) || ctx.Err() != nil
 			retryable := !errors.Is(err, plugin.ErrKindChanged) &&
@@ -1029,6 +1049,7 @@ func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone 
 			}, onDone)
 			return
 		}
+		receipt := pkg.Receipt
 
 		c.post(func() {
 			c.mu.Lock()
@@ -1039,7 +1060,7 @@ func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone 
 			c.updateCancel = nil
 			c.mu.Unlock()
 
-			if err := dispatchPackageUpdate(hooks, receipt, src, data); err != nil {
+			if err := dispatchPackageUpdate(hooks, pkg); err != nil {
 				if onDone != nil {
 					onDone(PluginUpdateOutcome{Err: err, Retryable: false})
 				}
@@ -1062,15 +1083,16 @@ func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone 
 						AssetID:         receipt.AssetID,
 						SHA256:          receipt.SHA256,
 						Bundled:         false,
-						Enabled:         receipt.Enabled,
+						Enabled:         item.Enabled,
 						InstalledAt:     receipt.InstalledAt,
 						UpdatedAt:       receipt.UpdatedAt,
 						License:         receipt.License,
 						Permissions:     append([]string(nil), receipt.Permissions...),
+						Swatches:        receipt.Swatches,
 						AvailableUpdate: nil,
 					}
-					if src != nil {
-						updated.Capabilities = src.Capabilities()
+					if pkg.Source != nil {
+						updated.Capabilities = pkg.Source.Capabilities()
 					}
 					c.installed[i] = updated
 					break
@@ -1088,23 +1110,23 @@ func (c *PluginCatalog) Update(pluginID string, offer PluginUpdateOffer, onDone 
 
 // dispatchPackageUpdate routes committed package updates strictly by plugin kind
 // so theme updates never trigger content-source playback/session teardown.
-func dispatchPackageUpdate(hooks PluginUpdateHooks, receipt plugin.InstalledReceipt, src *plugin.Source, data []byte) error {
-	switch receipt.Kind {
+func dispatchPackageUpdate(hooks PluginUpdateHooks, pkg plugin.InstalledPackage) error {
+	switch pkg.Receipt.Kind {
 	case plugin.SourceKind:
 		if hooks.BeforeSourceUpdate != nil {
-			hooks.BeforeSourceUpdate(receipt.ID)
+			hooks.BeforeSourceUpdate(pkg.Receipt.ID)
 		}
 		if hooks.ApplySourceUpdate != nil {
-			return hooks.ApplySourceUpdate(src, receipt)
+			return hooks.ApplySourceUpdate(pkg.Source, pkg.Receipt)
 		}
 		return nil
 	case plugin.ThemeKind:
 		if hooks.ApplyThemeUpdate != nil {
-			return hooks.ApplyThemeUpdate(receipt, data)
+			return hooks.ApplyThemeUpdate(pkg.Theme, pkg.Receipt)
 		}
 		return nil
 	default:
-		return fmt.Errorf("%w: unsupported kind %q", plugin.ErrIncompatible, receipt.Kind)
+		return fmt.Errorf("%w: unsupported kind %q", plugin.ErrIncompatible, pkg.Receipt.Kind)
 	}
 }
 
@@ -1148,7 +1170,7 @@ func (c *PluginCatalog) SetEnabled(pluginID string, enabled bool) error {
 	hooks := c.lifecycleHooks
 	c.mu.Unlock()
 
-	if store != nil {
+	if store != nil && item.Kind != plugin.ThemeKind {
 		var err error
 		if item.Bundled {
 			err = store.SetBundledEnabled(item.ID, enabled)
@@ -1162,7 +1184,7 @@ func (c *PluginCatalog) SetEnabled(pluginID string, enabled bool) error {
 
 	if err := dispatchPluginToggle(hooks, item.Kind, item.ID, enabled); err != nil {
 		// Roll back persisted toggle state if re-enabling failed.
-		if store != nil {
+		if store != nil && item.Kind != plugin.ThemeKind {
 			if item.Bundled {
 				_ = store.SetBundledEnabled(item.ID, !enabled)
 			} else {
@@ -1173,10 +1195,18 @@ func (c *PluginCatalog) SetEnabled(pluginID string, enabled bool) error {
 	}
 
 	c.mu.Lock()
-	for i := range c.installed {
-		if strings.EqualFold(c.installed[i].ID, item.ID) {
-			c.installed[i].Enabled = enabled
-			break
+	if item.Kind == plugin.ThemeKind {
+		for i := range c.installed {
+			if c.installed[i].Kind == plugin.ThemeKind {
+				c.installed[i].Enabled = enabled && strings.EqualFold(c.installed[i].ID, item.ID)
+			}
+		}
+	} else {
+		for i := range c.installed {
+			if strings.EqualFold(c.installed[i].ID, item.ID) {
+				c.installed[i].Enabled = enabled
+				break
+			}
 		}
 	}
 	c.mu.Unlock()
@@ -1245,7 +1275,13 @@ func dispatchPluginToggle(hooks PluginLifecycleHooks, kind plugin.Kind, pluginID
 		}
 		return nil
 	case plugin.ThemeKind:
-		if !enabled && hooks.DisableTheme != nil {
+		if enabled {
+			if hooks.EnableTheme != nil {
+				return hooks.EnableTheme(pluginID)
+			}
+			return nil
+		}
+		if hooks.DisableTheme != nil {
 			hooks.DisableTheme(pluginID)
 		}
 		return nil

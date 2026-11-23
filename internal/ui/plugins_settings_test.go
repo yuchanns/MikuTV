@@ -407,7 +407,8 @@ func TestPluginsInstallWorkflowRepoConfirmFailRetrySuccessAndEntries(t *testing.
 	t.Cleanup(pluginCat.Close)
 
 	var view *View
-	pluginCat.SetInstaller(pkgStore, "0.1.0", func(src *plugin.Source, receipt plugin.InstalledReceipt) error {
+	pluginCat.SetInstaller(pkgStore, "0.1.0", func(pkg plugin.InstalledPackage) error {
+		src := pkg.Source
 		info := src.Manifest()
 		next := append(append([]app.Entry(nil), state.Entries()...), app.Entry{
 			ID: info.ID, SourceID: info.ID, Name: info.Name, Description: info.Description,
@@ -617,7 +618,8 @@ func TestPluginsUpdateWorkflowCheckExpandedPermissionsFailPreserveRetryAndHotRel
 	var view *View
 	var stoppedSourceID string
 	var appliedGen uint64
-	pluginCat.SetInstaller(pkgStore, "0.1.0", func(src *plugin.Source, receipt plugin.InstalledReceipt) error {
+	pluginCat.SetInstaller(pkgStore, "0.1.0", func(pkg plugin.InstalledPackage) error {
+		src := pkg.Source
 		info := src.Manifest()
 		next := append(append([]app.Entry(nil), state.Entries()...), app.Entry{
 			ID: info.ID, SourceID: info.ID, Name: info.Name, Description: info.Description,
@@ -820,7 +822,8 @@ func TestPluginsRemoveUninstallDisableEmptyEntriesAndReEnable(t *testing.T) {
 		}
 		state.UpdateEntries(next)
 	}
-	pluginCat.SetInstaller(pkgStore, "0.1.0", func(src *plugin.Source, receipt plugin.InstalledReceipt) error {
+	pluginCat.SetInstaller(pkgStore, "0.1.0", func(pkg plugin.InstalledPackage) error {
+		src := pkg.Source
 		info := src.Manifest()
 		e := app.Entry{ID: info.ID, SourceID: info.ID, Name: info.Name, Description: info.Description, Artwork: info.ID, Capabilities: src.Capabilities()}
 		entriesByID[e.ID] = e

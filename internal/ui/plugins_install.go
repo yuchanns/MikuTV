@@ -23,9 +23,10 @@ const (
 	pluginRepoEdit   app.FocusID = "plugins/repo/edit"
 	pluginRepoSubmit app.FocusID = "plugins/repo/submit"
 
-	pluginInstallConfirmBtn   app.FocusID = "plugins/install/confirm"
-	pluginInstallRetryBtn     app.FocusID = "plugins/install/retry"
-	pluginInstallOpenEntryBtn app.FocusID = "plugins/install/open-entry"
+	pluginInstallConfirmBtn        app.FocusID = "plugins/install/confirm"
+	pluginInstallRetryBtn          app.FocusID = "plugins/install/retry"
+	pluginInstallOpenEntryBtn      app.FocusID = "plugins/install/open-entry"
+	pluginInstallOpenAppearanceBtn app.FocusID = "plugins/install/open-appearance"
 
 	pluginRepoMaxLength = 120
 )
@@ -108,12 +109,21 @@ func (v *View) startPluginInstall() {
 		st.receipt = out.Receipt
 		st.failure = ""
 		st.retryable = false
+		if out.Receipt.Kind == plugin.ThemeKind && v.pluginsUI.returnToThemePicker {
+			v.State.Back()
+			v.returnToAppearanceThemePicker(out.Receipt.ID)
+			return
+		}
 		// Prepare the underlying settings page on Installed focused at the new plugin.
 		v.pluginsUI.view = pluginsViewInstalled
 		v.pluginsUI.selectedInstalledID = ""
 		v.pluginsUI.selectedCatalogRepo = ""
 		v.pluginsUI.returnFocus = pluginsInstalledFocus(out.Receipt.ID)
-		v.State.Focus, v.reveal = pluginInstallOpenEntryBtn, true
+		if out.Receipt.Kind == plugin.ThemeKind {
+			v.State.Focus, v.reveal = pluginInstallOpenAppearanceBtn, true
+		} else {
+			v.State.Focus, v.reveal = pluginInstallOpenEntryBtn, true
+		}
 	})
 }
 
@@ -334,26 +344,32 @@ func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 					body += " (" + st.item.Release.TagName + ")"
 				}
 			}
-			p.framelessHeader(c, "PLUGINS \u00b7 INSTALL", "plus", l.InstallConfirmTitle, body)
-			permIntro := l.InstallPermissionsIntro
-			if len(st.item.Permissions) == 0 {
-				permIntro = l.InstallNoPermissions
+			if st.item.Manifest.Kind == plugin.ThemeKind {
+				p.framelessHeader(c, "PLUGINS \u00b7 INSTALL", "palette", l.InstallConfirmTitle, body)
+				ui.Text(c, l.ThemeInstallConfirmBody).FillWidth().Margin(24, 0, 0, 0).
+					FontSize(20).LineHeight(1.7).TextColor(paint(colors.Text.Secondary))
+			} else {
+				p.framelessHeader(c, "PLUGINS \u00b7 INSTALL", "plus", l.InstallConfirmTitle, body)
+				permIntro := l.InstallPermissionsIntro
+				if len(st.item.Permissions) == 0 {
+					permIntro = l.InstallNoPermissions
+				}
+				ui.Text(c, permIntro).FillWidth().Margin(24, 0, 14, 0).
+					FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))
+				if len(st.item.Permissions) > 0 {
+					ui.Column(c).FillWidth().Gap(8).Children(func() {
+						limit := min(len(st.item.Permissions), 6)
+						for _, domain := range st.item.Permissions[:limit] {
+							ui.Row(c).FillWidth().MinHeight(54).Padding(12, 18).Radius(10).
+								Background(d.subtleFill).AlignItems(ui.Center).Justify(ui.SpaceBetween).Gap(16).Children(func() {
+								ui.Text(c, domain).Grow(1).MinWidth(0).SingleLine().FontSize(19).TextColor(paint(colors.Text.Primary))
+								ui.Icon(c, p.Assets.Icon("lock")).Size(20, 20).TextColor(paint(colors.Text.Secondary))
+							})
+						}
+					})
+				}
 			}
-			ui.Text(c, permIntro).FillWidth().Margin(24, 0, 14, 0).
-				FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))
-			if len(st.item.Permissions) > 0 {
-				ui.Column(c).FillWidth().Gap(8).Children(func() {
-					limit := min(len(st.item.Permissions), 6)
-					for _, domain := range st.item.Permissions[:limit] {
-						ui.Row(c).FillWidth().MinHeight(54).Padding(12, 18).Radius(10).
-							Background(d.subtleFill).AlignItems(ui.Center).Justify(ui.SpaceBetween).Gap(16).Children(func() {
-							ui.Text(c, domain).Grow(1).MinWidth(0).SingleLine().FontSize(19).TextColor(paint(colors.Text.Primary))
-							ui.Icon(c, p.Assets.Icon("lock")).Size(20, 20).TextColor(paint(colors.Text.Secondary))
-						})
-					}
-				})
-			}
-			ui.Row(c).Margin(36, 0, 0, 0).Gap(16).Children(func() {
+			ui.Row(c.Key("plugin-install-actions")).Margin(36, 0, 0, 0).Gap(16).Children(func() {
 				p.styledButton(c, l.InstallConfirmAction, "", pluginInstallConfirmBtn, "plugin-install-actions", func() {
 					v.startPluginInstall()
 				}, p.framelessButtonAppearance())
@@ -400,20 +416,32 @@ func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 			if name == "" {
 				name = st.item.Manifest.Name
 			}
+			isTheme := st.receipt.Kind == plugin.ThemeKind || st.item.Manifest.Kind == plugin.ThemeKind
 			body := name + "\n" + l.InstallSuccessBody
+			if isTheme {
+				body = name + "\n" + l.ThemeInstallSuccessBody
+			}
 			p.framelessHeader(c, "PLUGINS \u00b7 READY", "check", l.InstallSuccessTitle, body)
-			ui.Row(c).Margin(36, 0, 0, 0).Gap(16).Children(func() {
-				p.styledButton(c, l.InstallOpenEntries, "switch", pluginInstallOpenEntryBtn, "plugin-install-actions", func() {
-					newID := st.receipt.ID
-					p.State.Back()
-					if newID != "" {
-						p.State.Focus = pluginsInstalledFocus(newID)
-						p.State.OpenEntries(newID)
-					} else {
-						p.State.OpenEntries("")
-					}
-					v.reveal = true
-				}, p.framelessButtonAppearance())
+			ui.Row(c.Key("plugin-install-actions")).Margin(36, 0, 0, 0).Gap(16).Children(func() {
+				if isTheme {
+					p.styledButton(c, l.ThemeOpenAppearance, "palette", pluginInstallOpenAppearanceBtn, "plugin-install-actions", func() {
+						newID := st.receipt.ID
+						p.State.Back()
+						v.returnToAppearanceThemePicker(newID)
+					}, p.framelessButtonAppearance())
+				} else {
+					p.styledButton(c, l.InstallOpenEntries, "switch", pluginInstallOpenEntryBtn, "plugin-install-actions", func() {
+						newID := st.receipt.ID
+						p.State.Back()
+						if newID != "" {
+							p.State.Focus = pluginsInstalledFocus(newID)
+							p.State.OpenEntries(newID)
+						} else {
+							p.State.OpenEntries("")
+						}
+						v.reveal = true
+					}, p.framelessButtonAppearance())
+				}
 				p.styledButton(c, l.InstallDone, "", app.CloseModal, "plugin-install-actions", func() {
 					newID := st.receipt.ID
 					p.State.Back()

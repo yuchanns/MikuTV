@@ -22,7 +22,11 @@ func railWidth(state *app.State) float32 {
 func (navigationRail) Render(c *ui.Context, p *PageContext) {
 	expanded := p.State.Area == app.NavigationArea
 	rail := ui.Column(c.Key("rail"))
-	width := rail.AnimateTo("width", railWidth(p.State), ui.Animation{Duration: railDuration})
+	railAnim := ui.Animation{Duration: railDuration}
+	if p.host.reduceMotionEnabled(c) {
+		railAnim = ui.Animation{}
+	}
+	width := rail.AnimateTo("width", railWidth(p.State), railAnim)
 	p.host.railSpan = width
 	buttonWidth := width - 48
 	if p.active {

@@ -389,24 +389,30 @@ func (p *PageContext) selectCatalogFeature(c *ui.Context, current app.CatalogSna
 		home.rotateAt = time.Time{}
 		return
 	}
-	if position, ok := home.layout.byFocus[p.State.Focus]; ok {
-		selectGroup(home.layout.sections[position.section].group.Items, position.item)
+	if p.host.hoverPreviewEnabled() {
+		if position, ok := home.layout.byFocus[p.State.Focus]; ok {
+			selectGroup(home.layout.sections[position.section].group.Items, position.item)
+		} else if slot, ok := strings.CutPrefix(string(p.State.Focus), "home/feature/"); ok {
+			if index, err := strconv.Atoi(slot); err == nil && index >= 0 && index < len(home.featured) {
+				home.selected = index
+			}
+		} else {
+			for _, shelf := range shelves {
+				for idx, item := range shelf.items[:min(homeShelfLimit, len(shelf.items))] {
+					if p.State.Focus == catalogCardFocus(shelf.id, item.Ref) {
+						selectGroup(shelf.items, idx)
+					}
+				}
+			}
+		}
 	} else if slot, ok := strings.CutPrefix(string(p.State.Focus), "home/feature/"); ok {
 		if index, err := strconv.Atoi(slot); err == nil && index >= 0 && index < len(home.featured) {
 			home.selected = index
 		}
-	} else {
-		for _, shelf := range shelves {
-			for idx, item := range shelf.items[:min(homeShelfLimit, len(shelf.items))] {
-				if p.State.Focus == catalogCardFocus(shelf.id, item.Ref) {
-					selectGroup(shelf.items, idx)
-				}
-			}
-		}
 	}
 	now := c.Now()
 	if catalogSelectionPinned(p.State.Focus) || p.scroll().Y > 8 || len(home.featured) < 2 ||
-		current.Phase != app.CatalogReady || c.Preferences().ReduceMotion {
+		current.Phase != app.CatalogReady || p.host.reduceMotionEnabled(c) {
 		home.rotateAt = time.Time{}
 		return
 	}

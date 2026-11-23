@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
 	"github.com/yuchanns/MikuTV/internal/plugin"
+	"github.com/yuchanns/MikuTV/internal/theme"
 )
 
 type pluginsViewMode uint8
@@ -62,6 +63,7 @@ type pluginsSettingsUI struct {
 	listScroll           float32
 	pendingRestoreScroll bool
 	returnFocus          app.FocusID
+	returnToThemePicker  bool
 	repo                 pluginRepoDraft
 	install              pluginInstallState
 	update               pluginUpdateState
@@ -87,6 +89,10 @@ func (v *View) backFromPluginsSettings() bool {
 		return true
 	}
 	if s.view == pluginsViewDiscover {
+		if s.returnToThemePicker {
+			v.returnToAppearanceThemePicker("")
+			return true
+		}
 		s.view = pluginsViewInstalled
 		v.State.Focus, v.reveal = pluginsDiscoverBtn, true
 		return true
@@ -208,6 +214,7 @@ func (p *PageContext) renderPluginsInstalled(c *ui.Context) {
 			}
 			p.styledButton(c, l.DiscoverButton, "search", pluginsDiscoverBtn, "plugins-toolbar", func() {
 				v.pluginsUI.view = pluginsViewDiscover
+				v.pluginsUI.returnToThemePicker = false
 				v.pluginsUI.selectedInstalledID = ""
 				v.pluginsUI.selectedCatalogRepo = ""
 				if v.PluginCatalog != nil {
@@ -227,7 +234,12 @@ func (p *PageContext) renderPluginsInstalled(c *ui.Context) {
 		focusID := pluginsInstalledFocus(inst.ID)
 		note := p.installedPluginSubtitle(inst)
 		status := p.installedPluginStatus(inst)
-		p.pluginRow(c, focusID, "content", p.pluginKindIcon(inst.Kind), inst.Name, note, status, func() {
+		var swatches *[6]theme.Color
+		if inst.Kind == plugin.ThemeKind {
+			sw := inst.Swatches
+			swatches = &sw
+		}
+		p.pluginRowWithSwatches(c, focusID, "content", p.pluginKindIcon(inst.Kind), inst.Name, note, status, swatches, func() {
 			if v.activeScroll != nil {
 				v.pluginsUI.listScroll = v.activeScroll.Y
 			}
@@ -312,9 +324,17 @@ func (p *PageContext) renderPluginsDiscover(c *ui.Context) {
 	p.region("plugins-tabs", tabEdges)
 
 	// Breadcrumb row
+	backLabel := l.BackInstalled
+	if s.returnToThemePicker {
+		backLabel = l.BackThemePicker
+	}
 	ui.Row(c.Key("plugins-discover-top")).FillWidth().AlignItems(ui.Center).Justify(ui.SpaceBetween).Margin(0, 0, 22, 0).Children(func() {
-		p.pluginBackButton(c, l.BackInstalled, "plugins-top", func() {
+		p.pluginBackButton(c, backLabel, "plugins-top", func() {
 			s.editing = false
+			if s.returnToThemePicker {
+				v.returnToAppearanceThemePicker("")
+				return
+			}
 			s.view = pluginsViewInstalled
 			p.State.Focus, v.reveal = pluginsDiscoverBtn, true
 		})
@@ -409,7 +429,12 @@ func (p *PageContext) renderPluginsDiscover(c *ui.Context) {
 			focusID := pluginsCatalogFocus(item.Repository)
 			note := p.catalogPluginSubtitle(item)
 			status := p.catalogPluginStatus(item)
-			p.pluginRow(c, focusID, "content", p.pluginKindIcon(item.Manifest.Kind), item.Manifest.Name, note, status, func() {
+			var swatches *[6]theme.Color
+			if item.Manifest.Kind == plugin.ThemeKind {
+				sw := item.Swatches
+				swatches = &sw
+			}
+			p.pluginRowWithSwatches(c, focusID, "content", p.pluginKindIcon(item.Manifest.Kind), item.Manifest.Name, note, status, swatches, func() {
 				if v.activeScroll != nil {
 					s.listScroll = v.activeScroll.Y
 				}
@@ -591,14 +616,22 @@ func (p *PageContext) renderInstalledPluginDetail(c *ui.Context, item app.Instal
 	ui.Text(c, subtitle).FontSize(19).LineHeight(1.7).Margin(10, 0, 26, 0).TextColor(paint(colors.Text.Muted))
 	ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
 
+	toggleIcon := "plug"
 	toggleNote := l.EnableReadyNote
-	if !item.Enabled {
+	if item.Kind == plugin.ThemeKind {
+		toggleIcon = "palette"
+		if item.Enabled {
+			toggleNote = l.ThemeEnableActiveNote
+		} else {
+			toggleNote = l.ThemeEnableReadyNote
+		}
+	} else if !item.Enabled {
 		toggleNote = l.EnableDisabledNote
 	} else if p.State != nil && p.State.CurrentEntry == item.ID {
 		toggleNote = l.EnableCurrentNote
 	}
 	instItem := item
-	p.danmakuToggleRow(c, pluginsDetailToggle, "plug", l.EnableLabel, toggleNote, item.Enabled, func() {
+	p.danmakuToggleRow(c, pluginsDetailToggle, toggleIcon, l.EnableLabel, toggleNote, item.Enabled, func() {
 		if instItem.Enabled {
 			v.openPluginDisableDialog(instItem)
 		} else {
@@ -634,7 +667,11 @@ func (p *PageContext) renderInstalledPluginDetail(c *ui.Context, item app.Instal
 	p.pluginRow(c, pluginsDetailSource, "content", "repository", l.SourceLabel, "", repo, func() {})
 
 	if !item.Bundled {
-		p.pluginRow(c, pluginsDetailRemove, "content", "trash", l.RemoveLabel, l.RemoveNote, "", func() {
+		removeNote := l.RemoveNote
+		if item.Kind == plugin.ThemeKind {
+			removeNote = l.ThemeRemoveNote
+		}
+		p.pluginRow(c, pluginsDetailRemove, "content", "trash", l.RemoveLabel, removeNote, "", func() {
 			v.openPluginRemoveDialog(instItem)
 		})
 	}
@@ -692,7 +729,11 @@ func (p *PageContext) renderCatalogPluginDetail(c *ui.Context, item plugin.Catal
 	p.pluginRow(c, pluginsDetailCompat, "content", compatIcon, l.CompatLabel, p.compatibilityDetailNote(item.Compatibility), compatValue, func() {})
 
 	if item.Compatibility.Compatible {
-		p.pluginRow(c, pluginsDetailInstall, "content", "plus", l.InstallLabel, l.InstallNote, "", func() {
+		installNote := l.InstallNote
+		if item.Manifest.Kind == plugin.ThemeKind {
+			installNote = l.ThemeInstallNote
+		}
+		p.pluginRow(c, pluginsDetailInstall, "content", "plus", l.InstallLabel, installNote, "", func() {
 			v.openPluginInstallConfirm(item)
 		})
 	}
@@ -737,6 +778,10 @@ func (p *PageContext) pluginBackButton(c *ui.Context, label, region string, acti
 }
 
 func (p *PageContext) pluginRow(c *ui.Context, id app.FocusID, region, iconName, label, note, value string, action func()) {
+	p.pluginRowWithSwatches(c, id, region, iconName, label, note, value, nil, action)
+}
+
+func (p *PageContext) pluginRowWithSwatches(c *ui.Context, id app.FocusID, region, iconName, label, note, value string, swatches *[6]theme.Color, action func()) {
 	colors, d := p.Theme.Colors, p.uiColors()
 	fill, ink, noteColor, iconColor, valColor := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Muted), paint(colors.Text.Secondary), paint(colors.Text.Secondary)
 	if p.paintFocus() == id {
@@ -763,6 +808,9 @@ func (p *PageContext) pluginRow(c *ui.Context, id app.FocusID, region, iconName,
 					ui.Text(c, note).FontSize(16).LineHeight(1.6).TextColor(noteColor).SingleLine()
 				}
 			})
+			if swatches != nil {
+				p.renderThemeSwatches(c, *swatches, 76, 46, 8)
+			}
 			if value != "" {
 				ui.Text(c, value).FontSize(21).Shrink(0).TextColor(valColor)
 			}
@@ -860,6 +908,12 @@ func (p *PageContext) installedPluginSubtitle(item app.InstalledPlugin) string {
 
 func (p *PageContext) installedPluginStatus(item app.InstalledPlugin) string {
 	l := p.Assets.Text.Plugins
+	if item.Kind == plugin.ThemeKind {
+		if item.Enabled {
+			return l.StatusCurrentTheme
+		}
+		return l.StatusInstalled
+	}
 	if !item.Enabled {
 		return l.StatusOff
 	}

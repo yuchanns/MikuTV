@@ -87,14 +87,14 @@ func TestInspectPackageUsesReleaseManifestNotRepoNameAndChecksCompatibility(t *t
 			"minAppVersion": "0.1.0",
 			"theme": "theme.json"
 		}`,
-		"theme.json": `{"schemaVersion":1}`,
+		"theme.json": `{"schemaVersion":1,"base":"mikutv-dark","appearance":"dark","colors":{"accent":{"primary":"#60BFEC","soft":"#B2E5FF","strong":"#4AA4D2","foreground":"#072537"}}}`,
 	})
 	gotTheme, err := InspectPackage(themeZip, "0.1.0")
 	if err != nil {
 		t.Fatalf("InspectPackage theme: %v", err)
 	}
-	if gotTheme.Manifest.Kind != ThemeKind || gotTheme.Compatibility.Compatible || gotTheme.Compatibility.Code != IncompatibleThemeUnavailable {
-		t.Fatalf("expected theme kind unavailable until F45, got %+v", gotTheme)
+	if gotTheme.Manifest.Kind != ThemeKind || !gotTheme.Compatibility.Compatible || gotTheme.Compatibility.Code != CompatibleOK {
+		t.Fatalf("expected valid theme compatible in F45, got %+v", gotTheme)
 	}
 
 	badAuth := buildTestPluginZip(t, map[string]string{
@@ -240,12 +240,19 @@ func TestCatalogClientPaginationDedupETagRateLimitAndAuthoritativeKind(t *testin
 	}
 
 	// Page 2 reuses inspect cache for acme/video-source and fetches acme/media-hub.
+	// Also verify seeded inspect cache refreshes live DownloadURL while preserving SHA256.
+	seeded := p1.Items[0]
+	seeded.Release.DownloadURL = "http://stale.invalid/old.zip"
+	client.SeedInspectCache([]CatalogItem{seeded})
 	p2, err := client.FetchPage(context.Background(), 2, "")
 	if err != nil {
 		t.Fatalf("FetchPage 2: %v", err)
 	}
 	if p2.HasMore || len(p2.Items) != 2 {
 		t.Fatalf("unexpected page 2: hasMore=%v len=%d", p2.HasMore, len(p2.Items))
+	}
+	if p2.Items[0].Release.DownloadURL != srv.URL+"/assets/theme.zip" {
+		t.Fatalf("inspect cache returned stale DownloadURL: %q", p2.Items[0].Release.DownloadURL)
 	}
 	if zipDownloads.Load() != 2 {
 		t.Fatalf("expected exactly 2 zip downloads (cached acme/video-source reused), got %d", zipDownloads.Load())

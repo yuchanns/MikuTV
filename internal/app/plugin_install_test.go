@@ -132,8 +132,8 @@ func TestPluginCatalogInstallResolveConflictCancelAndMount(t *testing.T) {
 		func(fn func()) { queue <- fn },
 		func() {},
 	)
-	cat.SetInstaller(pkgStore, "0.1.0", func(src *plugin.Source, receipt plugin.InstalledReceipt) error {
-		mountedID = src.Manifest().ID + "@" + receipt.SHA256
+	cat.SetInstaller(pkgStore, "0.1.0", func(pkg plugin.InstalledPackage) error {
+		mountedID = pkg.Source.Manifest().ID + "@" + pkg.Receipt.SHA256
 		return nil
 	})
 	t.Cleanup(cat.Close)

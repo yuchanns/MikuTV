@@ -40,7 +40,7 @@ func (p *PageContext) syncCatalogFeatureInfo(c *ui.Context, snapshot app.Catalog
 	home := &p.host.home
 	info := &home.featureInfo
 	entry, _ := p.State.Current()
-	if !p.active || home.tab != "" || len(home.featured) == 0 || p.scroll().Y >= homeHeroHeight ||
+	if !p.active || !p.host.hoverPreviewEnabled() || home.tab != "" || len(home.featured) == 0 || p.scroll().Y >= homeHeroHeight ||
 		snapshot.Phase != app.CatalogReady || !entry.Capabilities.Has(provider.GetCatalogItem) {
 		info.stop()
 		return
@@ -74,7 +74,7 @@ func (p *PageContext) catalogBackdrop(c *ui.Context, item provider.MediaItem) {
 		image = p.catalogCover(item.CoverURL)
 	}
 	ui.Box(c.Key("home-backdrop")).Absolute().Left(0).Right(0).Top(0).Height(homeArtHeight).Clip().Children(func() {
-		transition, exit := p.catalogSlide()
+		transition, exit := p.catalogSlide(c)
 		ui.Box(c.Key("home-art-track")).Fill().ChildExit(exit).Children(func() {
 			ui.Box(c.Key(item.Ref)).Absolute().Left(0).Top(0).Fill().Transition(transition).Children(func() {
 				if image != nil {
@@ -103,7 +103,10 @@ func (p *PageContext) catalogBackdrop(c *ui.Context, item provider.MediaItem) {
 	})
 }
 
-func (p *PageContext) catalogSlide() (ui.ElementTransition, ui.Motion) {
+func (p *PageContext) catalogSlide(c *ui.Context) (ui.ElementTransition, ui.Motion) {
+	if p.host.reduceMotionEnabled(c) {
+		return ui.ElementTransition{}, ui.Motion{}
+	}
 	distance := p.Width
 	if p.host.home.featureStep < 0 {
 		distance = -distance
@@ -150,7 +153,7 @@ func (p *PageContext) catalogHero(c *ui.Context, current app.CatalogSnapshot) {
 
 func (p *PageContext) catalogHeroCopy(c *ui.Context, item provider.MediaItem, selected int) {
 	colors := p.Theme.Colors
-	transition, exit := p.catalogSlide()
+	transition, exit := p.catalogSlide(c)
 	ui.Box(c.Key("hero-copy-track")).Absolute().Left(0).Top(0).Right(0).Height(498).Clip().ChildExit(exit).Children(func() {
 		ui.Box(c.Key(item.Ref)).Absolute().Left(0).Top(0).Fill().Transition(transition).Children(func() {
 			ui.Row(c).Absolute().Top(76).Left(103).Height(19).Gap(15).AlignItems(ui.Center).Children(func() {

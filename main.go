@@ -187,6 +187,39 @@ func main() {
 			installedPlugins = append(installedPlugins, installedPl)
 		}
 
+		var loadedThemes []*plugin.ThemePackage
+		buildThemeMetadata := func(pkg *plugin.ThemePackage, receipt plugin.InstalledReceipt) (app.AboutPlugin, app.InstalledPlugin) {
+			info := pkg.Manifest()
+			aboutPl := app.AboutPlugin{
+				ID:          info.ID,
+				Name:        info.Name,
+				Kind:        string(info.Kind),
+				Version:     info.Version,
+				Bundled:     false,
+				License:     info.License,
+				LicenseText: pkg.LicenseText(),
+			}
+			installedPl := app.InstalledPlugin{
+				ID:          info.ID,
+				Name:        info.Name,
+				Description: info.Description,
+				Kind:        info.Kind,
+				Version:     info.Version,
+				Repository:  receipt.Repository,
+				ReleaseID:   receipt.ReleaseID,
+				TagName:     receipt.TagName,
+				AssetID:     receipt.AssetID,
+				SHA256:      receipt.SHA256,
+				Bundled:     false,
+				Enabled:     false,
+				InstalledAt: receipt.InstalledAt,
+				UpdatedAt:   receipt.UpdatedAt,
+				License:     info.License,
+				Swatches:    pkg.Theme().Swatches(),
+			}
+			return aboutPl, installedPl
+		}
+
 		externalPackages, externalFailures := packageStore.LoadAll(context.Background(), appVersion)
 		for _, err := range externalFailures {
 			log.Printf("external plugin load: %v", err)
@@ -197,6 +230,17 @@ func main() {
 				continue
 			}
 			receipt := pkg.Receipt
+			if pkg.Theme != nil {
+				aboutPl, installedPl := buildThemeMetadata(pkg.Theme, receipt)
+				mountedIDs[strings.ToLower(receipt.ID)] = true
+				loadedThemes = append(loadedThemes, pkg.Theme)
+				aboutPlugins = append(aboutPlugins, aboutPl)
+				installedPlugins = append(installedPlugins, installedPl)
+				continue
+			}
+			if pkg.Source == nil {
+				continue
+			}
 			entry, aboutPl, installedPl, err := mountSource(pkg.Source, &receipt)
 			if err != nil {
 				log.Printf("open external plugin %s storage: %v", receipt.ID, err)
@@ -243,14 +287,61 @@ func main() {
 		if pluginCatalogBase != "" {
 			pluginCatalogCache = platform.NewPluginCatalogCacheNamed("plugin-catalog-override-v1.json")
 		}
-		pluginCatalog := app.NewPluginCatalog(
+		var view *tvui.View
+		var pluginCatalog *app.PluginCatalog
+		appearance := app.NewAppearanceSettings(
+			packageStore,
+			loadedThemes,
+			func(next theme.Theme) {
+				if view != nil {
+					view.SetTheme(next)
+				}
+			},
+			func(activeThemeID string) {
+				if pluginCatalog != nil {
+					pluginCatalog.SyncActiveTheme(activeThemeID)
+				}
+			},
+			invalidate,
+		)
+		activeThemeID := appearance.ActiveThemeID()
+		for i := range installedPlugins {
+			if installedPlugins[i].Kind == plugin.ThemeKind {
+				installedPlugins[i].Enabled = activeThemeID != theme.BaseMikuTVDark && strings.EqualFold(installedPlugins[i].ID, activeThemeID)
+			}
+		}
+		pluginCatalog = app.NewPluginCatalog(
 			installedPlugins,
 			plugin.NewCatalogClient(appVersion, pluginCatalogBase),
 			pluginCatalogCache,
 			mygo.RunOnMain,
 			invalidate,
 		)
-		var view *tvui.View
+		upsertAboutPlugin := func(aboutPl app.AboutPlugin) {
+			if view == nil {
+				return
+			}
+			for i, existing := range view.About.Plugins {
+				if strings.EqualFold(existing.ID, aboutPl.ID) {
+					view.About.Plugins[i] = aboutPl
+					return
+				}
+			}
+			view.About.Plugins = append(view.About.Plugins, aboutPl)
+		}
+		removeAboutPlugin := func(pluginID string) {
+			if view == nil {
+				return
+			}
+			nextAbout := make([]app.AboutPlugin, 0, len(view.About.Plugins))
+			for _, pl := range view.About.Plugins {
+				if strings.EqualFold(pl.ID, pluginID) {
+					continue
+				}
+				nextAbout = append(nextAbout, pl)
+			}
+			view.About.Plugins = nextAbout
+		}
 		upsertRuntimeSource := func(source *plugin.Source, receipt plugin.InstalledReceipt, bumpGeneration bool) error {
 			entry, aboutPl, _, err := mountSource(source, &receipt)
 			if err != nil {
@@ -276,23 +367,20 @@ func main() {
 				}
 				state.UpdateEntries(next)
 			}
-			if view != nil {
-				replaced := false
-				for i, existing := range view.About.Plugins {
-					if strings.EqualFold(existing.ID, aboutPl.ID) {
-						view.About.Plugins[i] = aboutPl
-						replaced = true
-						break
-					}
-				}
-				if !replaced {
-					view.About.Plugins = append(view.About.Plugins, aboutPl)
-				}
-			}
+			upsertAboutPlugin(aboutPl)
 			return nil
 		}
-		pluginCatalog.SetInstaller(packageStore, appVersion, func(source *plugin.Source, receipt plugin.InstalledReceipt) error {
-			return upsertRuntimeSource(source, receipt, false)
+		pluginCatalog.SetInstaller(packageStore, appVersion, func(pkg plugin.InstalledPackage) error {
+			if pkg.Theme != nil {
+				aboutPl, _ := buildThemeMetadata(pkg.Theme, pkg.Receipt)
+				appearance.RegisterTheme(pkg.Theme)
+				upsertAboutPlugin(aboutPl)
+				return nil
+			}
+			if pkg.Source != nil {
+				return upsertRuntimeSource(pkg.Source, pkg.Receipt, false)
+			}
+			return plugin.ErrIncompatible
 		})
 		var auth *app.Auth
 		stopActiveSourceIfCurrent := func(pluginID string) {
@@ -338,8 +426,13 @@ func main() {
 				}
 				return nil
 			},
-			ApplyThemeUpdate: func(plugin.InstalledReceipt, []byte) error {
-				return plugin.ErrIncompatible
+			ApplyThemeUpdate: func(themePkg *plugin.ThemePackage, receipt plugin.InstalledReceipt) error {
+				if err := appearance.UpdateTheme(themePkg); err != nil {
+					return err
+				}
+				aboutPl, _ := buildThemeMetadata(themePkg, receipt)
+				upsertAboutPlugin(aboutPl)
+				return nil
 			},
 		})
 		pluginCatalog.SetLifecycleHooks(app.PluginLifecycleHooks{
@@ -389,16 +482,7 @@ func main() {
 				}
 				sourcesMu.Unlock()
 				removeEntryByID(pluginID)
-				if view != nil {
-					nextAbout := make([]app.AboutPlugin, 0, len(view.About.Plugins))
-					for _, pl := range view.About.Plugins {
-						if strings.EqualFold(pl.ID, pluginID) {
-							continue
-						}
-						nextAbout = append(nextAbout, pl)
-					}
-					view.About.Plugins = nextAbout
-				}
+				removeAboutPlugin(pluginID)
 				if clearData {
 					_ = preferences.ClearEntry(pluginID)
 					_ = preferences.ClearPluginStorage(pluginID, pluginID)
@@ -410,8 +494,17 @@ func main() {
 					view.SyncEntry()
 				}
 			},
-			DisableTheme: func(string) {},
-			RemoveTheme:  func(string) {},
+			EnableTheme: func(pluginID string) error {
+				_, err := appearance.SelectTheme(pluginID)
+				return err
+			},
+			DisableTheme: func(pluginID string) {
+				appearance.DisableTheme(pluginID)
+			},
+			RemoveTheme: func(pluginID string) {
+				appearance.RemoveTheme(pluginID)
+				removeAboutPlugin(pluginID)
+			},
 		})
 		auth = app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
 			catalog.Reload()
@@ -422,8 +515,8 @@ func main() {
 			}
 		}, func() { view.PromptSignIn() })
 		auth.SetCleaner(preferences)
-		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, PrivateMessages: privateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, PluginCatalog: pluginCatalog, Pages: pages, Assets: assets,
-			Preferences: preferences, Theme: theme.Default(), Version: appVersion,
+		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, PrivateMessages: privateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, Appearance: appearance, PluginCatalog: pluginCatalog, Pages: pages, Assets: assets,
+			Preferences: preferences, Theme: appearance.ActiveTheme(), Version: appVersion,
 			About: app.AboutInfo{Version: appVersion, Build: appBuild, Commit: appCommit, Plugins: aboutPlugins, Dependencies: aboutDeps},
 			TopShelf: topShelfStore})
 		activeView = view

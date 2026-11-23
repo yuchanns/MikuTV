@@ -337,7 +337,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		Leave: func(v *View) { v.favorites.dialog = favoriteDialog{} },
 	})
 	settings := map[string]Component{
-		"playback": playbackSettingsPage{}, "danmaku": danmakuSettingsPage{}, "appearance": settingsEmptyPage{},
+		"playback": playbackSettingsPage{}, "danmaku": danmakuSettingsPage{}, "appearance": appearanceSettingsPage{},
 		"privacy": privacySettingsPage{}, "plugins": pluginsSettingsPage{}, "about": aboutPage{},
 	}
 	for _, section := range assets.Text.Sections {
@@ -363,6 +363,11 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			reg.Back = (*View).backFromPluginsSettings
 			reg.Leave = func(v *View) {
 				v.pluginsUI.editing = false
+				switch v.State.Page {
+				case app.PluginRepoInput, app.PluginInstallDialog, app.PluginUpdateDialog, app.PluginDisableDialog, app.PluginRemoveDialog:
+				default:
+					v.pluginsUI.returnToThemePicker = false
+				}
 			}
 		}
 		registrations = append(registrations, reg)
@@ -397,6 +402,22 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Leave: func(v *View) {
 				v.danmakuUI.draft.editing = false
 			},
+		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.ThemePicker, Section: "appearance"},
+				Parent: app.Route{Page: app.Settings, Section: "appearance"},
+				Modal:  true, Initial: focus(themePickerOptionID("mikutv-dark")),
+			},
+			Component: themePickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 640,
+		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.ThemeError, Section: "appearance"},
+				Parent: app.Route{Page: app.Settings, Section: "appearance"},
+				Modal:  true, Initial: focus(themeErrorReselectBtn),
+			},
+			Component: themeErrorPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
 		},
 		Registration{
 			Policy: app.RouteSpec{

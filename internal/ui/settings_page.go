@@ -25,7 +25,7 @@ func (settingsLayout) Render(c *ui.Context, p *PageContext) {
 					selected := p.Pages.contains(section.Policy.Route, p.Location.Route)
 					background, foreground := ui.Transparent, paint(colors.Text.Secondary)
 					if selected {
-						background, foreground = d.subtleFill, paint(colors.Accent.Soft)
+						background, foreground = paint(colors.Selected.Background), paint(colors.Selected.Foreground)
 						p.left = focusDestination{Focus: id}
 					}
 					if p.State.Focus == id {

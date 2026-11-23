@@ -39,6 +39,7 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		{Page: app.AccountPicker},
 		{Page: app.PlaybackSettingPicker, Section: "playback"},
 		{Page: app.DanmakuSettingPicker, Section: "danmaku"},
+		{Page: app.ThemePicker, Section: "appearance"},
 		{Page: app.Licenses, Section: "about"},
 	}
 	for _, route := range drawerRoutes {
@@ -76,6 +77,7 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		{Page: app.VideoConfirm},
 		{Page: app.VideoCommentCompose},
 		{Page: app.DanmakuRuleEditor, Section: "danmaku"},
+		{Page: app.ThemeError, Section: "appearance"},
 		{Page: app.PluginRepoInput, Section: "plugins"},
 		{Page: app.PluginInstallDialog, Section: "plugins"},
 		{Page: app.PluginUpdateDialog, Section: "plugins"},
