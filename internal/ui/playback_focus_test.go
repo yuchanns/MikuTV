@@ -449,7 +449,7 @@ func TestPlaybackNetworkSpeedFormattingAndTopRightRender(t *testing.T) {
 	}
 
 	// Simulate prolonged stall -> warning amber color in top-right.
-	view.player.speedSince = time.Now().Add(-3 * time.Second)
+	view.player.speedSince = view.player.speedSince.Add(-3 * time.Second)
 	view.player.speedSampleAt = time.Time{}
 	pbState.BytesPerSecond = 0
 	tester.Frame()
