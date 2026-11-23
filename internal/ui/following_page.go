@@ -733,7 +733,7 @@ func (p *PageContext) followingLiveMetadata(c *ui.Context, item provider.MediaIt
 func (p *PageContext) followingGuestState(c *ui.Context) {
 	text := p.Assets.Text
 	p.followingStateBlock(c, "following", text.Following.GuestTitle, text.Following.GuestNote,
-		text.Activity.SignInAction, "user", followingSignInFocus, func() {
+		p.signInActionLabel(), "user", followingSignInFocus, func() {
 			p.host.openSignIn()
 		})
 }
@@ -747,7 +747,7 @@ func (p *PageContext) followingFailedState(c *ui.Context, code provider.ErrorCod
 	text := p.Assets.Text
 	if code == provider.NeedsSignIn {
 		p.followingStateBlock(c, "following", text.Auth.AccountExpired, text.Following.GuestNote,
-			text.Activity.SignInAction, "user", followingSignInFocus, func() {
+			p.signInActionLabel(), "user", followingSignInFocus, func() {
 				p.host.openSignIn()
 			})
 		return

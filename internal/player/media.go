@@ -28,7 +28,7 @@ const (
 	speedBucketWidth = 100 * time.Millisecond
 	speedBucketCount = 15
 	speedMinWindow   = 250 * time.Millisecond
-	hlsMaxChildren   = 512
+	hlsMaxChildren   = 4096
 )
 
 type hlsChildEntry struct {
@@ -839,7 +839,9 @@ func (m *Media) serveHLSChild(w http.ResponseWriter, r *http.Request) {
 
 func (m *Media) playlistChild(base *url.URL, value string, headers map[string]string) string {
 	ref, err := base.Parse(value)
-	if err != nil || ref.User != nil || ref.Scheme != "https" || ref.Host == "" {
+	allowedScheme := err == nil && (ref.Scheme == "https" ||
+		(ref.Scheme == "http" && base != nil && base.Scheme == "http" && strings.EqualFold(ref.Host, base.Host)))
+	if err != nil || ref.User != nil || !allowedScheme || ref.Host == "" {
 		return "unavailable"
 	}
 	if !strings.EqualFold(ref.Host, base.Host) {

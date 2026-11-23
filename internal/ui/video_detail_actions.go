@@ -82,7 +82,7 @@ func (p *PageContext) withVideoAccount(label string, action func()) {
 
 func (p *PageContext) openVideoSignIn(action func()) bool {
 	p.host.openSignIn()
-	if p.State.Page != app.SignInQR {
+	if !isSignInPage(p.State.Page) {
 		return false
 	}
 	p.host.videoDetail.signInAction = action

@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/yuchanns/MikuTV/internal/provider"
@@ -20,12 +21,13 @@ func (s *Session) Search(ctx context.Context, request provider.SearchRequest) (p
 		return provider.SearchPage{}, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
-	client, scope, signedIn := s.active, s.scope, s.accountID != ""
+	client, scope, signedIn, secret := s.active, s.scope, s.accountID != "", s.secret
 	s.requests.RUnlock()
 	input := struct {
 		provider.SearchRequest
-		SignedIn bool `json:"signedIn,omitempty"`
-	}{request, signedIn}
+		SignedIn bool            `json:"signedIn,omitempty"`
+		Secret   json.RawMessage `json:"secret,omitempty"`
+	}{request, signedIn, secret}
 	var page provider.SearchPage
 	if err := s.invoke(ctx, scope, client, provider.SearchCatalog, "search", input, &page); err != nil {
 		return provider.SearchPage{}, err
@@ -49,7 +51,7 @@ func (s *Session) Search(ctx context.Context, request provider.SearchRequest) (p
 		if creator.Followers != nil && *creator.Followers < 0 || creator.Videos != nil && *creator.Videos < 0 {
 			return provider.SearchPage{}, &provider.Error{Code: provider.PluginFailed}
 		}
-		if creator.Creator.AvatarURL != "" && httpsURL(creator.Creator.AvatarURL) == nil {
+		if creator.Creator.AvatarURL != "" && s.allowedURL(creator.Creator.AvatarURL) == nil {
 			creator.Creator.AvatarURL = ""
 		}
 	}
@@ -80,11 +82,12 @@ func (s *Session) SearchSuggest(ctx context.Context, query string) (provider.Sea
 		return provider.SearchSuggestResult{}, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
-	client, scope := s.active, s.scope
+	client, scope, secret := s.active, s.scope, s.secret
 	s.requests.RUnlock()
 	input := struct {
-		Query string `json:"query"`
-	}{Query: query}
+		Query  string          `json:"query"`
+		Secret json.RawMessage `json:"secret,omitempty"`
+	}{Query: query, Secret: secret}
 	var result provider.SearchSuggestResult
 	if err := s.invoke(ctx, scope, client, provider.SearchSuggest, "searchSuggest", input, &result); err != nil {
 		return provider.SearchSuggestResult{}, err

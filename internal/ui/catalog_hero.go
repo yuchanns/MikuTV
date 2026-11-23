@@ -273,6 +273,11 @@ func (p *PageContext) catalogHero(c *ui.Context, current app.CatalogSnapshot) {
 	home, colors := &p.host.home, p.Theme.Colors
 	ui.Box(c.Key("catalog-hero")).FillWidth().Height(homeHeroHeight).Children(func() {
 		if len(home.featured) == 0 {
+			entry, _ := p.State.Current()
+			if current.Phase == app.CatalogFailed && current.Error == provider.NeedsSignIn && entry.Capabilities.Has(provider.SignIn) {
+				p.catalogGuestHero(c, entry)
+				return
+			}
 			ui.Box(c).Absolute().Top(76).Left(103).Children(func() {
 				p.catalogStatus(c, current)
 			})
@@ -299,6 +304,36 @@ func (p *PageContext) catalogHero(c *ui.Context, current app.CatalogSnapshot) {
 		ui.Text(c, p.Assets.Text.Home.HeroCaption).Absolute().Right(83).Bottom(76).
 			FontSize(13).LetterSpacing(3).TextColor(withAlpha(colors.Text.Secondary, 0xb3))
 		p.catalogPager(c)
+	})
+}
+
+func (p *PageContext) catalogGuestHero(c *ui.Context, entry app.Entry) {
+	colors := p.Theme.Colors
+	title := entry.Auth.GuestTitle
+	if title == "" {
+		title = entry.Name
+	}
+	if title == "" {
+		title = p.Assets.Text.Auth.AccountTitle
+	}
+	desc := entry.Auth.GuestDescription
+	if desc == "" {
+		desc = p.Assets.Text.Activity.SignInNeeded
+	}
+	ui.Column(c.Key("catalog-guest-hero")).Absolute().Top(112).Left(103).Width(min(760, p.Width-186)).Gap(22).Children(func() {
+		ui.Row(c).Height(19).Gap(15).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Size(24, 1).Background(paint(colors.Accent.Soft))
+			ui.Text(c, "SIGN IN").FontSize(16).FontWeight(500).LetterSpacing(5).TextColor(paint(colors.Text.Secondary))
+		})
+		ui.Text(c, title).FontSize(60).FontWeight(650).LineHeight(1.2).MaxLines(2)
+		ui.Text(c, desc).FontSize(22).LineHeight(1.7).MaxLines(3).TextColor(paint(colors.Text.Secondary))
+	})
+	ui.Row(c).Absolute().Left(103).Top(498).Gap(16).AlignItems(ui.Center).Children(func() {
+		style := p.playButtonAppearance()
+		style.padding = 28
+		p.styledButton(c, p.signInActionLabel(), "user", homePlayAction, homeHero, func() {
+			p.host.openSignIn()
+		}, style).Center()
 	})
 }
 

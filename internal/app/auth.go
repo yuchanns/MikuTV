@@ -230,6 +230,29 @@ func (a *Auth) StartSignIn(onSuccess func()) bool {
 	return true
 }
 
+func (a *Auth) StartCredentialsSignIn(req provider.CredentialsRequest, onSuccess func()) bool {
+	if !a.accounts.Ready || a.accounts.Busy {
+		return false
+	}
+	credService, ok := a.service.(provider.CredentialsAuthenticator)
+	if !ok {
+		a.failSignIn(provider.Unsupported)
+		return false
+	}
+	work := a.startWork()
+	a.signIn = SignInSnapshot{Phase: SignInLoading}
+	a.changed()
+	go func() {
+		credential, err := credService.SignInWithCredentials(work, req)
+		if err != nil {
+			a.deliver(work, func() { a.failSignIn(provider.CodeOf(err)) })
+			return
+		}
+		a.deliver(work, func() { a.approve(work, credential, onSuccess) })
+	}()
+	return true
+}
+
 func (a *Auth) CancelSignIn() {
 	if a.signIn.Phase != SignInIdle {
 		a.finishWork()

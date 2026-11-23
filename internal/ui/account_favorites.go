@@ -91,7 +91,7 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 		ui.Column(c.Key("library-body/" + string(query.Section) + "/" + query.Folder)).FillWidth().Children(func() {
 			if guest {
 				p.libraryEmpty(c, "library", text.Activity.LibraryGuestTitle, text.Activity.LibraryGuestNote,
-					text.Activity.SignInAction, "user", emptyFocus, func() { p.State.Push(app.Route{Page: app.Account}) })
+					p.signInActionLabel(), "user", emptyFocus, func() { p.State.Push(app.Route{Page: app.Account}) })
 				return
 			}
 			ui.Box(c.Key("library-heading")).FillWidth().Height(headingHeight).Children(func() {

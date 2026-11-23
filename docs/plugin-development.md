@@ -93,8 +93,32 @@ Source plugins are ES modules (`.js` or `.mjs`) executed inside MikuTV's isolate
 
 - Every outbound `fetch` / WebSocket host MUST be declared in `permissions.network`.
 - Users explicitly review this list before installing and again whenever an update adds new domains.
-- Private IPs, loopback (`127.0.0.1`), link-local, CGNAT (`100.64.0.0/10`), and `localhost` are rejected.
+- Private IPs, loopback (`127.0.0.1`), link-local, CGNAT (`100.64.0.0/10`), and `localhost` are rejected in static `permissions.network`.
 - Wildcards (`*.example.com`) require a valid eTLD+1 base domain.
+- **Self-Hosted User Server Origin (`authentication.serverURL`)**: When a source declares `"methods": ["credentials"]` and `"serverURL": "required"` (or `"optional"`), `permissions.network` may be empty. At sign-in time, MikuTV validates the user-entered `http://` or `https://` address and grants a strict **per-session single-origin allowlist** (exact `scheme://host:port` only) for `fetch`, artwork, and playback requests — including LAN servers — while still blocking every other LAN IP, port, or undeclared domain.
+
+### Credentials & Self-Hosted Authentication
+
+Source plugins targeting self-hosted media servers (e.g. Jellyfin) or username/password accounts declare `"credentials"` in `authentication.methods`:
+
+```json
+"authentication": {
+  "methods": ["credentials"],
+  "serverURL": "required",
+  "presentation": {
+    "guestTitle": "Connect to Jellyfin",
+    "guestDescription": "Sign in with your Jellyfin server URL and account.",
+    "credentialsTitle": "Sign In to Jellyfin",
+    "credentialsDescription": "Enter your server URL, username, and password.",
+    "serverURLPlaceholder": "http://192.168.1.10:8096",
+    "usernamePlaceholder": "Username"
+  }
+}
+```
+
+- Export `signInWithCredentials(req)` receiving `{ serverURL, username, password }` and returning `{ account, secret }`.
+- MikuTV stores `secret` and the normalized `serverOrigin` in the tvOS Keychain, passes `secret` directly to `restoreAccount(secret)` and `signOut(secret)`, and injects `req.secret` into subsequent `browse`, `getItem`, `search`, `searchSuggest`, `resolvePlayback`, `readSubtitles`, and `readAccount` calls for that session.
+- Reference implementation: [`yuchanns/mikutv-plugin-jellyfin`](https://github.com/yuchanns/mikutv-plugin-jellyfin).
 
 ### Sandbox Host API (`globalThis.host`)
 
@@ -128,7 +152,7 @@ Every capability declared in `capabilities` MUST have its matching named export(
 | `playback.subtitles` | `readSubtitles` | — |
 | `live.chat` | `connectLiveChat` | — |
 | `live.chatWrite` | `sendLiveChat` | Requires `live.chat` + `account.signIn` |
-| `account.signIn` | `beginSignIn`, `pollSignIn`, `restoreAccount`, `signOut` | Requires `authentication.methods: ["qrCode"]` |
+| `account.signIn` | `restoreAccount`, `signOut`, plus `beginSignIn` & `pollSignIn` (for `"qrCode"`) and/or `signInWithCredentials` (for `"credentials"`) | Requires `authentication.methods` (`"qrCode"` and/or `"credentials"`) |
 | `account.videoInteraction` | `editVideo` | Requires `account.signIn` |
 | `account.videoFavorites` | `videoFavoriteFolders`, `editVideoFavoriteFolders` | Requires `account.signIn` |
 | `account.danmaku` | `postDanmaku` | Requires `account.signIn` |

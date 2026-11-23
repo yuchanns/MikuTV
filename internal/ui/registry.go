@@ -326,6 +326,29 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				v.series.signInAction = nil
 				v.player.content.afterLogin = nil
 			}},
+		Registration{Policy: app.RouteSpec{
+			Route: app.Route{Page: app.SignInCredentials}, Parent: app.Route{Page: app.Account},
+			Initial: focus(credUsernameField),
+			ResolveFocus: func(s *app.State) app.FocusID {
+				if entry, ok := s.Current(); ok && entry.UsesServerURL() {
+					return credServerField
+				}
+				return credUsernameField
+			},
+			Modal: true, RequiresEntry: true, Capability: provider.SignIn,
+		}, Component: credentialsSignIn{},
+			ModalPresentation: modalFrameless, ModalWidth: 820,
+			Back: (*View).backFromCredentialsSignIn,
+			Leave: func(v *View) {
+				v.Auth.CancelSignIn()
+				v.credDraft.clear()
+				v.videoDetail.signInAction = nil
+				if v.creator != nil {
+					v.creator.signInAction = nil
+				}
+				v.series.signInAction = nil
+				v.player.content.afterLogin = nil
+			}},
 		Registration{Policy: authModal(app.SignOut, app.Account, app.CloseModal), Component: signOutDialog{},
 			ModalPresentation: modalFrameless, ModalWidth: 760},
 	)

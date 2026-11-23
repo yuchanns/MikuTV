@@ -93,7 +93,31 @@ MikuTV 通过 GitHub Topic **`mikutv-plugin`**（或用户直接输入的 `owner
 
 - 插件发起的每一条 `fetch` / WebSocket 请求目标域名都必须在 `permissions.network` 中明确声明。
 - 安装前会向用户展示完整域名清单；插件更新新增域名时也会再次提示用户确认。
-- 内网 IP、回环地址（`127.0.0.1`）、链路本地地址、CGNAT（`100.64.0.0/10`）与 `localhost` 均会被拒绝；通配符（`*.example.com`）要求具备合法的 eTLD+1 根域名。
+- 静态清单 `permissions.network` 中拒绝内网 IP、回环地址（`127.0.0.1`）、链路本地地址、CGNAT（`100.64.0.0/10`）与 `localhost`；通配符（`*.example.com`）要求具备合法的 eTLD+1 根域名。
+- **自建服务器动态来源放行（`authentication.serverURL`）**：当内容源声明 `"methods": ["credentials"]` 且 `"serverURL": "required"`（或 `"optional"`）时，`permissions.network` 可留空。用户在登录表单输入 `http://` 或 `https://` 服务器地址后，MikuTV 会为当前会话动态放行且**仅放行该精确 Origin（`scheme://host:port`）**的 `fetch`、封面图片与媒体播放请求（含局域网地址），同时继续严格拦截其他一切内网 IP、端口和未声明域名。
+
+### 账号密码与自建服务器登录（`methods: ["credentials"]`）
+
+对接自建媒体服务器（如 Jellyfin）或账号密码体系的内容源可在 `authentication.methods` 中声明 `"credentials"`：
+
+```json
+"authentication": {
+  "methods": ["credentials"],
+  "serverURL": "required",
+  "presentation": {
+    "guestTitle": "连接 Jellyfin 媒体库",
+    "guestDescription": "输入局域网或远程 Jellyfin 服务器地址与账号登录。",
+    "credentialsTitle": "登录 Jellyfin",
+    "credentialsDescription": "输入服务器地址、用户名与密码。",
+    "serverURLPlaceholder": "http://192.168.1.10:8096",
+    "usernamePlaceholder": "用户名"
+  }
+}
+```
+
+- 导出 `signInWithCredentials(req)`，接收 `{ serverURL, username, password }` 并返回 `{ account, secret }`。
+- MikuTV 会将 `secret` 与规范化后的 `serverOrigin` 安全写入 tvOS Keychain，向 `restoreAccount(secret)` 与 `signOut(secret)` 直接传入 `secret`，并在同一会话的 `browse`、`getItem`、`search`、`searchSuggest`、`resolvePlayback`、`readSubtitles`、`readAccount` 请求中注入 `req.secret`。
+- 参考实现：[`yuchanns/mikutv-plugin-jellyfin`](https://github.com/yuchanns/mikutv-plugin-jellyfin)。
 
 ### 沙箱宿主 API（`globalThis.host`）
 
@@ -127,7 +151,7 @@ MikuTV 通过 GitHub Topic **`mikutv-plugin`**（或用户直接输入的 `owner
 | `playback.subtitles` | `readSubtitles` | — |
 | `live.chat` | `connectLiveChat` | — |
 | `live.chatWrite` | `sendLiveChat` | 需同时声明 `live.chat` + `account.signIn` |
-| `account.signIn` | `beginSignIn`、`pollSignIn`、`restoreAccount`、`signOut` | 需同时声明 `authentication.methods: ["qrCode"]` |
+| `account.signIn` | `restoreAccount`、`signOut`，以及 `beginSignIn` + `pollSignIn`（`"qrCode"`）和/或 `signInWithCredentials`（`"credentials"`） | 需声明 `authentication.methods`（`"qrCode"` 和/或 `"credentials"`） |
 | `account.videoInteraction` | `editVideo` | 需同时声明 `account.signIn` |
 | `account.videoFavorites` | `videoFavoriteFolders`、`editVideoFavoriteFolders` | 需同时声明 `account.signIn` |
 | `account.danmaku` | `postDanmaku` | 需同时声明 `account.signIn` |

@@ -136,6 +136,7 @@ type Compatibility struct {
 type Inspection struct {
 	Manifest           Manifest
 	NetworkPermissions []string
+	UserServerOrigin   bool
 	Capabilities       provider.Capabilities
 	Swatches           [6]theme.Color
 	Language           string
@@ -166,6 +167,7 @@ type CatalogItem struct {
 	Release         ReleaseAsset  `json:"release"`
 	Manifest        Manifest        `json:"manifest"`
 	Permissions     []string        `json:"permissions,omitempty"`
+	UserServerOrigin bool           `json:"userServerOrigin,omitempty"`
 	Swatches        [6]theme.Color  `json:"swatches,omitempty"`
 	Language        string          `json:"language,omitempty"`
 	NativeName      string          `json:"nativeName,omitempty"`
@@ -253,6 +255,7 @@ func InspectPackage(data []byte, appVersion string) (Inspection, error) {
 			return result, nil
 		}
 		result.NetworkPermissions = append([]string(nil), src.Permissions.Network...)
+		result.UserServerOrigin = src.Authentication.ServerURL == "required" || src.Authentication.ServerURL == "optional"
 		result.Capabilities = append(provider.Capabilities(nil), src.Capabilities...)
 		result.Compatibility = Compatibility{Compatible: true, Code: CompatibleOK}
 		return result, nil
@@ -629,9 +632,10 @@ func (c *CatalogClient) inspectRepository(ctx context.Context, repo githubRepoEn
 		Stars:           repo.Stars,
 		UpdatedAt:       repo.UpdatedAt,
 		Release:         asset,
-		Manifest:        inspected.Manifest,
-		Permissions:     inspected.NetworkPermissions,
-		Swatches:        inspected.Swatches,
+		Manifest:         inspected.Manifest,
+		Permissions:      inspected.NetworkPermissions,
+		UserServerOrigin: inspected.UserServerOrigin,
+		Swatches:         inspected.Swatches,
 		Language:        inspected.Language,
 		NativeName:      inspected.NativeName,
 		Compatibility:   inspected.Compatibility,
@@ -754,9 +758,10 @@ func (c *CatalogClient) ResolveRepository(ctx context.Context, rawRepo string) (
 		Stars:           repo.Stars,
 		UpdatedAt:       repo.UpdatedAt,
 		Release:         asset,
-		Manifest:        inspected.Manifest,
-		Permissions:     inspected.NetworkPermissions,
-		Swatches:        inspected.Swatches,
+		Manifest:         inspected.Manifest,
+		Permissions:      inspected.NetworkPermissions,
+		UserServerOrigin: inspected.UserServerOrigin,
+		Swatches:         inspected.Swatches,
 		Language:        inspected.Language,
 		NativeName:      inspected.NativeName,
 		Compatibility:   inspected.Compatibility,

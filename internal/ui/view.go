@@ -116,6 +116,7 @@ type View struct {
 	qrPayload       string
 	qrImage         ui.ImageSource
 	qrHasAction     bool
+	credDraft       credentialsDraft
 	accountAvatar   *app.AccountAvatar
 	avatarImage     ui.ImageSource
 	profileGlow     ui.ImageSource
@@ -233,7 +234,7 @@ func (v *View) Render(c *ui.Context) {
 	}
 	fromVideo := rootReg.PreserveFocusUnderlay
 	top := layers[len(layers)-1]
-	fromMedia := fromVideo || top.Page == app.SignInQR && rootReg.TransparentCanvas
+	fromMedia := fromVideo || isSignInPage(top.Page) && rootReg.TransparentCanvas
 	if blur := v.modalBlur(top.Route, fromMedia); blur != 0 {
 		screen.Cache().Blur(blur)
 	}

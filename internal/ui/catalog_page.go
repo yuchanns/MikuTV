@@ -151,7 +151,9 @@ func (catalogPage) Render(c *ui.Context, p *PageContext) {
 	top := float32(homeHeaderHeight + homeDiscoveryHeight)
 	grid := discoveryGridMetrics
 	if home.tab == "" {
-		shelves = p.homeShelves(current.Page.Shelves, picks)
+		if !(current.Phase == app.CatalogFailed && current.Error == provider.NeedsSignIn) {
+			shelves = p.homeShelves(current.Page.Shelves, picks)
+		}
 		top = homeHeaderHeight + homeHeroHeight + float32(len(shelves))*homeShelfHeight
 		grid = homeGridMetrics(p.Width)
 		if grid.columns != home.layout.grid.columns {
@@ -185,7 +187,7 @@ func (catalogPage) Render(c *ui.Context, p *PageContext) {
 	loadingTail := current.Appending && current.Phase == app.CatalogLoading
 	viewport := p.catalogViewport(loadingTail)
 	p.prepareCatalogArtwork(viewport, shelves, scroll)
-	emptyFeed := home.tab == "" && len(home.layout.sections) == 0
+	emptyFeed := home.tab == "" && len(home.layout.sections) == 0 && !(current.Phase == app.CatalogFailed && current.Error == provider.NeedsSignIn)
 	p.catalogRegions(shelves, emptyFeed)
 
 	ui.Box(c.Key("home-feed")).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
@@ -302,7 +304,10 @@ func (p *PageContext) catalogRegions(shelves []catalogShelf, emptyFeed bool) {
 		}
 		return d
 	}
-	firstShelf := shelfDest(shelves[0])
+	var firstShelf focusDestination
+	if len(shelves) > 0 {
+		firstShelf = shelfDest(shelves[0])
+	}
 	p.region(homeHeader, focusEdges{app.Down: {Focus: homePlayAction, Region: homeHero}})
 	p.region(homeHero, focusEdges{
 		app.Up: {Focus: app.ContentAction}, app.Down: firstShelf, app.Right: {Region: homePager},
@@ -578,6 +583,14 @@ func (p *PageContext) catalogDiscovery(c *ui.Context, current app.CatalogSnapsho
 	})
 	if len(current.Page.Collections) == 0 {
 		ui.Column(c.Key("catalog-discovery-status")).FillWidth().Padding(homeShelfTop, 83, 0, 103).Gap(20).Children(func() {
+			entry, _ := p.State.Current()
+			if current.Phase == app.CatalogFailed && current.Error == provider.NeedsSignIn && entry.Capabilities.Has(provider.SignIn) {
+				ui.Text(c, text.Activity.SignInNeeded).FontSize(25).TextColor(paint(colors.Text.Secondary))
+				p.button(c, p.signInActionLabel(), homeTabRetry, homeCards, func() {
+					p.host.openSignIn()
+				})
+				return
+			}
 			p.catalogStatus(c, current)
 			if catalogPageFailed(current) {
 				p.button(c, text.Retry, homeTabRetry, homeCards, func() {

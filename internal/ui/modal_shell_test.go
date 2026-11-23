@@ -89,6 +89,7 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		{Page: app.PrivacyDetails, Section: "about"},
 		{Page: app.AboutProject, Section: "about"},
 		{Page: app.SignInQR},
+		{Page: app.SignInCredentials},
 		{Page: app.SignOut},
 		{Page: app.AccountDetails},
 		{Page: noticePage},

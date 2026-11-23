@@ -328,9 +328,32 @@ func signOutID(snapshot app.AccountsSnapshot) string {
 	return snapshot.SelectedID
 }
 
+func isSignInPage(page app.Page) bool {
+	return page == app.SignInQR || page == app.SignInCredentials
+}
+
+func (p *PageContext) signInActionLabel() string {
+	if entry, ok := p.State.Current(); ok && entry.SupportsCredentials() && !entry.SupportsQRCode() {
+		return p.Assets.Text.Auth.CredentialsLogin
+	}
+	return p.Assets.Text.Auth.ScanLogin
+}
+
 func (v *View) PromptSignIn() { v.dispatch(v.openSignIn) }
 
 func (v *View) openSignIn() {
+	if entry, ok := v.State.Current(); ok && entry.SupportsCredentials() && !entry.SupportsQRCode() {
+		if !v.Auth.Accounts().Ready || v.Auth.Accounts().Busy {
+			return
+		}
+		v.credDraft.clear()
+		v.Auth.CancelSignIn()
+		if v.State.Page == app.AccountPicker {
+			v.State.Back()
+		}
+		v.State.Push(app.Route{Page: app.SignInCredentials})
+		return
+	}
 	if v.Auth.StartSignIn(v.dismissAfter(app.SignInQR)) {
 		if v.State.Page == app.AccountPicker {
 			v.State.Back()
@@ -348,7 +371,7 @@ func (v *View) dismissAfter(page app.Page) func() {
 		var resumeCreator func()
 		var resumeSeries func()
 		var resumePlayer func()
-		if page == app.SignInQR {
+		if isSignInPage(page) {
 			resume = v.videoDetail.signInAction
 			if v.creator != nil {
 				resumeCreator = v.creator.signInAction

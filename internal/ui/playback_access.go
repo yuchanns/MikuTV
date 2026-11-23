@@ -49,7 +49,7 @@ func (v *View) PlaybackChanged() {
 
 func (v *View) openPlaybackSignIn() bool {
 	v.openSignIn()
-	if v.State.Page != app.SignInQR {
+	if !isSignInPage(v.State.Page) {
 		return false
 	}
 	s := &v.player
@@ -146,7 +146,7 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 			}
 		}
 		if v.Auth.Accounts().CurrentID == "" {
-			dialog.actions = append(dialog.actions, playbackAccessAction{p.Assets.Text.Activity.SignInAction, "", func() {
+			dialog.actions = append(dialog.actions, playbackAccessAction{p.signInActionLabel(), "", func() {
 				v.openPlaybackSignIn()
 			}})
 		}
@@ -216,7 +216,7 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 		return dialog
 	default:
 		return playbackAccessDialog{title: text.LoginLimit, actions: []playbackAccessAction{
-			{p.Assets.Text.Activity.SignInAction, "", func() { v.openPlaybackSignIn() }}, {p.Assets.Text.Close, "", closeDialog},
+			{p.signInActionLabel(), "", func() { v.openPlaybackSignIn() }}, {p.Assets.Text.Close, "", closeDialog},
 		}}
 	}
 }

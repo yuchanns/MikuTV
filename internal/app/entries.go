@@ -7,15 +7,36 @@ import (
 )
 
 type Entry struct {
-	ID           string                      `json:"id"`
-	SourceID     string                      `json:"sourceId"`
-	Name         string                      `json:"name"`
-	Description  string                      `json:"description"`
-	Artwork      string                      `json:"artwork"`
-	Capabilities provider.Capabilities       `json:"capabilities,omitempty"`
-	Auth         provider.AuthPresentation   `json:"auth,omitzero"`
-	Presentation provider.SourcePresentation `json:"presentation,omitzero"`
-	Generation   uint64                      `json:"-"`
+	ID            string                      `json:"id"`
+	SourceID      string                      `json:"sourceId"`
+	Name          string                      `json:"name"`
+	Description   string                      `json:"description"`
+	Artwork       string                      `json:"artwork"`
+	Capabilities  provider.Capabilities       `json:"capabilities,omitempty"`
+	AuthMethods   []provider.AuthMethod       `json:"authMethods,omitempty"`
+	ServerURLMode string                      `json:"serverURLMode,omitempty"`
+	Auth          provider.AuthPresentation   `json:"auth,omitzero"`
+	Presentation  provider.SourcePresentation `json:"presentation,omitzero"`
+	Generation    uint64                      `json:"-"`
+}
+
+func (e Entry) SupportsCredentials() bool {
+	return slices.Contains(e.AuthMethods, provider.AuthMethodCredentials)
+}
+
+func (e Entry) SupportsQRCode() bool {
+	if len(e.AuthMethods) == 0 {
+		return e.Capabilities.Has(provider.SignIn)
+	}
+	return slices.Contains(e.AuthMethods, provider.AuthMethodQRCode)
+}
+
+func (e Entry) UsesServerURL() bool {
+	return e.ServerURLMode == "required" || e.ServerURLMode == "optional"
+}
+
+func (e Entry) RequiresServerURL() bool {
+	return e.ServerURLMode == "required"
 }
 
 // Entries returns a snapshot of the registered entries.
@@ -35,6 +56,8 @@ func (s *State) UpdateEntries(entries []Entry) {
 		if old, ok := previous[item.ID]; ok && item.Generation == old.Generation {
 			if item.SourceID != old.SourceID || item.Name != old.Name || item.Description != old.Description ||
 				item.Artwork != old.Artwork || item.Auth != old.Auth || item.Presentation != old.Presentation ||
+				item.ServerURLMode != old.ServerURLMode ||
+				!slices.Equal(item.AuthMethods, old.AuthMethods) ||
 				!slices.Equal(item.Capabilities, old.Capabilities) {
 				item.Generation = old.Generation + 1
 			}

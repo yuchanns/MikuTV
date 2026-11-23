@@ -98,6 +98,7 @@ func main() {
 			entry := app.Entry{ID: info.ID, SourceID: info.ID, Name: info.Name,
 				Description: info.Description, Artwork: info.ID,
 				Capabilities: source.Capabilities(), Auth: source.AuthPresentation(),
+				AuthMethods: source.AuthMethods(), ServerURLMode: source.ServerURLMode(),
 				Presentation: source.Presentation()}
 			sourcesMu.RLock()
 			store := stores[entry.ID]
@@ -595,6 +596,7 @@ func main() {
 					ID: info.ID, SourceID: info.ID, Name: info.Name,
 					Description: info.Description, Artwork: info.ID,
 					Capabilities: src.Capabilities(), Auth: src.AuthPresentation(),
+					AuthMethods: src.AuthMethods(), ServerURLMode: src.ServerURLMode(),
 					Presentation: src.Presentation(),
 				}
 				current := state.Entries()

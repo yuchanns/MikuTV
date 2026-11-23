@@ -365,7 +365,11 @@ func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 				p.framelessHeader(c, "PLUGINS \u00b7 INSTALL", "plus", l.InstallConfirmTitle, body)
 				permIntro := l.InstallPermissionsIntro
 				if len(st.item.Permissions) == 0 {
-					permIntro = l.InstallNoPermissions
+					if st.item.UserServerOrigin {
+						permIntro = l.InstallUserServerPermissions
+					} else {
+						permIntro = l.InstallNoPermissions
+					}
 				}
 				ui.Text(c, permIntro).FillWidth().Margin(24, 0, 14, 0).
 					FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))

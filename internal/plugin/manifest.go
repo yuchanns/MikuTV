@@ -54,6 +54,7 @@ type sourceManifest struct {
 	Main           string `json:"main"`
 	Authentication struct {
 		Methods      []string                  `json:"methods,omitempty"`
+		ServerURL    string                    `json:"serverURL,omitempty"`
 		Presentation provider.AuthPresentation `json:"presentation,omitzero"`
 	} `json:"authentication,omitempty"`
 	Permissions struct {
@@ -116,13 +117,27 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 	if err := decodeJSON(data, &manifest); err != nil {
 		return sourceManifest{}, fmt.Errorf("source manifest: %w", err)
 	}
+	hasCredentials := false
 	for i, method := range manifest.Authentication.Methods {
-		if method != "qrCode" {
+		switch method {
+		case string(provider.AuthMethodQRCode):
+		case string(provider.AuthMethodCredentials):
+			hasCredentials = true
+		default:
 			return sourceManifest{}, fmt.Errorf("%w: authentication method %q", ErrIncompatible, method)
 		}
 		if slices.Contains(manifest.Authentication.Methods[:i], method) {
 			return sourceManifest{}, fmt.Errorf("duplicate authentication method")
 		}
+	}
+	switch manifest.Authentication.ServerURL {
+	case "", "none":
+	case "optional", "required":
+		if !hasCredentials {
+			return sourceManifest{}, fmt.Errorf("%w: authentication serverURL requires credentials method", ErrIncompatible)
+		}
+	default:
+		return sourceManifest{}, fmt.Errorf("%w: authentication serverURL %q", ErrIncompatible, manifest.Authentication.ServerURL)
 	}
 	if manifest.Capabilities.Has(provider.SignIn) != (len(manifest.Authentication.Methods) != 0) {
 		return sourceManifest{}, fmt.Errorf("%w: sign-in capability and authentication method must be declared together", ErrIncompatible)

@@ -493,7 +493,7 @@ func (p *PageContext) toggleCreatorFollow() {
 
 func (p *PageContext) openCreatorSignIn(action func()) bool {
 	p.host.openSignIn()
-	if p.State.Page != app.SignInQR || p.host.creator == nil {
+	if !isSignInPage(p.State.Page) || p.host.creator == nil {
 		return false
 	}
 	p.host.creator.signInAction = action

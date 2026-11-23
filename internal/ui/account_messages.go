@@ -40,7 +40,7 @@ func (accountMessagesPage) Render(c *ui.Context, p *PageContext) {
 	hasPrivate := p.host.PrivateMessages != nil && p.host.PrivateMessages.Available()
 	if !hasNotifications && !hasPrivate {
 		p.region(noticeFooter, nil)
-		p.libraryEmpty(c, "comment", text.SignInNeeded, "", text.SignInAction, "user", noticeStatus,
+		p.libraryEmpty(c, "comment", text.SignInNeeded, "", p.signInActionLabel(), "user", noticeStatus,
 			func() { p.State.Back() })
 		return
 	}

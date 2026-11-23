@@ -14,6 +14,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -217,13 +218,30 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, ext
 	return rt.SetGlobal("host", hostObj)
 }
 
+func sameHTTPOrigin(a, b *url.URL) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+}
+
 func (s *Source) allowRequest(secure bool) func(*http.Request) error {
+	return s.allowRequestWithOrigin(secure, nil)
+}
+
+func (s *Source) allowRequestWithOrigin(secure bool, userOrigin *url.URL) func(*http.Request) error {
 	allow := webapi.AllowHosts(s.manifest.Permissions.Network...)
+	allowUser := userOrigin != nil && s.AllowsUserServerOrigin()
 	return func(req *http.Request) error {
-		if (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.User != nil ||
-			(secure && req.URL.Scheme != "https") ||
+		if req == nil || req.URL == nil || (req.URL.Scheme != "http" && req.URL.Scheme != "https") || req.URL.User != nil ||
 			(req.Host != "" && !strings.EqualFold(req.Host, req.URL.Host)) {
 			return errors.New("source requests require an authorized HTTP origin")
+		}
+		if allowUser && sameHTTPOrigin(req.URL, userOrigin) {
+			return nil
+		}
+		if secure && req.URL.Scheme != "https" {
+			return errors.New("source requests require an authorized HTTPS origin")
 		}
 		return allow(req)
 	}

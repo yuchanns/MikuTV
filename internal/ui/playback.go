@@ -484,8 +484,8 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 		return
 	}
 	contentModal := s.content.overlay()
-	access := playbackHasAccessDialog(state) && !contentModal && p.State.Page != app.SignInQR
-	branchVisible := playbackHasBranchOverlay(state) && !access && !contentModal && p.State.Page != app.SignInQR
+	access := playbackHasAccessDialog(state) && !contentModal && !isSignInPage(p.State.Page)
+	branchVisible := playbackHasBranchOverlay(state) && !access && !contentModal && !isSignInPage(p.State.Page)
 	if branchVisible && s.panel != "" {
 		s.panel = ""
 	}
@@ -543,7 +543,7 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 		})
 		return
 	}
-	if !access && p.State.Page != app.SignInQR {
+	if !access && !isSignInPage(p.State.Page) {
 		s.showAccessHelp = false
 	}
 	surface := *p

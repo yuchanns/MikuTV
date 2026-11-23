@@ -77,7 +77,7 @@ func (p *PageContext) withPlayerAccount(action func()) {
 		return
 	}
 	v.openSignIn()
-	if v.State.Page == app.SignInQR {
+	if isSignInPage(v.State.Page) {
 		v.player.content.afterLogin = action
 	}
 }
@@ -121,7 +121,7 @@ func (p *PageContext) toggleLiveFollow() {
 			if err != nil {
 				if provider.CodeOf(err) == provider.NeedsSignIn {
 					v.openSignIn()
-					if v.State.Page == app.SignInQR {
+					if isSignInPage(v.State.Page) {
 						s.content.afterLogin = p.toggleLiveFollow
 					}
 					return

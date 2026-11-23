@@ -86,7 +86,8 @@ type pluginLabels struct {
 	RepoNotFoundErr, RepoVersionMismatchErr         string
 	RepoConflictErr, RepoResolveFailedErr           string
 	InstallConfirmTitle, InstallPermissionsIntro    string
-	InstallNoPermissions, InstallConfirmAction      string
+	InstallNoPermissions, InstallUserServerPermissions string
+	InstallConfirmAction                            string
 	InstallPendingTitle, InstallPendingBody         string
 	InstallFailedTitle, InstallFailedDefault        string
 	InstallFailedNotInstalled, InstallRetryAction   string
@@ -353,6 +354,12 @@ type authLabels struct {
 	Accounts, AccountsNote, Add, SignOut, SignOutTitle, SignOutNote string
 	Failed, NetworkFailed, AccountExpired                           string
 	AccountTitle, ScanLogin                                         string
+	CredentialsLogin, CredentialsTitle, CredentialsBody             string
+	ServerURLLabel, ServerURLPlaceholder                            string
+	UsernameLabel, UsernamePlaceholder                              string
+	PasswordLabel, PasswordPlaceholder                              string
+	SubmitCredentials, SubmittingCredentials                        string
+	ServerURLInvalid, UsernameRequired, InvalidCredentials          string
 	Connected, AccountStatus, AccountNormal, SignOutCancel          string
 }
 

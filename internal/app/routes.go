@@ -50,6 +50,7 @@ const (
 	PrivateMessageCompose Page = "privateMessageCompose"
 	AccountPicker         Page = "accountPicker"
 	SignInQR            Page = "signInQR"
+	SignInCredentials   Page = "signInCredentials"
 	SignOut             Page = "signOut"
 	Licenses            Page = "licenses"
 	AboutProject        Page = "aboutProject"

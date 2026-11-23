@@ -9,7 +9,7 @@ import (
 
 func (p *PageContext) openSeriesSignIn(action func()) bool {
 	p.host.openSignIn()
-	if p.State.Page != app.SignInQR {
+	if !isSignInPage(p.State.Page) {
 		return false
 	}
 	p.host.series.signInAction = action

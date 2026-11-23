@@ -7,13 +7,30 @@ import (
 	"time"
 )
 
+type AuthMethod string
+
+const (
+	AuthMethodQRCode      AuthMethod = "qrCode"
+	AuthMethodCredentials AuthMethod = "credentials"
+)
+
 type AuthPresentation struct {
-	AccountSubtitle  string `json:"accountSubtitle,omitempty"`
-	GuestTitle       string `json:"guestTitle,omitempty"`
-	GuestDescription string `json:"guestDescription,omitempty"`
-	GuestArtwork     string `json:"guestArtwork,omitempty"`
-	QRTitle          string `json:"qrTitle,omitempty"`
-	QRDescription    string `json:"qrDescription,omitempty"`
+	AccountSubtitle        string `json:"accountSubtitle,omitempty"`
+	GuestTitle             string `json:"guestTitle,omitempty"`
+	GuestDescription       string `json:"guestDescription,omitempty"`
+	GuestArtwork           string `json:"guestArtwork,omitempty"`
+	QRTitle                string `json:"qrTitle,omitempty"`
+	QRDescription          string `json:"qrDescription,omitempty"`
+	CredentialsTitle       string `json:"credentialsTitle,omitempty"`
+	CredentialsDescription string `json:"credentialsDescription,omitempty"`
+	ServerURLPlaceholder   string `json:"serverURLPlaceholder,omitempty"`
+	UsernamePlaceholder    string `json:"usernamePlaceholder,omitempty"`
+}
+
+type CredentialsRequest struct {
+	ServerURL string `json:"serverURL,omitempty"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
 }
 
 type Account struct {
@@ -91,4 +108,10 @@ type Authenticator interface {
 	RestoreAccount(context.Context, Credential) (Credential, error)
 	SetAccount(*Credential) error
 	SignOut(context.Context, Credential) error
+}
+
+// CredentialsAuthenticator is optionally implemented by authenticators that
+// support server URL / username / password sign-in (methods: ["credentials"]).
+type CredentialsAuthenticator interface {
+	SignInWithCredentials(context.Context, CredentialsRequest) (Credential, error)
 }

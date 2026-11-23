@@ -84,6 +84,51 @@ func (s *Source) Capabilities() provider.Capabilities {
 	return append(provider.Capabilities(nil), s.manifest.Capabilities...)
 }
 
+func (m *sourceManifest) requiredExports(capability provider.Capability) ([]string, bool) {
+	if capability == provider.SignIn {
+		exports := []string{restoreAccount, signOut}
+		for _, method := range m.Authentication.Methods {
+			switch method {
+			case string(provider.AuthMethodQRCode):
+				exports = append(exports, beginSignIn, pollSignIn)
+			case string(provider.AuthMethodCredentials):
+				exports = append(exports, signInWithCredentials)
+			}
+		}
+		return exports, true
+	}
+	names, ok := operations[capability]
+	return names, ok
+}
+
+func (s *Source) AuthMethods() []provider.AuthMethod {
+	out := make([]provider.AuthMethod, 0, len(s.manifest.Authentication.Methods))
+	for _, m := range s.manifest.Authentication.Methods {
+		out = append(out, provider.AuthMethod(m))
+	}
+	return out
+}
+
+func (s *Source) HasAuthMethod(method provider.AuthMethod) bool {
+	for _, m := range s.manifest.Authentication.Methods {
+		if m == string(method) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Source) ServerURLMode() string {
+	return s.manifest.Authentication.ServerURL
+}
+
+func (s *Source) AllowsUserServerOrigin() bool {
+	if !s.HasAuthMethod(provider.AuthMethodCredentials) {
+		return false
+	}
+	return s.manifest.Authentication.ServerURL == "required" || s.manifest.Authentication.ServerURL == "optional"
+}
+
 func (s *Source) AuthPresentation() provider.AuthPresentation {
 	return s.manifest.Authentication.Presentation
 }
@@ -132,6 +177,18 @@ func (s *Source) LocalizedMetadata(tag string) (name, description string, auth p
 	if strings.TrimSpace(ov.Auth.QRDescription) != "" {
 		auth.QRDescription = ov.Auth.QRDescription
 	}
+	if strings.TrimSpace(ov.Auth.CredentialsTitle) != "" {
+		auth.CredentialsTitle = ov.Auth.CredentialsTitle
+	}
+	if strings.TrimSpace(ov.Auth.CredentialsDescription) != "" {
+		auth.CredentialsDescription = ov.Auth.CredentialsDescription
+	}
+	if strings.TrimSpace(ov.Auth.ServerURLPlaceholder) != "" {
+		auth.ServerURLPlaceholder = ov.Auth.ServerURLPlaceholder
+	}
+	if strings.TrimSpace(ov.Auth.UsernamePlaceholder) != "" {
+		auth.UsernamePlaceholder = ov.Auth.UsernamePlaceholder
+	}
 	if strings.TrimSpace(ov.Presentation.CreatorMark) != "" {
 		pres.CreatorMark = ov.Presentation.CreatorMark
 	}
@@ -177,7 +234,7 @@ func openPackage(ctx context.Context, input io.ReaderAt, size int64, digest [sha
 	}
 	seen := make(map[provider.Capability]bool)
 	for _, capability := range manifest.Capabilities {
-		names, ok := operations[capability]
+		names, ok := manifest.requiredExports(capability)
 		if !ok || seen[capability] {
 			return nil, fmt.Errorf("%w: invalid operation declaration %q", ErrIncompatible, capability)
 		}

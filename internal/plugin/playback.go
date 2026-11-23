@@ -34,19 +34,20 @@ func (s *Session) ResolvePlayback(ctx context.Context, request provider.Playback
 		return result, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
-	client, scope, signedIn := s.active, s.scope, s.accountID != ""
+	client, scope, signedIn, secret := s.active, s.scope, s.accountID != "", s.secret
 	s.requests.RUnlock()
 	input := struct {
 		provider.PlaybackRequest
-		SignedIn bool `json:"signedIn,omitempty"`
-	}{request, signedIn}
+		SignedIn bool            `json:"signedIn,omitempty"`
+		Secret   json.RawMessage `json:"secret,omitempty"`
+	}{request, signedIn, secret}
 	if err := s.invoke(ctx, scope, client, provider.ResolvePlayback, "resolvePlayback", input, &result.Plan); err != nil {
 		return provider.Playback{}, err
 	}
 	if client == nil {
 		return provider.Playback{}, &provider.Error{Code: provider.PluginFailed}
 	}
-	allowed := s.source.allowRequest(true)
+	allowed := s.allowRequestForSession(true)
 	if !s.ownPlaybackPlan(&result.Plan, request, allowed) {
 		return provider.Playback{}, &provider.Error{Code: provider.PluginFailed}
 	}
@@ -90,7 +91,7 @@ func (s *Session) ResolvePlayback(ctx context.Context, request provider.Playback
 	if cdn == nil {
 		cdn = newCDNTracker()
 	}
-	result.Transport = &playbackTransport{client: &mediaClient, scope: scope, allow: allowed, cdn: cdn}
+	result.Transport = &playbackTransport{session: s, client: &mediaClient, scope: scope, allow: allowed, cdn: cdn}
 	return result, nil
 }
 
@@ -143,7 +144,7 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 	}
 	for index := range plan.Streams {
 		stream := &plan.Streams[index]
-		if !ownPlaybackResource(&stream.Video.Resource, allow) {
+		if !s.ownPlaybackResource(&stream.Video.Resource, allow) {
 			return false
 		}
 		switch stream.Format {
@@ -155,14 +156,14 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 			if !validDASHTrack(stream.Video, true) {
 				return false
 			}
-			if stream.Audio != nil && (!validDASHTrack(*stream.Audio, false) || !ownPlaybackResource(&stream.Audio.Resource, allow)) {
+			if stream.Audio != nil && (!validDASHTrack(*stream.Audio, false) || !s.ownPlaybackResource(&stream.Audio.Resource, allow)) {
 				return false
 			}
 			seenAudio := make(map[string]bool, len(stream.AudioTracks))
 			audioTracks := stream.AudioTracks[:0]
 			for i := range stream.AudioTracks {
 				track := stream.AudioTracks[i]
-				if !validDASHTrack(track, false) || !ownPlaybackResource(&track.Resource, allow) {
+				if !validDASHTrack(track, false) || !s.ownPlaybackResource(&track.Resource, allow) {
 					return false
 				}
 				track.ID = strings.TrimSpace(track.ID)
@@ -202,7 +203,7 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 		if track.ID == "" || track.Label == "" {
 			return false
 		}
-		if ownPlaybackResource(&track.Resource, allow) {
+		if s.ownPlaybackResource(&track.Resource, allow) {
 			tracks = append(tracks, track)
 		}
 	}
@@ -214,7 +215,7 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 			plan.Thumbnails = nil
 		} else {
 			for index, location := range thumbs.Images {
-				image := httpsURL(location)
+				image := s.allowedURL(location)
 				if image == nil || allow(&http.Request{URL: image}) != nil {
 					thumbs.Images[index] = ""
 				}
@@ -227,7 +228,7 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 			return false
 		}
 		if chapter.ImageURL != "" {
-			image := httpsURL(chapter.ImageURL)
+			image := s.allowedURL(chapter.ImageURL)
 			if image == nil || allow(&http.Request{URL: image}) != nil {
 				chapter.ImageURL = ""
 			}
@@ -288,10 +289,10 @@ func validDASHTrack(track provider.PlaybackTrack, video bool) bool {
 		track.FrameRate >= 0 && validRange(track.Init) && validRange(track.Index) && track.Index.First > track.Init.Last
 }
 
-func ownPlaybackResource(resource *provider.PlaybackResource, allow func(*http.Request) error) bool {
+func (s *Session) ownPlaybackResource(resource *provider.PlaybackResource, allow func(*http.Request) error) bool {
 	urls := make([]string, 0, len(resource.URLs))
 	for _, address := range resource.URLs {
-		target := httpsURL(address)
+		target := s.allowedURL(address)
 		if target != nil && allow(&http.Request{URL: target}) == nil {
 			urls = append(urls, address)
 		}
@@ -514,10 +515,11 @@ func (c *cdnTracker) hasHealthyAlternative(urls []string, currentURL string, now
 }
 
 type playbackTransport struct {
-	client *http.Client
-	scope  context.Context
-	allow  func(*http.Request) error
-	cdn    *cdnTracker
+	session *Session
+	client  *http.Client
+	scope   context.Context
+	allow   func(*http.Request) error
+	cdn     *cdnTracker
 }
 
 func (t *playbackTransport) ReportSlow(rawURL string) {
@@ -529,7 +531,7 @@ func (t *playbackTransport) HasHealthyAlternative(urls []string, currentURL stri
 }
 
 func (t *playbackTransport) OpenResource(ctx context.Context, resource provider.PlaybackResource, method, byteRange string) (*http.Response, error) {
-	if (method != http.MethodGet && method != http.MethodHead) || !ownPlaybackResource(&resource, t.allow) {
+	if (method != http.MethodGet && method != http.MethodHead) || t.session == nil || !t.session.ownPlaybackResource(&resource, t.allow) {
 		return nil, &provider.Error{Code: provider.Denied}
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -779,16 +781,20 @@ func (s *Session) invokePlaybackWrite(ctx context.Context, capability provider.C
 }
 
 func (s *Session) PlaybackSubtitles(ctx context.Context, query provider.PlaybackSubtitleQuery) ([]provider.SubtitleCue, error) {
-	if !s.ownsPlayback(query.PlaybackTarget) || !ownPlaybackResource(&query.Track.Resource, s.source.allowRequest(true)) {
+	if !s.ownsPlayback(query.PlaybackTarget) || !s.ownPlaybackResource(&query.Track.Resource, s.allowRequestForSession(true)) {
 		return nil, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
-	client, scope := s.active, s.scope
+	client, scope, secret := s.active, s.scope, s.secret
 	s.requests.RUnlock()
+	input := struct {
+		provider.PlaybackSubtitleQuery
+		Secret json.RawMessage `json:"secret,omitempty"`
+	}{query, secret}
 	var result struct {
 		Cues []provider.SubtitleCue `json:"cues"`
 	}
-	if err := s.invoke(ctx, scope, client, provider.ReadSubtitles, "readSubtitles", query, &result); err != nil {
+	if err := s.invoke(ctx, scope, client, provider.ReadSubtitles, "readSubtitles", input, &result); err != nil {
 		return nil, err
 	}
 	for _, cue := range result.Cues {

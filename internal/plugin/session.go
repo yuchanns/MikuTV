@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -33,12 +34,28 @@ type Session struct {
 	context context.Context
 	cancel  context.CancelFunc
 
-	requests  sync.RWMutex
-	active    *http.Client
-	accountID string
-	secret    json.RawMessage
-	scope     context.Context
-	stop      context.CancelFunc
+	requests   sync.RWMutex
+	active     *http.Client
+	accountID  string
+	secret     json.RawMessage
+	userOrigin *url.URL
+	scope      context.Context
+	stop       context.CancelFunc
+}
+
+func (s *Session) activeUserOrigin() *url.URL {
+	s.requests.RLock()
+	origin := s.userOrigin
+	s.requests.RUnlock()
+	return origin
+}
+
+func (s *Session) allowRequestForSession(secure bool) func(*http.Request) error {
+	return s.source.allowRequestWithOrigin(secure, s.activeUserOrigin())
+}
+
+func (s *Session) allowedURL(raw string) *url.URL {
+	return allowedMediaURL(raw, s.source.AllowsUserServerOrigin(), s.activeUserOrigin())
 }
 
 // NewSession gives an entry its own cookies, storage and cancellation scope.
@@ -70,12 +87,13 @@ func (s *Source) Verify(ctx context.Context) error {
 func (s *Session) Browse(ctx context.Context, request provider.BrowseRequest) (provider.CollectionPage, error) {
 	var page provider.CollectionPage
 	s.requests.RLock()
-	client, scope, signedIn := s.active, s.scope, s.accountID != ""
+	client, scope, signedIn, secret := s.active, s.scope, s.accountID != "", s.secret
 	s.requests.RUnlock()
 	input := struct {
 		provider.BrowseRequest
-		SignedIn bool `json:"signedIn,omitempty"`
-	}{request, signedIn}
+		SignedIn bool            `json:"signedIn,omitempty"`
+		Secret   json.RawMessage `json:"secret,omitempty"`
+	}{request, signedIn, secret}
 	if err := s.invoke(ctx, scope, client, provider.BrowseCatalog, "browse", input, &page); err != nil {
 		return page, err
 	}
@@ -112,13 +130,15 @@ func (s *Session) item(ctx context.Context, ref provider.MediaRef, includeSectio
 	}
 	input := struct {
 		provider.MediaRef
-		IncludeSections bool `json:"includeSections,omitempty"`
-		SignedIn        bool `json:"signedIn,omitempty"`
+		IncludeSections bool            `json:"includeSections,omitempty"`
+		SignedIn        bool            `json:"signedIn,omitempty"`
+		Secret          json.RawMessage `json:"secret,omitempty"`
 	}{MediaRef: ref, IncludeSections: includeSections}
 	s.requests.RLock()
-	client, scope, signedIn := s.active, s.scope, s.accountID != ""
+	client, scope, signedIn, secret := s.active, s.scope, s.accountID != "", s.secret
 	s.requests.RUnlock()
 	input.SignedIn = signedIn
+	input.Secret = secret
 	if err := s.invoke(ctx, scope, client, provider.GetCatalogItem, "getItem", input, &item); err != nil {
 		return item, err
 	}
@@ -155,10 +175,10 @@ func (s *Session) ownItem(item *provider.MediaItem) error {
 			return err
 		}
 	}
-	if item.CoverURL != "" && httpsURL(item.CoverURL) == nil {
+	if item.CoverURL != "" && s.allowedURL(item.CoverURL) == nil {
 		item.CoverURL = ""
 	}
-	if item.BackdropURL != "" && httpsURL(item.BackdropURL) == nil {
+	if item.BackdropURL != "" && s.allowedURL(item.BackdropURL) == nil {
 		item.BackdropURL = ""
 	}
 	item.Ref.EntryID = s.entryID
@@ -206,15 +226,16 @@ func (s *Session) ReadAccount(ctx context.Context, request provider.AccountReque
 		return provider.AccountPage{}, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
-	client, scope, accountID := s.active, s.scope, s.accountID
+	client, scope, accountID, secret := s.active, s.scope, s.accountID, s.secret
 	s.requests.RUnlock()
 	if accountID == "" {
 		return provider.AccountPage{}, &provider.Error{Code: provider.NeedsSignIn}
 	}
 	input := struct {
 		provider.AccountRequest
-		Owner string `json:"owner"`
-	}{request, accountID}
+		Owner  string          `json:"owner"`
+		Secret json.RawMessage `json:"secret,omitempty"`
+	}{request, accountID, secret}
 	var page provider.AccountPage
 	if err := s.invoke(ctx, scope, client, request.Section.Capability(), "readAccount", input, &page); err != nil {
 		return provider.AccountPage{}, err
@@ -231,7 +252,7 @@ func (s *Session) ReadAccount(ctx context.Context, request provider.AccountReque
 			row.ProgressSeconds != nil && *row.ProgressSeconds < 0 {
 			return provider.AccountPage{}, &provider.Error{Code: provider.PluginFailed}
 		}
-		if row.CreatorAvatarURL != "" && httpsURL(row.CreatorAvatarURL) == nil {
+		if row.CreatorAvatarURL != "" && s.allowedURL(row.CreatorAvatarURL) == nil {
 			row.CreatorAvatarURL = ""
 		}
 		if row.Ref != nil {
@@ -337,6 +358,10 @@ func (s *Session) MarkNotificationsRead(ctx context.Context, request provider.No
 }
 
 func (s *Session) invoke(ctx, scope context.Context, client *http.Client, op provider.Capability, export string, request, result any) error {
+	return s.invokeWithOrigin(ctx, scope, client, s.activeUserOrigin(), op, export, request, result)
+}
+
+func (s *Session) invokeWithOrigin(ctx, scope context.Context, client *http.Client, userOrigin *url.URL, op provider.Capability, export string, request, result any) error {
 	if !s.source.manifest.Capabilities.Has(op) {
 		return &provider.Error{Code: provider.Unsupported}
 	}
@@ -352,7 +377,7 @@ func (s *Session) invoke(ctx, scope context.Context, client *http.Client, op pro
 		return &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
 	secure := strings.HasPrefix(string(op), "account.") || op == provider.ReportPlayback || op == provider.WriteLiveChat
-	data, err := s.source.execute(ctx, client, s.storage, export, params, secure)
+	data, err := s.source.executeWithOrigin(ctx, client, s.storage, export, params, secure, userOrigin)
 	if scope.Err() != nil {
 		return context.Canceled
 	}
@@ -392,13 +417,17 @@ var invokeScript = func() *moejs.Script {
 // Each operation owns its loop. Stopping it cannot interrupt a different call,
 // and a completed call cannot leave its timers or promises running.
 func (s *Source) execute(ctx context.Context, client *http.Client, store *Storage, export string, params []byte, secure bool) ([]byte, error) {
+	return s.executeWithOrigin(ctx, client, store, export, params, secure, nil)
+}
+
+func (s *Source) executeWithOrigin(ctx context.Context, client *http.Client, store *Storage, export string, params []byte, secure bool, userOrigin *url.URL) ([]byte, error) {
 	rt := moejs.NewRuntime(moejs.Options{MemoryLimit: heapLimit, DisableDynamicCode: true})
 	loop, err := eventloop.New(rt, eventloop.Options{})
 	if err != nil {
 		return nil, &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
 	defer loop.Terminate()
-	opts := webapi.Options{Context: ctx, Client: client, Allow: s.allowRequest(secure)}
+	opts := webapi.Options{Context: ctx, Client: client, Allow: s.allowRequestWithOrigin(secure, userOrigin)}
 	api, err := webapi.Install(loop, opts)
 	if err != nil {
 		return nil, &provider.Error{Code: provider.PluginFailed, Cause: err}
@@ -417,7 +446,8 @@ func (s *Source) execute(ctx context.Context, client *http.Client, store *Storag
 			return err
 		}
 		for _, capability := range s.manifest.Capabilities {
-			for _, name := range operations[capability] {
+			names, _ := s.manifest.requiredExports(capability)
+			for _, name := range names {
 				if value, ok := rt.Export(name); !ok || !value.IsObject() || !value.AsObject().IsCallable() {
 					return fmt.Errorf("%w: %s is not callable", ErrIncompatible, name)
 				}
@@ -489,7 +519,7 @@ func errorCode(value string) provider.ErrorCode {
 }
 
 func (s *Source) httpClient() *http.Client {
-	if len(s.manifest.Permissions.Network) == 0 {
+	if len(s.manifest.Permissions.Network) == 0 && !s.AllowsUserServerOrigin() {
 		return nil
 	}
 	jar, _ := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})

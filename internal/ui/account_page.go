@@ -98,7 +98,7 @@ func (p *PageContext) guestAccount(c *ui.Context, entry app.Entry, snapshot app.
 			}
 			ui.Box(c).Height(30)
 			ui.Row(c).Gap(16).Children(func() {
-				label, action := labels.ScanLogin, p.host.openSignIn
+				label, action := p.signInActionLabel(), p.host.openSignIn
 				if !snapshot.Ready && !snapshot.Busy {
 					label, action = p.Assets.Text.Retry, p.host.Auth.Load
 				}

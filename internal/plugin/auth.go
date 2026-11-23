@@ -19,12 +19,13 @@ import (
 )
 
 const (
-	beginSignIn    = "beginSignIn"
-	pollSignIn     = "pollSignIn"
-	restoreAccount = "restoreAccount"
-	signOut        = "signOut"
-	maxAvatarBytes = 512 << 10
-	maxAvatarSide  = 1024
+	beginSignIn           = "beginSignIn"
+	pollSignIn            = "pollSignIn"
+	signInWithCredentials = "signInWithCredentials"
+	restoreAccount        = "restoreAccount"
+	signOut               = "signOut"
+	maxAvatarBytes        = 512 << 10
+	maxAvatarSide         = 1024
 )
 
 type qrResult struct {
@@ -50,8 +51,34 @@ type storedCookie struct {
 }
 
 type storedCredential struct {
-	Secret  json.RawMessage `json:"secret"`
-	Cookies []storedCookie  `json:"cookies,omitempty"`
+	Secret       json.RawMessage `json:"secret"`
+	Cookies      []storedCookie  `json:"cookies,omitempty"`
+	ServerOrigin string          `json:"serverOrigin,omitempty"`
+}
+
+// NormalizeServerOrigin validates a user-entered self-hosted server address
+// and returns its exact origin (scheme://host[:port]) plus cleaned base URL.
+func NormalizeServerOrigin(raw string) (*url.URL, string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || len(trimmed) > 512 {
+		return nil, "", errors.New("server address required")
+	}
+	candidate := trimmed
+	if !strings.Contains(candidate, "://") {
+		if strings.Contains(candidate, ":") && !strings.HasSuffix(candidate, ":443") {
+			candidate = "http://" + candidate
+		} else {
+			candidate = "https://" + candidate
+		}
+	}
+	u, err := url.Parse(candidate)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" ||
+		u.User != nil || u.Opaque != "" || u.RawQuery != "" || u.Fragment != "" {
+		return nil, "", errors.New("invalid server URL")
+	}
+	origin := &url.URL{Scheme: strings.ToLower(u.Scheme), Host: u.Host}
+	baseURL := strings.TrimRight(origin.String()+u.Path, "/")
+	return origin, baseURL, nil
 }
 
 type qrAttempt struct {
@@ -62,12 +89,15 @@ type qrAttempt struct {
 }
 
 func (s *Session) BeginSignIn(ctx context.Context) (provider.QRAttempt, error) {
-	client, err := s.credentialClient(nil, true)
+	if !s.source.HasAuthMethod(provider.AuthMethodQRCode) {
+		return nil, &provider.Error{Code: provider.Unsupported}
+	}
+	client, err := s.credentialClient(nil, true, nil)
 	if err != nil {
 		return nil, err
 	}
 	var result qrResult
-	if err := s.invoke(ctx, s.context, client, provider.SignIn, beginSignIn, struct{}{}, &result); err != nil {
+	if err := s.invokeWithOrigin(ctx, s.context, client, nil, provider.SignIn, beginSignIn, struct{}{}, &result); err != nil {
 		return nil, err
 	}
 	expires := time.UnixMilli(result.ExpiresAt)
@@ -75,6 +105,45 @@ func (s *Session) BeginSignIn(ctx context.Context) (provider.QRAttempt, error) {
 		return nil, &provider.Error{Code: provider.PluginFailed}
 	}
 	return &qrAttempt{session: s, client: client, challenge: provider.QRChallenge{URL: result.URL, ExpiresAt: expires}, key: result.Key}, nil
+}
+
+func (s *Session) SignInWithCredentials(ctx context.Context, req provider.CredentialsRequest) (provider.Credential, error) {
+	if !s.source.HasAuthMethod(provider.AuthMethodCredentials) {
+		return provider.Credential{}, &provider.Error{Code: provider.Unsupported}
+	}
+	var userOrigin *url.URL
+	serverURL := ""
+	if s.source.AllowsUserServerOrigin() {
+		rawServer := strings.TrimSpace(req.ServerURL)
+		if rawServer == "" {
+			if s.source.ServerURLMode() == "required" {
+				return provider.Credential{}, &provider.Error{Code: provider.Denied}
+			}
+		} else {
+			var err error
+			userOrigin, serverURL, err = NormalizeServerOrigin(rawServer)
+			if err != nil {
+				return provider.Credential{}, &provider.Error{Code: provider.Denied, Cause: err}
+			}
+		}
+	}
+	client, err := s.credentialClient(nil, userOrigin == nil, userOrigin)
+	if err != nil {
+		return provider.Credential{}, err
+	}
+	params := provider.CredentialsRequest{
+		ServerURL: serverURL,
+		Username:  strings.TrimSpace(req.Username),
+		Password:  req.Password,
+	}
+	var result authResult
+	if err := s.invokeWithOrigin(ctx, s.context, client, userOrigin, provider.SignIn, signInWithCredentials, params, &result); err != nil {
+		return provider.Credential{}, err
+	}
+	if result.Status != "" && result.Status != provider.QRApproved {
+		return provider.Credential{}, &provider.Error{Code: provider.Denied}
+	}
+	return s.credential(result, nil, userOrigin)
 }
 
 func (a *qrAttempt) Challenge() provider.QRChallenge { return a.challenge }
@@ -85,14 +154,14 @@ func (a *qrAttempt) Poll(ctx context.Context) (provider.QRProgress, error) {
 		Key string `json:"key"`
 	}{a.key}
 	s := a.session
-	if err := s.invoke(ctx, s.context, a.client, provider.SignIn, pollSignIn, params, &result); err != nil {
+	if err := s.invokeWithOrigin(ctx, s.context, a.client, nil, provider.SignIn, pollSignIn, params, &result); err != nil {
 		return provider.QRProgress{}, err
 	}
 	switch result.Status {
 	case provider.QRWaiting, provider.QRScanned, provider.QRExpired:
 		return provider.QRProgress{Status: result.Status}, nil
 	case provider.QRApproved:
-		credential, err := s.credential(result, nil)
+		credential, err := s.credential(result, nil, nil)
 		return provider.QRProgress{Status: provider.QRApproved, Credential: credential}, err
 	default:
 		return provider.QRProgress{}, &provider.Error{Code: provider.PluginFailed}
@@ -100,38 +169,39 @@ func (a *qrAttempt) Poll(ctx context.Context) (provider.QRProgress, error) {
 }
 
 func (s *Session) RestoreAccount(ctx context.Context, previous provider.Credential) (provider.Credential, error) {
-	stored, client, err := s.useCredential(previous)
+	stored, userOrigin, client, err := s.useCredential(previous)
 	if err != nil {
 		return provider.Credential{}, err
 	}
 	var result authResult
-	if err := s.invoke(ctx, s.context, client, provider.SignIn, restoreAccount, stored.Secret, &result); err != nil {
+	if err := s.invokeWithOrigin(ctx, s.context, client, userOrigin, provider.SignIn, restoreAccount, stored.Secret, &result); err != nil {
 		return provider.Credential{}, err
 	}
 	if result.Account.ID != previous.Account.ID {
 		return provider.Credential{}, &provider.Error{Code: provider.Denied}
 	}
-	return s.credential(result, stored.Cookies)
+	return s.credential(result, stored.Cookies, userOrigin)
 }
 
 func (s *Session) SignOut(ctx context.Context, previous provider.Credential) error {
-	stored, client, err := s.useCredential(previous)
+	stored, userOrigin, client, err := s.useCredential(previous)
 	if err != nil {
 		return err
 	}
 	var result struct{}
-	return s.invoke(ctx, s.context, client, provider.SignIn, signOut, stored.Secret, &result)
+	return s.invokeWithOrigin(ctx, s.context, client, userOrigin, provider.SignIn, signOut, stored.Secret, &result)
 }
 
 func (s *Session) SetAccount(credential *provider.Credential) error {
 	var client *http.Client
 	var secret json.RawMessage
+	var userOrigin *url.URL
 	var err error
 	if credential == nil {
-		client, err = s.credentialClient(nil, false)
+		client, err = s.credentialClient(nil, false, nil)
 	} else {
 		var stored storedCredential
-		stored, client, err = s.useCredential(*credential)
+		stored, userOrigin, client, err = s.useCredential(*credential)
 		secret = stored.Secret
 	}
 	if err != nil {
@@ -143,7 +213,7 @@ func (s *Session) SetAccount(credential *provider.Credential) error {
 		return err
 	}
 	s.stop()
-	s.active, s.secret = client, secret
+	s.active, s.secret, s.userOrigin = client, secret, userOrigin
 	s.accountID = ""
 	if credential != nil {
 		s.accountID = credential.Account.ID
@@ -152,14 +222,14 @@ func (s *Session) SetAccount(credential *provider.Credential) error {
 	return nil
 }
 
-func (s *Session) credential(result authResult, cookies []storedCookie) (provider.Credential, error) {
+func (s *Session) credential(result authResult, cookies []storedCookie, userOrigin *url.URL) (provider.Credential, error) {
 	if result.Account.ID == "" || strings.TrimSpace(result.Account.Name) == "" || len(result.Secret) == 0 {
 		return provider.Credential{}, &provider.Error{Code: provider.PluginFailed}
 	}
 	if result.Cookies != nil {
 		cookies = nil
 		for _, item := range result.Cookies {
-			origin := s.cookieOrigin(item.URL)
+			origin := s.cookieOrigin(item.URL, userOrigin)
 			if origin == nil {
 				return provider.Credential{}, &provider.Error{Code: provider.Denied}
 			}
@@ -179,23 +249,35 @@ func (s *Session) credential(result authResult, cookies []storedCookie) (provide
 			}
 		}
 	}
-	data, err := json.Marshal(storedCredential{Secret: result.Secret, Cookies: cookies})
+	stored := storedCredential{Secret: result.Secret, Cookies: cookies}
+	if userOrigin != nil && s.source.AllowsUserServerOrigin() {
+		stored.ServerOrigin = userOrigin.String()
+	}
+	data, err := json.Marshal(stored)
 	if err != nil {
 		return provider.Credential{}, &provider.Error{Code: provider.PluginFailed}
 	}
 	return provider.Credential{Account: result.Account, Data: data, PendingConfirmation: result.PendingConfirmation}, nil
 }
 
-func (s *Session) useCredential(credential provider.Credential) (storedCredential, *http.Client, error) {
+func (s *Session) useCredential(credential provider.Credential) (storedCredential, *url.URL, *http.Client, error) {
 	var stored storedCredential
 	if err := decodeJSON(credential.Data, &stored); err != nil || len(stored.Secret) == 0 {
-		return storedCredential{}, nil, &provider.Error{Code: provider.PluginFailed}
+		return storedCredential{}, nil, nil, &provider.Error{Code: provider.PluginFailed}
 	}
-	client, err := s.credentialClient(stored.Cookies, true)
-	return stored, client, err
+	var userOrigin *url.URL
+	if stored.ServerOrigin != "" && s.source.AllowsUserServerOrigin() {
+		origin, _, err := NormalizeServerOrigin(stored.ServerOrigin)
+		if err != nil {
+			return storedCredential{}, nil, nil, &provider.Error{Code: provider.Denied, Cause: err}
+		}
+		userOrigin = origin
+	}
+	client, err := s.credentialClient(stored.Cookies, userOrigin == nil, userOrigin)
+	return stored, userOrigin, client, err
 }
 
-func (s *Session) credentialClient(cookies []storedCookie, secure bool) (*http.Client, error) {
+func (s *Session) credentialClient(cookies []storedCookie, secure bool, userOrigin *url.URL) (*http.Client, error) {
 	if s.client == nil {
 		if len(cookies) != 0 {
 			return nil, &provider.Error{Code: provider.Denied}
@@ -204,7 +286,7 @@ func (s *Session) credentialClient(cookies []storedCookie, secure bool) (*http.C
 	}
 	jar, _ := cookiejar.New(&cookiejar.Options{PublicSuffixList: publicsuffix.List})
 	for _, cookie := range cookies {
-		origin := s.cookieOrigin(cookie.URL)
+		origin := s.cookieOrigin(cookie.URL, userOrigin)
 		if origin == nil || cookie.Cookie == nil || cookie.Cookie.Valid() != nil {
 			return nil, &provider.Error{Code: provider.Denied}
 		}
@@ -239,7 +321,7 @@ func (s *Session) LoadCatalogBackdrop(ctx context.Context, location string) (ima
 }
 
 func (s *Session) loadArtwork(ctx context.Context, location string, maxBytes int64, maxSide int) (image.Image, error) {
-	target := httpsURL(location)
+	target := s.allowedURL(location)
 	if target == nil || s.client == nil {
 		return nil, &provider.Error{Code: provider.Denied}
 	}
@@ -247,7 +329,7 @@ func (s *Session) loadArtwork(ctx context.Context, location string, maxBytes int
 	if err != nil {
 		return nil, err
 	}
-	if err := s.source.allowRequest(true)(request); err != nil {
+	if err := s.allowRequestForSession(true)(request); err != nil {
 		return nil, &provider.Error{Code: provider.Denied, Cause: err}
 	}
 
@@ -294,12 +376,29 @@ func toTightRGBA(src image.Image) *image.RGBA {
 	return dst
 }
 
-func (s *Session) cookieOrigin(value string) *url.URL {
-	u := httpsURL(value)
-	if u == nil || s.source.allowRequest(true)(&http.Request{URL: u}) != nil {
+func (s *Session) cookieOrigin(value string, userOrigin *url.URL) *url.URL {
+	u := allowedMediaURL(value, s.source.AllowsUserServerOrigin(), userOrigin)
+	if u == nil || s.source.allowRequestWithOrigin(true, userOrigin)(&http.Request{URL: u}) != nil {
 		return nil
 	}
 	u.RawQuery, u.Fragment, u.RawFragment, u.ForceQuery = "", "", "", false
+	return u
+}
+
+func allowedMediaURL(value string, allowUserOrigin bool, userOrigin *url.URL) *url.URL {
+	if u := httpsURL(value); u != nil {
+		return u
+	}
+	if !allowUserOrigin || userOrigin == nil {
+		return nil
+	}
+	u, err := url.Parse(value)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.Opaque != "" {
+		return nil
+	}
+	if !sameHTTPOrigin(u, userOrigin) {
+		return nil
+	}
 	return u
 }
 
