@@ -50,7 +50,10 @@ type playbackContent struct {
 	danmakuGen             uint64
 	danmakuSchedule        []scheduledDanmaku
 	danmakuScheduleGen     uint64
+	danmakuScheduleRules   uint64
 	danmakuScheduleDensity int
+	danmakuScheduleArea    app.DanmakuArea
+	danmakuScheduleSize    app.DanmakuFontSize
 	danmakuScheduleWidth   int
 	danmakuClockAt         time.Time
 	danmakuClockPos        float64
@@ -68,16 +71,31 @@ type playbackContent struct {
 	afterLogin             func()
 }
 
-type playbackSettings struct {
-	initialized bool
-	show        bool
-	density     int
-	opacity     int
+func danmakuFontMetrics(size app.DanmakuFontSize) (fontSize float32, stride float32) {
+	if size == app.DanmakuFontLarge {
+		return 36, 52
+	}
+	return 28, 41
 }
 
-func (s *playbackSettings) defaults() {
-	if !s.initialized {
-		*s = playbackSettings{initialized: true, show: true, density: 60, opacity: 75}
+func danmakuLaneBounds(area app.DanmakuArea, size app.DanmakuFontSize) (scrollMax, topMax, bottomMax int) {
+	large := size == app.DanmakuFontLarge
+	switch area {
+	case app.DanmakuAreaTop:
+		if large {
+			return 3, 2, 0
+		}
+		return 4, 2, 0
+	case app.DanmakuAreaFull:
+		if large {
+			return 11, 3, 3
+		}
+		return danmakuMaxScrollLanes, danmakuMaxStaticLanes, danmakuMaxStaticLanes
+	default: // upper half
+		if large {
+			return 7, 2, 0
+		}
+		return 9, 3, 0
 	}
 }
 
@@ -139,22 +157,28 @@ func (s *playbackContent) danmakuPosition(now time.Time, state app.PlaybackState
 	return predicted
 }
 
-func (s *playbackContent) ensureDanmakuSchedule(density int, viewportWidth float32) []scheduledDanmaku {
+func (s *playbackContent) ensureDanmakuSchedule(display app.DanmakuDisplay, rules []provider.DanmakuRule, rulesRev uint64, viewportWidth float32) []scheduledDanmaku {
 	widthKey := int(math.Round(float64(viewportWidth)))
 	if s.danmakuScheduleGen == s.danmakuGen &&
-		s.danmakuScheduleDensity == density &&
+		s.danmakuScheduleRules == rulesRev &&
+		s.danmakuScheduleDensity == display.Density &&
+		s.danmakuScheduleArea == display.Area &&
+		s.danmakuScheduleSize == display.FontSize &&
 		s.danmakuScheduleWidth == widthKey {
 		return s.danmakuSchedule
 	}
-	s.danmakuSchedule = scheduleDanmaku(s.danmaku, density, viewportWidth)
+	s.danmakuSchedule = scheduleDanmakuWithOptions(s.danmaku, display, rules, viewportWidth)
 	s.danmakuScheduleGen = s.danmakuGen
-	s.danmakuScheduleDensity = density
+	s.danmakuScheduleRules = rulesRev
+	s.danmakuScheduleDensity = display.Density
+	s.danmakuScheduleArea = display.Area
+	s.danmakuScheduleSize = display.FontSize
 	s.danmakuScheduleWidth = widthKey
 	return s.danmakuSchedule
 }
 
-func (s *playbackContent) hasActiveDanmaku(pos, lookahead float64, density int, viewportWidth float32) bool {
-	schedule := s.ensureDanmakuSchedule(density, viewportWidth)
+func (s *playbackContent) hasActiveDanmaku(pos, lookahead float64, display app.DanmakuDisplay, rules []provider.DanmakuRule, rulesRev uint64, viewportWidth float32) bool {
+	schedule := s.ensureDanmakuSchedule(display, rules, rulesRev, viewportWidth)
 	if len(schedule) == 0 {
 		return false
 	}
@@ -172,13 +196,15 @@ func (s *playbackContent) hasActiveDanmaku(pos, lookahead float64, density int, 
 }
 
 func (s *playbackContent) needsAnimationFrame(v *View, state app.PlaybackState, now time.Time, viewportWidth float32) bool {
-	v.playbackSettings.defaults()
+	snap := v.DanmakuRules.Snapshot()
+	display := snap.Display
 	entry, _ := v.State.Current()
 	if state.Resolution.Plan.Live || state.Target.Ref.Kind == provider.Live ||
-		!v.playbackSettings.show || !entry.Capabilities.Has(provider.ReadDanmaku) ||
+		!display.Show || !entry.Capabilities.Has(provider.ReadDanmaku) ||
 		state.Target.PartID == "" || !state.Clock.HasFrame || state.Clock.Ended || state.Failure != "" {
 		return false
 	}
+	v.DanmakuRules.EnsureSynced()
 	s.loadDanmaku(v, state)
 	if !state.Playing || state.Clock.Buffering || len(s.danmaku) == 0 {
 		return false
@@ -187,15 +213,16 @@ func (s *playbackContent) needsAnimationFrame(v *View, state app.PlaybackState, 
 	if !s.danmakuClockAt.IsZero() && s.danmakuClockRev == state.Revision {
 		pos = s.danmakuClockPos
 	}
-	return s.hasActiveDanmaku(pos, 0.25, v.playbackSettings.density, viewportWidth)
+	return s.hasActiveDanmaku(pos, 0.25, display, snap.Rules, snap.Revision, viewportWidth)
 }
 
 func (s *playbackContent) refresh(v *View, state app.PlaybackState) time.Duration {
-	v.playbackSettings.defaults()
+	display := v.danmakuDisplay()
 	entry, _ := v.State.Current()
 	live := state.Resolution.Plan.Live || state.Target.Ref.Kind == provider.Live
-	if !live && v.playbackSettings.show && entry.Capabilities.Has(provider.ReadDanmaku) &&
+	if !live && display.Show && entry.Capabilities.Has(provider.ReadDanmaku) &&
 		state.Target.PartID != "" && state.Clock.HasFrame && !state.Clock.Ended {
+		v.DanmakuRules.EnsureSynced()
 		s.loadDanmaku(v, state)
 	}
 	if state.Playing || state.Loading || state.Switching || s.subtitle != "" {
@@ -313,7 +340,7 @@ func (s *playbackContent) thumbnail(v *View, seconds float64) ui.ImageSource {
 func (p *PageContext) playbackTextLayers(c *ui.Context, state app.PlaybackState) {
 	v, s, colors := p.host, &p.host.player, p.Theme.Colors
 	if state.Clock.HasFrame && !state.Clock.Ended && state.Failure == "" {
-		if v.playbackSettings.show {
+		if v.danmakuDisplay().Show {
 			p.drawDanmaku(c, state)
 		}
 		for _, cue := range s.content.cues {
@@ -344,17 +371,25 @@ func (p *PageContext) playbackTextLayers(c *ui.Context, state app.PlaybackState)
 }
 
 func estimateDanmakuWidth(text string) float32 {
+	return estimateDanmakuWidthScaled(text, app.DanmakuFontNormal)
+}
+
+func estimateDanmakuWidthScaled(text string, size app.DanmakuFontSize) float32 {
+	scale := float32(1)
+	if size == app.DanmakuFontLarge {
+		scale = 36.0 / 28.0
+	}
 	var width float32
 	for _, r := range text {
 		switch {
 		case r > 0x7f || unicode.Is(unicode.Han, r):
-			width += 30
+			width += 30 * scale
 		case r >= 'A' && r <= 'Z':
-			width += 20
+			width += 20 * scale
 		case strings.ContainsRune("iIl1!.,;:'| ", r):
-			width += 11
+			width += 11 * scale
 		default:
-			width += 17
+			width += 17 * scale
 		}
 	}
 	return max(36, width+28)
@@ -383,26 +418,46 @@ type scrollLaneState struct {
 }
 
 func scheduleDanmaku(items []provider.Danmaku, density int, viewportWidth float32) []scheduledDanmaku {
-	if len(items) == 0 || density <= 0 || viewportWidth <= 0 {
+	display := app.DefaultDanmakuDisplay()
+	display.Density = density
+	display.Area = app.DanmakuAreaFull
+	return scheduleDanmakuWithOptions(items, display, nil, viewportWidth)
+}
+
+func scheduleDanmakuWithOptions(items []provider.Danmaku, display app.DanmakuDisplay, rules []provider.DanmakuRule, viewportWidth float32) []scheduledDanmaku {
+	if len(items) == 0 || display.Density <= 0 || viewportWidth <= 0 {
 		return nil
 	}
-	clamped := min(max(density, 10), 100)
-	scrollCount := max(2, min(danmakuMaxScrollLanes, (clamped*danmakuMaxScrollLanes+99)/100))
-	staticCount := max(1, min(danmakuMaxStaticLanes, (clamped*danmakuMaxStaticLanes+99)/100))
+	clamped := min(max(display.Density, 10), 100)
+	scrollMax, topMax, bottomMax := danmakuLaneBounds(display.Area, display.FontSize)
+	scrollCount := max(2, min(scrollMax, (clamped*scrollMax+99)/100))
+	topCount := 0
+	if topMax > 0 {
+		topCount = max(1, min(topMax, (clamped*topMax+99)/100))
+	}
+	bottomCount := 0
+	if bottomMax > 0 {
+		bottomCount = max(1, min(bottomMax, (clamped*bottomMax+99)/100))
+	}
 	gap := float64(80 + (100-clamped)*4)
 	viewW := float64(viewportWidth)
 
 	scrollLanes := make([]scrollLaneState, scrollCount)
-	topLanes := make([]float64, staticCount)
-	bottomLanes := make([]float64, staticCount)
+	topLanes := make([]float64, topCount)
+	bottomLanes := make([]float64, bottomCount)
 	for i := range topLanes {
 		topLanes[i] = -1
+	}
+	for i := range bottomLanes {
 		bottomLanes[i] = -1
 	}
 
 	seen := make(map[string]int, len(items))
 	result := make([]scheduledDanmaku, 0, len(items))
 	for _, item := range items {
+		if app.DanmakuBlockedByRules(rules, item.Text, item.SenderID, item.SenderHash) {
+			continue
+		}
 		t := item.Seconds
 		sig := fmt.Sprintf("%d:%s:%s", int64(math.Round(t*1000)), item.Mode, item.Text)
 		ordinal := seen[sig]
@@ -443,7 +498,7 @@ func scheduleDanmaku(items []provider.Danmaku, density int, viewportWidth float3
 				start: t, end: t + danmakuStaticTime, lane: lane,
 			})
 		default:
-			w := float64(estimateDanmakuWidth(item.Text))
+			w := float64(estimateDanmakuWidthScaled(item.Text, display.FontSize))
 			speed := (viewW + w) / danmakuMovingTime
 			lane := -1
 			for l, prev := range scrollLanes {
@@ -476,9 +531,10 @@ func (p *PageContext) drawDanmaku(c *ui.Context, state app.PlaybackState) {
 		p.drawLiveDanmaku(c, state)
 		return
 	}
-	settings := p.host.playbackSettings
+	snap := p.host.DanmakuRules.Snapshot()
+	display := snap.Display
 	content := &p.host.player.content
-	if len(content.danmaku) == 0 || settings.density == 0 {
+	if len(content.danmaku) == 0 || display.Density == 0 {
 		return
 	}
 	rate := float64(1)
@@ -486,14 +542,15 @@ func (p *PageContext) drawDanmaku(c *ui.Context, state app.PlaybackState) {
 		rate = p.host.Playback.Rate()
 	}
 	position := content.danmakuPosition(c.Now(), state, rate)
-	schedule := content.ensureDanmakuSchedule(settings.density, p.Width)
+	schedule := content.ensureDanmakuSchedule(display, snap.Rules, snap.Revision, p.Width)
 	if len(schedule) == 0 {
 		return
 	}
 	first := sort.Search(len(schedule), func(i int) bool { return schedule[i].start > position-danmakuMovingTime })
 	ink := paint(p.Theme.Colors.Playback.Foreground)
 	shadow := paint(p.Theme.Colors.Playback.SubtitleOutline)
-	opacity := float32(settings.opacity) / 100
+	opacity := float32(display.Opacity) / 100
+	fontSize, stride := danmakuFontMetrics(display.FontSize)
 	for i := first; i < len(schedule); i++ {
 		item := schedule[i]
 		if item.start > position {
@@ -502,17 +559,17 @@ func (p *PageContext) drawDanmaku(c *ui.Context, state app.PlaybackState) {
 		if position >= item.end {
 			continue
 		}
-		text := ui.Text(c.Key(danmakuNodeKey{item.key}), item.text).Absolute().FontSize(28).FontWeight(640).
+		text := ui.Text(c.Key(danmakuNodeKey{item.key}), item.text).Absolute().FontSize(fontSize).FontWeight(640).
 			Opacity(opacity).TextColor(ink).TextShadow(0, 1, 4, shadow).Cache()
 		switch item.mode {
 		case provider.DanmakuTop:
-			text.Top(164 + float32(item.lane*40)).Left(p.Width * .28).Right(p.Width * .28).TextAlign(ui.Center)
+			text.Top(164 + float32(item.lane)*stride).Left(p.Width * .28).Right(p.Width * .28).TextAlign(ui.Center)
 		case provider.DanmakuBottom:
-			text.Bottom(246 + float32(item.lane*40)).Left(p.Width * .28).Right(p.Width * .28).TextAlign(ui.Center)
+			text.Bottom(246 + float32(item.lane)*stride).Left(p.Width * .28).Right(p.Width * .28).TextAlign(ui.Center)
 		default:
 			elapsed := position - item.start
 			x := p.Width - (p.Width+item.width)*float32(elapsed/danmakuMovingTime)
-			text.Left(0).Top(153 + float32(item.lane*41)).Width(item.width).MaxLines(1).Translate(x, 0)
+			text.Left(0).Top(153 + float32(item.lane)*stride).Width(item.width).MaxLines(1).Translate(x, 0)
 		}
 	}
 }
@@ -520,12 +577,20 @@ func (p *PageContext) drawDanmaku(c *ui.Context, state app.PlaybackState) {
 func (p *PageContext) playbackDanmakuOptions(c *ui.Context) {
 	v, text := p.host, p.Assets.Text.Playback
 	colors := p.Theme.Colors
-	options := &v.playbackSettings
-	p.playbackOption(c, playbackOptionID(playerDanmaku, "enabled"), text.On, "", options.show, func() { options.show = true })
-	p.playbackOption(c, playbackOptionID(playerDanmaku, "disabled"), text.Off, "", !options.show, func() { options.show = false })
+	display := v.danmakuDisplay()
+	p.playbackOption(c, playbackOptionID(playerDanmaku, "enabled"), text.On, "", display.Show, func() {
+		_ = v.DanmakuRules.UpdateDisplay(func(cfg *app.DanmakuDisplay) { cfg.Show = true })
+	})
+	p.playbackOption(c, playbackOptionID(playerDanmaku, "disabled"), text.Off, "", !display.Show, func() {
+		_ = v.DanmakuRules.UpdateDisplay(func(cfg *app.DanmakuDisplay) { cfg.Show = false })
+	})
 	ui.Column(c).FillWidth().Margin(14, 0, 19, 0).Gap(13).Children(func() {
-		p.playbackSlider(c, "density", text.Density, &options.density, 10)
-		p.playbackSlider(c, "opacity", text.Opacity, &options.opacity, 5)
+		p.playbackSlider(c, "density", text.Density, display.Density, 10, func(next int) {
+			_ = v.DanmakuRules.UpdateDisplay(func(cfg *app.DanmakuDisplay) { cfg.Density = next })
+		})
+		p.playbackSlider(c, "opacity", text.Opacity, display.Opacity, 5, func(next int) {
+			_ = v.DanmakuRules.UpdateDisplay(func(cfg *app.DanmakuDisplay) { cfg.Opacity = next })
+		})
 	})
 	entry, _ := p.State.Current()
 	liveMode := v.Playback != nil && isLivePlayback(v.Playback.State(), v.player.current())
@@ -560,17 +625,17 @@ func (p *PageContext) playbackDanmakuOptions(c *ui.Context) {
 	}
 }
 
-func (p *PageContext) playbackSlider(c *ui.Context, key, label string, value *int, step int) {
+func (p *PageContext) playbackSlider(c *ui.Context, key, label string, value int, step int, onChange func(int)) {
 	id := playbackOptionID(playerDanmaku, key)
 	colors, d := p.Theme.Colors, p.uiColors()
-	button := ui.Button(c.Key(key), "").Label(fmt.Sprintf("%s %d%%", label, *value)).FillWidth().
+	button := ui.Button(c.Key(key), "").Label(fmt.Sprintf("%s %d%%", label, value)).FillWidth().
 		Padding(0, 16, 16, 16).Radius(5).Background(ui.Transparent).Border(0, ui.Transparent)
 	p.bindDirection(button, id, playerPanelGroup, func(direction app.Direction) bool {
 		switch direction {
 		case app.Left:
-			*value = max(10, *value-step)
+			onChange(max(10, value-step))
 		case app.Right:
-			*value = min(100, *value+step)
+			onChange(min(100, value+step))
 		default:
 			return false
 		}
@@ -580,11 +645,11 @@ func (p *PageContext) playbackSlider(c *ui.Context, key, label string, value *in
 		ui.Column(c).FillWidth().Gap(16).Children(func() {
 			ui.Row(c).FillWidth().Justify(ui.SpaceBetween).Children(func() {
 				ui.Text(c, label).FontSize(17).TextColor(paint(colors.Playback.Secondary))
-				ui.Text(c, fmt.Sprintf("%d%%", *value)).FontSize(15).TextColor(paint(colors.Playback.Secondary))
+				ui.Text(c, fmt.Sprintf("%d%%", value)).FontSize(15).TextColor(paint(colors.Playback.Secondary))
 			})
 			ui.Box(c).FillWidth().Height(16).Children(func() {
 				const thumbRadius = 8
-				fraction := float32(max(0, *value-10)) / 90 * 100
+				fraction := float32(max(0, value-10)) / 90 * 100
 				if p.paintFocus() == id {
 					ui.Box(c).Absolute().Left(-2).Right(-6).Top(-4).Height(24).Radius(5).
 						Border(2, paint(colors.Focus.Ring))

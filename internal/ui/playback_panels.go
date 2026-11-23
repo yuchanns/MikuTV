@@ -65,7 +65,7 @@ func (s *playbackView) openPanel(v *View, panel app.FocusID) {
 		v.State.Focus = playbackOptionID(panel, state.SelectedLine)
 	case playerDanmaku:
 		key := "disabled"
-		if v.playbackSettings.show {
+		if v.danmakuDisplay().Show {
 			key = "enabled"
 		}
 		v.State.Focus = playbackOptionID(panel, key)

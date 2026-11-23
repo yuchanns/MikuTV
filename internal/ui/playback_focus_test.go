@@ -38,7 +38,7 @@ func TestPlaybackPopoverColors(t *testing.T) {
 		ui.Column(c).FillWidth().Children(func() {
 			page.playbackOption(c, playbackOptionID(playerQuality, "hdr"), "HDR",
 				page.playbackLimitLabel(provider.PlaybackMembership), false, func() {})
-			page.playbackSlider(c, "density", "Density", &density, 10)
+			page.playbackSlider(c, "density", "Density", density, 10, func(next int) { density = next })
 		})
 	}, 320, 160)
 	requireColor := func(frame *image.RGBA, area image.Rectangle, color theme.Color) {

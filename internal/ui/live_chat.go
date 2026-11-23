@@ -292,19 +292,23 @@ type liveDanmakuNodeKey struct {
 }
 
 func (s *playbackContent) needsLiveDanmakuFrame(v *View, state app.PlaybackState, now time.Time) bool {
-	v.playbackSettings.defaults()
+	snap := v.DanmakuRules.Snapshot()
+	display := snap.Display
 	entry, _ := v.State.Current()
-	if v.LiveChat == nil || !v.playbackSettings.show || v.playbackSettings.density <= 0 ||
+	if v.LiveChat == nil || !display.Show || display.Density <= 0 ||
 		!entry.Capabilities.Has(provider.LiveChat) ||
 		!state.Clock.HasFrame || state.Clock.Ended || state.LiveEnded || state.Failure != "" ||
 		!state.Playing || state.Clock.Buffering {
 		return false
 	}
+	v.DanmakuRules.EnsureSynced()
 	dms := v.LiveChat.Snapshot().Danmaku
 	for i := len(dms) - 1; i >= 0; i-- {
 		elapsed := now.Sub(dms[i].ReceivedAt).Seconds()
 		if elapsed >= 0 && elapsed < danmakuMovingTime {
-			return true
+			if !app.DanmakuBlockedByRules(snap.Rules, dms[i].Body, dms[i].AuthorID, "") {
+				return true
+			}
 		}
 		if elapsed >= danmakuMovingTime {
 			break
@@ -315,8 +319,9 @@ func (s *playbackContent) needsLiveDanmakuFrame(v *View, state app.PlaybackState
 
 func (p *PageContext) drawLiveDanmaku(c *ui.Context, state app.PlaybackState) {
 	v := p.host
-	settings := v.playbackSettings
-	if v.LiveChat == nil || settings.density <= 0 || p.Width <= 0 {
+	snap := v.DanmakuRules.Snapshot()
+	display := snap.Display
+	if v.LiveChat == nil || display.Density <= 0 || p.Width <= 0 {
 		return
 	}
 	dms := v.LiveChat.Snapshot().Danmaku
@@ -324,19 +329,24 @@ func (p *PageContext) drawLiveDanmaku(c *ui.Context, state app.PlaybackState) {
 		return
 	}
 	now := c.Now()
-	clamped := min(max(settings.density, 10), 100)
-	lanes := max(2, min(danmakuMaxScrollLanes, (clamped*danmakuMaxScrollLanes+99)/100))
+	clamped := min(max(display.Density, 10), 100)
+	scrollMax, _, _ := danmakuLaneBounds(display.Area, display.FontSize)
+	lanes := max(2, min(scrollMax, (clamped*scrollMax+99)/100))
+	fontSize, stride := danmakuFontMetrics(display.FontSize)
 	ink := paint(p.Theme.Colors.Playback.Foreground)
 	selfInk := paint(p.Theme.Colors.Accent.Soft)
 	shadow := paint(p.Theme.Colors.Playback.SubtitleOutline)
-	opacity := float32(settings.opacity) / 100
+	opacity := float32(display.Opacity) / 100
 
 	for _, dm := range dms {
 		elapsed := now.Sub(dm.ReceivedAt).Seconds()
 		if elapsed < 0 || elapsed >= danmakuMovingTime {
 			continue
 		}
-		w := estimateDanmakuWidth(dm.Body)
+		if app.DanmakuBlockedByRules(snap.Rules, dm.Body, dm.AuthorID, "") {
+			continue
+		}
+		w := estimateDanmakuWidthScaled(dm.Body, display.FontSize)
 		lane := int(dm.Seq % uint64(lanes))
 		x := p.Width - (p.Width+w)*float32(elapsed/danmakuMovingTime)
 		color := ink
@@ -344,8 +354,8 @@ func (p *PageContext) drawLiveDanmaku(c *ui.Context, state app.PlaybackState) {
 			color = selfInk
 		}
 		ui.Text(c.Key(liveDanmakuNodeKey{dm.Seq}), dm.Body).Absolute().
-			Left(0).Top(153 + float32(lane*41)).Width(w).MaxLines(1).
-			FontSize(28).FontWeight(640).Opacity(opacity).
+			Left(0).Top(153 + float32(lane)*stride).Width(w).MaxLines(1).
+			FontSize(fontSize).FontWeight(640).Opacity(opacity).
 			TextColor(color).TextShadow(0, 1, 4, shadow).Translate(x, 0).Cache()
 	}
 }

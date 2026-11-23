@@ -17,6 +17,7 @@ const (
 
 type LiveDanmaku struct {
 	Seq        uint64
+	AuthorID   string
 	Body       string
 	Self       bool
 	ReceivedAt time.Time
@@ -276,6 +277,7 @@ func (c *LiveChat) appendMessage(msg provider.LiveChatMessage, now time.Time) {
 	dms := append([]LiveDanmaku(nil), c.snap.Danmaku...)
 	dms = append(dms, LiveDanmaku{
 		Seq:        c.danmaku,
+		AuthorID:   msg.AuthorID,
 		Body:       msg.Body,
 		Self:       msg.Self,
 		ReceivedAt: now,

@@ -605,12 +605,113 @@ func (s *Session) Danmaku(ctx context.Context, query provider.DanmakuQuery) ([]p
 	if err := s.invoke(ctx, scope, client, provider.ReadDanmaku, "readDanmaku", query, &result); err != nil {
 		return nil, err
 	}
-	for _, item := range result.Items {
+	for i := range result.Items {
+		item := &result.Items[i]
 		if item.Seconds < 0 || !validDanmakuMode(item.Mode) || strings.TrimSpace(item.Text) == "" {
 			return nil, &provider.Error{Code: provider.PluginFailed}
 		}
+		item.SenderID = strings.TrimSpace(item.SenderID)
+		item.SenderHash = strings.TrimSpace(item.SenderHash)
+		if len(item.SenderID) > 64 {
+			item.SenderID = item.SenderID[:64]
+		}
+		if len(item.SenderHash) > 64 {
+			item.SenderHash = item.SenderHash[:64]
+		}
 	}
 	return result.Items, nil
+}
+
+func (s *Session) DanmakuRules(ctx context.Context) ([]provider.DanmakuRule, error) {
+	s.requests.RLock()
+	client, scope, owner := s.active, s.scope, s.accountID
+	s.requests.RUnlock()
+	if owner == "" {
+		return nil, &provider.Error{Code: provider.NeedsSignIn}
+	}
+	var result struct {
+		Rules []provider.DanmakuRule `json:"rules"`
+	}
+	if err := s.invoke(ctx, scope, client, provider.DanmakuRules, "readDanmakuRules", struct{}{}, &result); err != nil {
+		return nil, err
+	}
+	cleaned := make([]provider.DanmakuRule, 0, len(result.Rules))
+	for _, rule := range result.Rules {
+		sanitized, ok := sanitizeDanmakuRule(rule, true)
+		if !ok {
+			continue
+		}
+		cleaned = append(cleaned, sanitized)
+	}
+	return cleaned, nil
+}
+
+func (s *Session) AddDanmakuRule(ctx context.Context, draft provider.DanmakuRuleDraft) (provider.DanmakuRule, error) {
+	draft.Pattern = strings.TrimSpace(draft.Pattern)
+	if !provider.ValidDanmakuRuleKind(draft.Kind) || !provider.ValidDanmakuRulePattern(draft.Kind, draft.Pattern) {
+		return provider.DanmakuRule{}, &provider.Error{Code: provider.Denied}
+	}
+	s.requests.RLock()
+	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
+	s.requests.RUnlock()
+	if owner == "" {
+		return provider.DanmakuRule{}, &provider.Error{Code: provider.NeedsSignIn}
+	}
+	if draft.Owner != "" && draft.Owner != owner {
+		return provider.DanmakuRule{}, context.Canceled
+	}
+	input := struct {
+		Data   provider.DanmakuRuleDraft `json:"data"`
+		Secret json.RawMessage           `json:"secret"`
+	}{draft, secret}
+	var result struct {
+		Rule provider.DanmakuRule `json:"rule"`
+	}
+	if err := s.invoke(ctx, scope, client, provider.DanmakuRules, "addDanmakuRule", input, &result); err != nil {
+		return provider.DanmakuRule{}, err
+	}
+	if result.Rule.Kind == "" {
+		result.Rule.Kind = draft.Kind
+	}
+	if strings.TrimSpace(result.Rule.Pattern) == "" {
+		result.Rule.Pattern = draft.Pattern
+	}
+	sanitized, ok := sanitizeDanmakuRule(result.Rule, true)
+	if !ok {
+		return provider.DanmakuRule{}, &provider.Error{Code: provider.PluginFailed}
+	}
+	return sanitized, nil
+}
+
+func (s *Session) RemoveDanmakuRule(ctx context.Context, removal provider.DanmakuRuleRemoval) error {
+	removal.RemoteID = strings.TrimSpace(removal.RemoteID)
+	if removal.RemoteID == "" || len(removal.RemoteID) > 128 {
+		return &provider.Error{Code: provider.Denied}
+	}
+	return s.invokePlaybackWrite(ctx, provider.DanmakuRules, "removeDanmakuRule", removal.Owner, removal)
+}
+
+func sanitizeDanmakuRule(rule provider.DanmakuRule, synced bool) (provider.DanmakuRule, bool) {
+	if !provider.ValidDanmakuRuleKind(rule.Kind) {
+		return provider.DanmakuRule{}, false
+	}
+	rule.Pattern = strings.TrimSpace(rule.Pattern)
+	if rule.Pattern == "" || utf8.RuneCountInString(rule.Pattern) > 64 {
+		return provider.DanmakuRule{}, false
+	}
+	rule.RemoteID = strings.TrimSpace(rule.RemoteID)
+	if len(rule.RemoteID) > 128 {
+		rule.RemoteID = rule.RemoteID[:128]
+	}
+	rule.ID = strings.TrimSpace(rule.ID)
+	if len(rule.ID) > 128 {
+		rule.ID = rule.ID[:128]
+	}
+	if synced {
+		rule.Synced = true
+		rule.Enabled = true
+	}
+	return rule, true
 }
 
 func (s *Session) PostDanmaku(ctx context.Context, draft provider.DanmakuPost) error {

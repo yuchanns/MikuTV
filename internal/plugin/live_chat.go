@@ -286,6 +286,7 @@ func sanitizeLiveChatEvent(event provider.LiveChatEvent) (provider.LiveChatEvent
 		msg := *event.Message
 		msg.ID = truncateRunes(strings.TrimSpace(msg.ID), 64)
 		msg.Author = truncateRunes(cleanChatText(msg.Author), liveChatMaxAuthorRunes)
+		msg.AuthorID = truncateRunes(strings.TrimSpace(msg.AuthorID), 64)
 		msg.Body = truncateRunes(cleanChatText(msg.Body), liveChatMaxBodyRunes)
 		if msg.Body == "" {
 			return provider.LiveChatEvent{}, false

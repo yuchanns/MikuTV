@@ -337,7 +337,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		Leave: func(v *View) { v.favorites.dialog = favoriteDialog{} },
 	})
 	settings := map[string]Component{
-		"playback": settingsEmptyPage{}, "danmaku": settingsEmptyPage{}, "appearance": settingsEmptyPage{},
+		"playback": settingsEmptyPage{}, "danmaku": danmakuSettingsPage{}, "appearance": settingsEmptyPage{},
 		"privacy": privacySettingsPage{}, "plugins": settingsEmptyPage{}, "about": aboutPage{},
 	}
 	for _, section := range assets.Text.Sections {
@@ -345,15 +345,49 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		if !ok {
 			return nil, fmt.Errorf("unregistered settings component %q", section.ID)
 		}
-		registrations = append(registrations, Registration{
+		reg := Registration{
 			Policy:    app.RouteSpec{Route: app.Route{Page: app.Settings, Section: section.ID}, Parent: app.Route{Page: app.Settings}, Initial: focus(app.SectionFocus(section.ID))},
 			Component: component, Title: section.Name, Icon: section.Icon,
-		})
+		}
+		if section.ID == "danmaku" {
+			reg.Sync = syncDanmakuSettings
+			reg.Back = (*View).backFromDanmakuSettings
+			reg.Leave = func(v *View) {
+				if v.State.Page != app.DanmakuSettingPicker && v.State.Page != app.DanmakuRuleEditor {
+					v.danmakuUI.rulesOpen = false
+				}
+			}
+		}
+		registrations = append(registrations, reg)
 	}
-	registrations = append(registrations, Registration{
-		Policy:    app.RouteSpec{Route: app.Route{Page: app.Licenses, Section: "about"}, Parent: app.Route{Page: app.Settings, Section: "about"}, Modal: true, Initial: focus(app.LicenseText)},
-		Component: licensesPage{}, Title: assets.Text.Licenses, ModalPresentation: modalDrawer, ModalWidth: 880,
-	})
+	registrations = append(registrations,
+		Registration{
+			Policy: app.RouteSpec{
+				Route: app.Route{Page: app.DanmakuSettingPicker, Section: "danmaku"},
+				Parent: app.Route{Page: app.Settings, Section: "danmaku"},
+				Modal: true, Initial: focus(danmakuPickerOptionID(0)),
+			},
+			Component: danmakuSettingPickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 560,
+		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route: app.Route{Page: app.DanmakuRuleEditor, Section: "danmaku"},
+				Parent: app.Route{Page: app.Settings, Section: "danmaku"},
+				Modal: true, Initial: focus(danmakuEditorField),
+			},
+			Component: danmakuRuleEditorPage{}, ModalPresentation: modalFrameless, ModalWidth: 820,
+			Back: func(v *View) bool {
+				return v.DanmakuRules != nil && v.DanmakuRules.Snapshot().Busy
+			},
+			Leave: func(v *View) {
+				v.danmakuUI.draft.editing = false
+			},
+		},
+		Registration{
+			Policy:    app.RouteSpec{Route: app.Route{Page: app.Licenses, Section: "about"}, Parent: app.Route{Page: app.Settings, Section: "about"}, Modal: true, Initial: focus(app.LicenseText)},
+			Component: licensesPage{}, Title: assets.Text.Licenses, ModalPresentation: modalDrawer, ModalWidth: 880,
+		},
+	)
 	registrations = append(registrations, additional...)
 	p := &Pages{components: make(map[app.Route]Registration)}
 	var policies []app.RouteSpec

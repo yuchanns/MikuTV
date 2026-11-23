@@ -53,11 +53,12 @@ type Options struct {
 	Auth            *app.Auth
 	Activity        *app.AccountActivity
 	PrivateMessages *app.PrivateMessages
+	DanmakuRules    *app.DanmakuRules
 	Pages           *Pages
-	Assets      *Assets
-	Preferences app.PreferencesStore
-	Theme       theme.Theme
-	Version     string
+	Assets          *Assets
+	Preferences     app.PreferencesStore
+	Theme           theme.Theme
+	Version         string
 }
 
 type View struct {
@@ -71,6 +72,7 @@ type View struct {
 	Auth            *app.Auth
 	Activity        *app.AccountActivity
 	PrivateMessages *app.PrivateMessages
+	DanmakuRules    *app.DanmakuRules
 	Playback        *app.Playback
 	Pages           *Pages
 	Assets          *Assets
@@ -107,9 +109,9 @@ type View struct {
 	creator          *creatorState
 	creatorStack     []*creatorState
 	player           playbackView
-	favorites       favoritesUI
-
-	playbackSettings playbackSettings
+	favorites        favoritesUI
+	danmakuUI        danmakuSettingsUI
+	settingsFeedback videoDetailFeedback
 
 	accountDetailsPhone bool
 	openNotice          provider.AccountRow
@@ -119,8 +121,12 @@ type View struct {
 }
 
 func NewView(options Options) *View {
+	danmakuRules := options.DanmakuRules
+	if danmakuRules == nil {
+		danmakuRules = app.NewDanmakuRules(options.Preferences, nil, nil)
+	}
 	v := &View{
-		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages,
+		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Version: options.Version, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}
@@ -198,14 +204,24 @@ func (v *View) Render(c *ui.Context) {
 		case app.AccountMessages:
 			v.videoDetail.feedback = videoDetailFeedback{}
 			v.series.feedback = videoDetailFeedback{}
+			v.settingsFeedback = videoDetailFeedback{}
 			if v.creator != nil {
 				v.creator.feedback = videoDetailFeedback{}
 			}
 			v.renderFeedbackToast(c, &v.noticeFeedback)
+		case app.Settings:
+			v.videoDetail.feedback = videoDetailFeedback{}
+			v.series.feedback = videoDetailFeedback{}
+			v.noticeFeedback = videoDetailFeedback{}
+			if v.creator != nil {
+				v.creator.feedback = videoDetailFeedback{}
+			}
+			v.renderFeedbackToast(c, &v.settingsFeedback)
 		default:
 			v.videoDetail.feedback = videoDetailFeedback{}
 			v.series.feedback = videoDetailFeedback{}
 			v.noticeFeedback = videoDetailFeedback{}
+			v.settingsFeedback = videoDetailFeedback{}
 			if v.creator != nil {
 				v.creator.feedback = videoDetailFeedback{}
 			}
@@ -466,6 +482,16 @@ func (v *View) SyncAccountActivity() {
 			client = v.Catalog.LiveChatClient()
 		}
 		v.LiveChat.SetContext(entry.ID, entry.Generation, owner, client, entry.Capabilities.Has(provider.LiveChat))
+	}
+	if v.DanmakuRules != nil {
+		prev := v.DanmakuRules.Snapshot()
+		v.DanmakuRules.SetScope(entry.ID, entry.Capabilities, owner, v.Catalog)
+		if prev.EntryID != entry.ID || prev.Owner != owner {
+			v.danmakuUI.draft = danmakuRuleDraft{}
+			if v.State.Page == app.DanmakuRuleEditor {
+				v.State.Back()
+			}
+		}
 	}
 	if sync := v.Pages.components[v.State.Route].Sync; sync != nil {
 		sync(v)

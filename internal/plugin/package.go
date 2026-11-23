@@ -43,6 +43,7 @@ var operations = map[provider.Capability][]string{
 	provider.ReadSubtitles:                     {"readSubtitles"},
 	provider.ReadDanmaku:                       {"readDanmaku"},
 	provider.WriteDanmaku:                      {"postDanmaku"},
+	provider.DanmakuRules:                      {"readDanmakuRules", "addDanmakuRule", "removeDanmakuRule"},
 	provider.EditVideoFavorites:                {"videoFavoriteFolders", "editVideoFavoriteFolders"},
 	provider.SignIn:                            {beginSignIn, pollSignIn, restoreAccount, signOut},
 	provider.AccountHistory.Capability():       {"readAccount"},

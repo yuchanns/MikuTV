@@ -37,7 +37,25 @@ type labels struct {
 	Creator                                                               creatorLabels
 	Detail                                                                detailLabels
 	Playback                                                              playbackLabels
+	Danmaku                                                               danmakuSettingsLabels
 	Modal                                                                 modalLabels
+}
+
+type danmakuSettingsLabels struct {
+	Title, Intro                                                   string
+	DefaultShow, Density, Area, Opacity, FontSize                  string
+	Blocklist, BlocklistNote                                       string
+	AreaUpper, AreaFull, AreaTop                                   string
+	SizeNormal, SizeLarge                                          string
+	RulesBack, RulesTitle, RulesNote                               string
+	RulesSynced, RulesSyncing, RulesSyncFailed, RulesGuest         string
+	RulesLocalOnly, AddRule, FilterAll, FilterKeyword, FilterUser  string
+	EmptyRules, EmptyRulesNote                                     string
+	AddRuleTitle, KeywordPlaceholder, UserPlaceholder              string
+	EditRule, SaveRule, SavingRule                                 string
+	RuleRequired, RuleInvalidUser, RuleDuplicate                   string
+	RuleAdded, RuleDeleted, RuleRemove                             string
+	RuleSaveFailed, RuleRemoveFailed                               string
 }
 
 type modalLabels struct {

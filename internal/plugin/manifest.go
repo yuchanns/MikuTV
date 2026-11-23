@@ -118,7 +118,8 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 		return sourceManifest{}, fmt.Errorf("%w: sign-in capability and authentication method must be declared together", ErrIncompatible)
 	}
 	if (manifest.Capabilities.Has(provider.EditVideo) || manifest.Capabilities.Has(provider.WriteVideoComments) ||
-		manifest.Capabilities.Has(provider.WriteDanmaku) || manifest.Capabilities.Has(provider.EditVideoFavorites) ||
+		manifest.Capabilities.Has(provider.WriteDanmaku) || manifest.Capabilities.Has(provider.DanmakuRules) ||
+		manifest.Capabilities.Has(provider.EditVideoFavorites) ||
 		manifest.Capabilities.Has(provider.FollowCreator) ||
 		manifest.Capabilities.Has(provider.ReportPlayback)) &&
 		!manifest.Capabilities.Has(provider.SignIn) {

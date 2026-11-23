@@ -199,11 +199,11 @@ func TestLiveChatDrawerReadOnlyWriteComposeMutedAndDanmaku(t *testing.T) {
 	if !view.player.content.needsLiveDanmakuFrame(view, view.Playback.State(), time.Now()) {
 		t.Fatal("expected live scrolling danmaku frame needed after incoming chat message")
 	}
-	view.playbackSettings.show = false
+	_ = view.DanmakuRules.UpdateDisplay(func(d *app.DanmakuDisplay) { d.Show = false })
 	if view.player.content.needsLiveDanmakuFrame(view, view.Playback.State(), time.Now()) {
 		t.Fatal("expected live danmaku hidden when show=false")
 	}
-	view.playbackSettings.show = true
+	_ = view.DanmakuRules.UpdateDisplay(func(d *app.DanmakuDisplay) { d.Show = true })
 
 	// Open Live Chat drawer -> compose button present.
 	view.player.openPanel(view, playerComments)

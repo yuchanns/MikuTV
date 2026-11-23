@@ -217,9 +217,11 @@ const (
 )
 
 type Danmaku struct {
-	Seconds float64     `json:"seconds"`
-	Mode    DanmakuMode `json:"mode"`
-	Text    string      `json:"text"`
+	Seconds    float64     `json:"seconds"`
+	Mode       DanmakuMode `json:"mode"`
+	Text       string      `json:"text"`
+	SenderID   string      `json:"senderID,omitempty"`
+	SenderHash string      `json:"senderHash,omitempty"`
 }
 
 type DanmakuPost struct {

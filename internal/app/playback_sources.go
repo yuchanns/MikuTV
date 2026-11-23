@@ -26,6 +26,36 @@ func (c *Catalog) PostPlaybackDanmaku(draft provider.DanmakuPost, accept func(er
 	}, func(_ struct{}, err error) { accept(err) })
 }
 
+func (c *Catalog) ReadDanmakuRules(accept func([]provider.DanmakuRule, error)) context.CancelFunc {
+	source, _ := c.session.(provider.DanmakuRulesProvider)
+	return catalogResult(c, func(ctx context.Context) ([]provider.DanmakuRule, error) {
+		if source == nil {
+			return nil, &provider.Error{Code: provider.Unsupported}
+		}
+		return source.DanmakuRules(ctx)
+	}, accept)
+}
+
+func (c *Catalog) AddDanmakuRule(draft provider.DanmakuRuleDraft, accept func(provider.DanmakuRule, error)) context.CancelFunc {
+	source, _ := c.session.(provider.DanmakuRulesProvider)
+	return catalogResult(c, func(ctx context.Context) (provider.DanmakuRule, error) {
+		if source == nil {
+			return provider.DanmakuRule{}, &provider.Error{Code: provider.Unsupported}
+		}
+		return source.AddDanmakuRule(ctx, draft)
+	}, accept)
+}
+
+func (c *Catalog) RemoveDanmakuRule(removal provider.DanmakuRuleRemoval, accept func(error)) context.CancelFunc {
+	source, _ := c.session.(provider.DanmakuRulesProvider)
+	return catalogResult(c, func(ctx context.Context) (struct{}, error) {
+		if source == nil {
+			return struct{}{}, &provider.Error{Code: provider.Unsupported}
+		}
+		return struct{}{}, source.RemoveDanmakuRule(ctx, removal)
+	}, func(_ struct{}, err error) { accept(err) })
+}
+
 func (c *Catalog) ReadPlaybackSubtitles(query provider.PlaybackSubtitleQuery, accept func([]provider.SubtitleCue, error)) context.CancelFunc {
 	source, _ := c.session.(provider.PlaybackSubtitleReader)
 	return catalogResult(c, func(ctx context.Context) ([]provider.SubtitleCue, error) {

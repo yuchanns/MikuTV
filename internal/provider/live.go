@@ -63,6 +63,7 @@ const (
 type LiveChatMessage struct {
 	ID        string `json:"id,omitempty"`
 	Author    string `json:"author"`
+	AuthorID  string `json:"authorID,omitempty"`
 	Body      string `json:"body"`
 	Self      bool   `json:"self,omitempty"`
 	Timestamp int64  `json:"timestamp,omitempty"`
