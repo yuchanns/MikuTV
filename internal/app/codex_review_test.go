@@ -248,6 +248,74 @@ func TestPrivateMessagesPrependRetainsConcurrentSend(t *testing.T) {
 	}
 }
 
+func TestPrivateMessagesConversationPaginationRetainsConcurrentSend(t *testing.T) {
+	page2Ready := make(chan struct{})
+	releasePage2 := make(chan struct{})
+
+	reader := &fakePrivateReader{
+		list: func(ctx context.Context, req provider.PrivateConversationsRequest) (provider.PrivateConversationsPage, error) {
+			if req.Cursor == "" {
+				return provider.PrivateConversationsPage{
+					Conversations: []provider.PrivateConversation{{ID: "c1", Peer: provider.PrivatePeer{ID: "p1", Name: "Peer 1"}, Preview: "old preview"}},
+					NextCursor:    "page-2",
+				}, nil
+			}
+			close(page2Ready)
+			<-releasePage2
+			return provider.PrivateConversationsPage{
+				Conversations: []provider.PrivateConversation{
+					{ID: "c1", Peer: provider.PrivatePeer{ID: "p1", Name: "Peer 1"}, Preview: "stale page2 preview"},
+					{ID: "c2", Peer: provider.PrivatePeer{ID: "p2", Name: "Peer 2"}, Preview: "second"},
+				},
+			}, nil
+		},
+		read: func(ctx context.Context, req provider.PrivateMessagesRequest) (provider.PrivateMessagesPage, error) {
+			return provider.PrivateMessagesPage{}, nil
+		},
+		send: func(ctx context.Context, req provider.PrivateMessageSendRequest) (provider.PrivateMessageSendResult, error) {
+			return provider.PrivateMessageSendResult{
+				Message: provider.PrivateMessage{ID: "m-new", Body: req.Body, SentAt: 50, FromSelf: true},
+			}, nil
+		},
+	}
+
+	queue := make(chan func(), 32)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	pm := NewPrivateMessages(func(fn func()) { queue <- fn }, func() {})
+	pm.Bind(Entry{ID: "src", Capabilities: provider.Capabilities{provider.ReadPrivateMessages, provider.WritePrivateMessages}}, "owner-1", reader, reader)
+	pm.EnsureConversations()
+	waitUntil(t, drain, func() bool { return len(pm.Conversations().Conversations) == 1 })
+
+	pm.LoadMoreConversations()
+	<-page2Ready
+
+	sent := false
+	pm.SendMessage("c1", "fresh sent body", func(_ provider.PrivateMessage, err error) {
+		if err != nil {
+			t.Errorf("SendMessage error: %v", err)
+		}
+		sent = true
+	})
+	waitUntil(t, drain, func() bool { return sent })
+
+	close(releasePage2)
+	waitUntil(t, drain, func() bool { return pm.Conversations().Phase == CatalogReady && len(pm.Conversations().Conversations) == 2 })
+
+	convs := pm.Conversations().Conversations
+	if convs[0].ID != "c1" || convs[0].Preview != "fresh sent body" || convs[1].ID != "c2" {
+		t.Fatalf("conversation pagination overwrote live local update: %+v", convs)
+	}
+}
+
 func TestDanmakuRulesLocalIDNoCollisionAfterReload(t *testing.T) {
 	store := newMemoryDanmakuStore()
 	_ = store.SaveDanmakuRules("src", "", []provider.DanmakuRule{

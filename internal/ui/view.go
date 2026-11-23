@@ -97,8 +97,10 @@ type View struct {
 	Trace           bool
 	projectQRURL    string
 	projectQRImage  ui.ImageSource
-	lastTopShelfHash   [32]byte
-	hasTopShelfHash    bool
+	lastTopShelfHash    [32]byte
+	hasTopShelfHash     bool
+	lastTopShelfErrHash [32]byte
+	hasTopShelfErrHash  bool
 	topShelfSnapshot   topshelf.Snapshot
 	pendingTopShelfURL string
 	lastOpenedURL      string

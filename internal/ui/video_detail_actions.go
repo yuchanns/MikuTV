@@ -64,12 +64,16 @@ func (p *PageContext) performVideoCustomAction(action provider.ActionSpec) {
 }
 
 func (p *PageContext) withVideoAccount(label string, action func()) {
+	p.withVideoAccountFor(provider.EditVideo, label, action)
+}
+
+func (p *PageContext) withVideoAccountFor(capability provider.Capability, label string, action func()) {
 	if p.State.Page == app.Player {
 		p.withPlayerAccount(action)
 		return
 	}
 	entry, _ := p.State.Current()
-	if !entry.Capabilities.Has(provider.EditVideo) {
+	if capability != "" && !entry.Capabilities.Has(capability) {
 		p.host.videoDetail.feedback = videoDetailFeedback{text: fmt.Sprintf(p.Assets.Text.Detail.ActionsUnavailable, label)}
 		return
 	}

@@ -221,7 +221,6 @@ func (m *PrivateMessages) loadConversations(cursor string, appending bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.listCancel = cancel
 	m.listCursor = cursor
-	previous := m.list.Conversations
 	m.list.Phase = CatalogLoading
 	m.list.Appending = appending
 	m.list.Error = ""
@@ -244,7 +243,7 @@ func (m *PrivateMessages) loadConversations(cursor string, appending bool) {
 			}
 			var merged []provider.PrivateConversation
 			if appending {
-				merged = mergePrivateConversations(previous, page.Conversations)
+				merged = mergePrivateConversations(m.list.Conversations, page.Conversations)
 			} else {
 				merged = mergePrivateConversations(nil, page.Conversations)
 			}

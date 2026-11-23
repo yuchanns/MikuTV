@@ -53,15 +53,16 @@ func (v *View) publishTopShelf(snapshot topshelf.Snapshot) {
 	}
 	sanitized.UpdatedAt = time.Now().Unix()
 	if err := v.TopShelf.Save(sanitized); err != nil {
-		if !v.hasTopShelfHash || hash != v.lastTopShelfHash {
+		if !v.hasTopShelfErrHash || hash != v.lastTopShelfErrHash {
 			log.Printf("topshelf: save failed: %v", err)
+			v.lastTopShelfErrHash = hash
+			v.hasTopShelfErrHash = true
 		}
-		v.lastTopShelfHash = hash
-		v.hasTopShelfHash = true
 		return
 	}
 	v.lastTopShelfHash = hash
 	v.hasTopShelfHash = true
+	v.hasTopShelfErrHash = false
 	v.topShelfSnapshot = sanitized
 	v.TopShelf.NotifyChanged()
 	log.Printf("topshelf: published entry=%s sections=%d items=%d", sanitized.EntryID, len(sanitized.Sections), sanitized.ItemCount())

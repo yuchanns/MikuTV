@@ -104,7 +104,7 @@ func (p *PageContext) videoCommentActions(c *ui.Context, d *videoDiscussionState
 		}
 		if p.canWriteVideoDiscussion() {
 			p.videoCommentVote(c, text.Dislike, "", "dislike", comment.ID, comment.Disliked, func() {
-				p.withVideoAccount(text.Dislike, func() {
+				p.withVideoAccountFor(provider.WriteVideoComments, text.Dislike, func() {
 					p.editVideo(provider.VideoEdit{Ref: p.host.discussionDetail().item.Ref, Interaction: provider.VideoReplyDislike,
 						Enabled: !comment.Disliked, ReplyID: comment.ID})
 				})
@@ -194,7 +194,7 @@ func (p *PageContext) openVideoComment(thread, reply *provider.VideoComment) {
 	if !p.canWriteVideoDiscussion() {
 		return
 	}
-	p.withVideoAccount(text.WriteComment, func() {
+	p.withVideoAccountFor(provider.WriteVideoComments, text.WriteComment, func() {
 		if thread != nil && p.host.discussionDetail().videoDiscussion().root == nil {
 			p.openVideoThread(*thread)
 		}
