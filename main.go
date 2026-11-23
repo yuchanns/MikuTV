@@ -85,6 +85,7 @@ func main() {
 		}
 		var entries []app.Entry
 		var aboutPlugins []app.AboutPlugin
+		var installedPlugins []app.InstalledPlugin
 		sourcesByID := make(map[string]*plugin.Source)
 		entrySource := make(map[string]string)
 		stores := make(map[string]*plugin.Storage)
@@ -113,6 +114,18 @@ func main() {
 				SourceCommit: source.SourceCommit(),
 				License:      info.License,
 				LicenseText:  source.LicenseText(),
+			})
+			installedPlugins = append(installedPlugins, app.InstalledPlugin{
+				ID:           info.ID,
+				Name:         info.Name,
+				Description:  info.Description,
+				Kind:         info.Kind,
+				Version:      info.Version,
+				Bundled:      source.Bundled(),
+				Enabled:      true,
+				License:      info.License,
+				SourceCommit: source.SourceCommit(),
+				Capabilities: source.Capabilities(),
 			})
 			assets.PrepareArtwork(entry.Artwork, source.Cover())
 			assets.PrepareAccountArtwork(entry.ID, source.AuthArtwork())
@@ -143,6 +156,18 @@ func main() {
 		liveChat := app.NewLiveChat(mygo.RunOnMain, invalidate)
 		danmakuRules := app.NewDanmakuRules(preferences, mygo.RunOnMain, invalidate)
 		playbackSettings := app.NewPlaybackSettings(preferences, invalidate)
+		pluginCatalogBase := os.Getenv("MIKUTV_PLUGIN_CATALOG_BASE_URL")
+		pluginCatalogCache := platform.NewPluginCatalogCache()
+		if pluginCatalogBase != "" {
+			pluginCatalogCache = platform.NewPluginCatalogCacheNamed("plugin-catalog-override-v1.json")
+		}
+		pluginCatalog := app.NewPluginCatalog(
+			installedPlugins,
+			plugin.NewCatalogClient(appVersion, pluginCatalogBase),
+			pluginCatalogCache,
+			mygo.RunOnMain,
+			invalidate,
+		)
 		var view *tvui.View
 		auth := app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
 			catalog.Reload()
@@ -153,7 +178,7 @@ func main() {
 			}
 		}, func() { view.PromptSignIn() })
 		auth.SetCleaner(preferences)
-		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, PrivateMessages: privateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, Pages: pages, Assets: assets,
+		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, PrivateMessages: privateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, PluginCatalog: pluginCatalog, Pages: pages, Assets: assets,
 			Preferences: preferences, Theme: theme.Default(), Version: appVersion,
 			About: app.AboutInfo{Version: appVersion, Build: appBuild, Commit: appCommit, Plugins: aboutPlugins, Dependencies: aboutDeps},
 			TopShelf: topShelfStore})
@@ -203,6 +228,7 @@ func main() {
 				view.Playback.Close()
 				disposePlayer()
 			}
+			pluginCatalog.Close()
 			danmakuRules.Close()
 			liveChat.Close()
 			live.Close()

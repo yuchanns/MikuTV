@@ -56,6 +56,7 @@ type Options struct {
 	PrivateMessages  *app.PrivateMessages
 	DanmakuRules     *app.DanmakuRules
 	PlaybackSettings *app.PlaybackSettings
+	PluginCatalog    *app.PluginCatalog
 	Pages            *Pages
 	Assets           *Assets
 	Preferences      app.PreferencesStore
@@ -78,6 +79,7 @@ type View struct {
 	PrivateMessages  *app.PrivateMessages
 	DanmakuRules     *app.DanmakuRules
 	PlaybackSettings *app.PlaybackSettings
+	PluginCatalog    *app.PluginCatalog
 	Playback         *app.Playback
 	Pages           *Pages
 	Assets          *Assets
@@ -128,6 +130,7 @@ type View struct {
 	playbackUI       playbackSettingsUI
 	danmakuUI        danmakuSettingsUI
 	privacyUI        privacySettingsUI
+	pluginsUI        pluginsSettingsUI
 	settingsFeedback videoDetailFeedback
 
 	accountDetailsPhone bool
@@ -147,7 +150,7 @@ func NewView(options Options) *View {
 		playbackSettings = app.NewPlaybackSettings(options.Preferences, nil)
 	}
 	v := &View{
-		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings,
+		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, PluginCatalog: options.PluginCatalog,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Version: options.Version, About: options.About.Normalized(options.Version), TopShelf: options.TopShelf, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}

@@ -338,7 +338,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	})
 	settings := map[string]Component{
 		"playback": playbackSettingsPage{}, "danmaku": danmakuSettingsPage{}, "appearance": settingsEmptyPage{},
-		"privacy": privacySettingsPage{}, "plugins": settingsEmptyPage{}, "about": aboutPage{},
+		"privacy": privacySettingsPage{}, "plugins": pluginsSettingsPage{}, "about": aboutPage{},
 	}
 	for _, section := range assets.Text.Sections {
 		component, ok := settings[section.ID]
@@ -356,6 +356,13 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				if v.State.Page != app.DanmakuSettingPicker && v.State.Page != app.DanmakuRuleEditor {
 					v.danmakuUI.rulesOpen = false
 				}
+			}
+		}
+		if section.ID == "plugins" {
+			reg.Sync = syncPluginsSettings
+			reg.Back = (*View).backFromPluginsSettings
+			reg.Leave = func(v *View) {
+				v.pluginsUI.editing = false
 			}
 		}
 		registrations = append(registrations, reg)

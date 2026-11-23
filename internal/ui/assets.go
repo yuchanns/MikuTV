@@ -41,8 +41,39 @@ type labels struct {
 	Danmaku                                                               danmakuSettingsLabels
 	Privacy                                                               privacySettingsLabels
 	About                                                                 aboutLabels
+	Plugins                                                               pluginLabels
 	TopShelf                                                              topShelfLabels
 	Modal                                                                 modalLabels
+}
+
+type pluginLabels struct {
+	InstalledTitle, InstalledNote                   string
+	DiscoverButton, AddRepoButton, CheckUpdates     string
+	BackInstalled, BackManage, BackDiscover         string
+	DiscoverTitle, DiscoverNote                     string
+	OfflineCachedNote, RateLimitedCachedNote        string
+	SearchPlaceholder                               string
+	FilterAll, FilterSource, FilterTheme            string
+	KindSource, KindTheme, KindUnknown              string
+	BuiltinTag, BuiltinRepo, BuiltinUpdateNote      string
+	StatusCurrentEntry, StatusEnabled, StatusOff    string
+	StatusUninstalled, StatusNeedAppUpdate          string
+	StatusThemeUnavailable, StatusIncompatible      string
+	EnableLabel, EnableCurrentNote, EnableReadyNote string
+	VersionLabel, LatestVersionNote, SourceLabel    string
+	CompatLabel, CompatOK, CompatOKNote             string
+	CompatNeedAppNote, CompatThemeNote              string
+	CompatProtocolNote, CompatAuthNote              string
+	CompatInvalidNote                               string
+	InstallLabel, InstallNote                       string
+	LoadingTitle, EmptyTitle, EmptyNote             string
+	ErrorTitle, ErrorNote, RateLimitErrorNote       string
+	NoMatchTitle, NoMatchNote, ClearSearch          string
+	NoMoreTitle, NoMoreNote, ShowAll                string
+	ReloadAction, RefreshAction                     string
+	LoadMoreAction, LoadingMore                     string
+	UpdatesUpToDate, InstallDeferred                string
+	AddRepoDeferred, ToggleDeferred                 string
 }
 
 type topShelfLabels struct {
