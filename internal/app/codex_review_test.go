@@ -84,6 +84,102 @@ confirming:
 	}
 }
 
+func TestAuthBackgroundConfirmationPreservesSelectedAccount(t *testing.T) {
+	store := &authMemoryStore{records: make(map[[2]string][]byte)}
+	confirmStarted := make(chan struct{})
+	releaseConfirm := make(chan struct{})
+
+	credA := provider.Credential{
+		Account: provider.Account{ID: "u1", Name: "Alice"},
+		Data:    []byte(`{"step":"initial-a"}`),
+	}
+	rotatedA := provider.Credential{
+		Account:             credA.Account,
+		Data:                []byte(`{"step":"rotated-a"}`),
+		PendingConfirmation: true,
+	}
+	confirmedA := provider.Credential{
+		Account: credA.Account,
+		Data:    []byte(`{"step":"confirmed-a"}`),
+	}
+	credB := provider.Credential{
+		Account: provider.Account{ID: "u2", Name: "Bob"},
+		Data:    []byte(`{"step":"initial-b"}`),
+	}
+	raw, _ := json.Marshal(accountRecord{Selected: "u1", Accounts: []provider.Credential{credA, credB}})
+	_ = store.Save("src", "src", raw)
+
+	callsA := 0
+	service := &testAuthService{
+		restore: func(ctx context.Context, c provider.Credential) (provider.Credential, error) {
+			if c.Account.ID == "u1" {
+				callsA++
+				if callsA == 1 {
+					return rotatedA, nil
+				}
+				close(confirmStarted)
+				<-releaseConfirm
+				return confirmedA, nil
+			}
+			return c, nil
+		},
+	}
+
+	queue := make(chan func(), 32)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	auth := NewAuth(store, func(fn func()) { queue <- fn }, func() {}, func() {}, func() {})
+	auth.Bind(Entry{ID: "src", SourceID: "src"}, service)
+	auth.Load()
+
+	waitUntil(t, drain, func() bool {
+		select {
+		case <-confirmStarted:
+			return true
+		default:
+			return false
+		}
+	})
+
+	// User switches to account B while account A's rotation confirmation is still in flight.
+	auth.SelectAccount("u2", nil)
+	waitUntil(t, drain, func() bool { return auth.Accounts().CurrentID == "u2" && !auth.Accounts().Busy })
+
+	// Now account A's background confirmation finishes.
+	close(releaseConfirm)
+	waitUntil(t, drain, func() bool {
+		data, _ := store.Load("src", "src")
+		var rec accountRecord
+		_ = json.Unmarshal(data, &rec)
+		for _, item := range rec.Accounts {
+			if item.Account.ID == "u1" && string(item.Data) == `{"step":"confirmed-a"}` {
+				return true
+			}
+		}
+		return false
+	})
+
+	data, _ := store.Load("src", "src")
+	var persisted accountRecord
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("unmarshal persisted record: %v", err)
+	}
+	if persisted.Selected != "u2" {
+		t.Fatalf("persisted Selected = %q, want %q", persisted.Selected, "u2")
+	}
+	if got := auth.Accounts().CurrentID; got != "u2" {
+		t.Fatalf("live CurrentID = %q, want %q", got, "u2")
+	}
+}
+
 func TestPrivateMessagesPrependRetainsConcurrentSend(t *testing.T) {
 	olderReady := make(chan struct{})
 	releaseOlder := make(chan struct{})

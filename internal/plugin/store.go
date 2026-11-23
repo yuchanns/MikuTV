@@ -412,6 +412,41 @@ func (s *PackageStore) loadReceiptsLocked() ([]InstalledReceipt, error) {
 	return receipts, nil
 }
 
+func (s *PackageStore) loadBackupReceiptsLocked() ([]InstalledReceipt, bool) {
+	if s.backup == nil {
+		return nil, false
+	}
+	backed := s.backup.LoadPluginReceiptsBackup()
+	if len(backed) == 0 {
+		return nil, false
+	}
+	var receipts []InstalledReceipt
+	if err := json.Unmarshal(backed, &receipts); err != nil {
+		return nil, false
+	}
+	return receipts, true
+}
+
+func mergeMissingBackupReceipts(base, backup []InstalledReceipt) ([]InstalledReceipt, bool) {
+	merged := append([]InstalledReceipt(nil), base...)
+	existing := make(map[string]bool, len(merged))
+	for _, r := range merged {
+		if key := strings.ToLower(strings.TrimSpace(r.ID)); key != "" {
+			existing[key] = true
+		}
+	}
+	added := false
+	for _, r := range backup {
+		key := strings.ToLower(strings.TrimSpace(r.ID))
+		if key != "" && !existing[key] {
+			merged = append(merged, r)
+			existing[key] = true
+			added = true
+		}
+	}
+	return merged, added
+}
+
 func (s *PackageStore) saveReceiptsLocked(receipts []InstalledReceipt) error {
 	if err := writeJSONAtomic(s.receiptsPath(), receipts); err != nil {
 		return err
@@ -546,15 +581,7 @@ func (s *PackageStore) LoadAllWithMissing(ctx context.Context, appVersion string
 		return nil, nil, false, []error{fmt.Errorf("decode installed plugin receipts: %w", err)}
 	}
 
-	var backupReceipts []InstalledReceipt
-	backupLoaded := false
-	if s.backup != nil {
-		if backed := s.backup.LoadPluginReceiptsBackup(); len(backed) > 0 {
-			if err := json.Unmarshal(backed, &backupReceipts); err == nil {
-				backupLoaded = true
-			}
-		}
-	}
+	backupReceipts, backupLoaded := s.loadBackupReceiptsLocked()
 
 	receipts := append([]InstalledReceipt(nil), diskReceipts...)
 	cachePurged := false
@@ -567,18 +594,14 @@ func (s *PackageStore) LoadAllWithMissing(ctx context.Context, appVersion string
 			_ = s.backup.SavePluginReceiptsBackup(compact)
 		}
 	} else if len(backupReceipts) > 0 {
-		existing := make(map[string]bool, len(receipts))
-		for _, r := range receipts {
-			existing[strings.ToLower(strings.TrimSpace(r.ID))] = true
+		var added bool
+		receipts, added = mergeMissingBackupReceipts(receipts, backupReceipts)
+		if added {
+			cachePurged = true
 		}
-		for _, r := range backupReceipts {
-			key := strings.ToLower(strings.TrimSpace(r.ID))
-			if key != "" && !existing[key] {
-				receipts = append(receipts, r)
-				existing[key] = true
-				cachePurged = true
-			}
-		}
+	}
+	if cachePurged && len(receipts) > 0 {
+		_ = writeJSONAtomic(s.receiptsPath(), receipts)
 	}
 	s.mu.Unlock()
 
@@ -695,6 +718,9 @@ func (s *PackageStore) RestoreReceipt(ctx context.Context, receipt InstalledRece
 	receipts, err := s.loadReceiptsLocked()
 	if err != nil {
 		receipts = nil
+	}
+	if backupReceipts, ok := s.loadBackupReceiptsLocked(); ok && len(backupReceipts) > 0 {
+		receipts, _ = mergeMissingBackupReceipts(receipts, backupReceipts)
 	}
 	receipts = upsertReceipt(receipts, receipt)
 	if err := s.saveReceiptsLocked(receipts); err != nil {

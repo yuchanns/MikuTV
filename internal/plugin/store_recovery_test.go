@@ -179,6 +179,67 @@ func TestPackageStoreCachePurgeBackupAndRestore(t *testing.T) {
 	}
 }
 
+func TestPackageStoreRestoreReceiptPreservesOtherPendingReceipts(t *testing.T) {
+	ctx := context.Background()
+	cacheDir := filepath.Join(t.TempDir(), "plugins")
+	backup := &memoryStoreBackup{}
+
+	store := NewPackageStore(cacheDir)
+	store.SetBackup(backup)
+
+	zipA, shaA := buildTestThemeZip(t, "theme-alpha", "Theme Alpha", "1.0.0")
+	zipB, shaB := buildTestThemeZip(t, "theme-beta", "Theme Beta", "1.0.0")
+	for _, tc := range []struct {
+		id, name, repo, sha string
+		raw                 []byte
+	}{
+		{"theme-alpha", "Theme Alpha", "example/theme-alpha", shaA, zipA},
+		{"theme-beta", "Theme Beta", "example/theme-beta", shaB, zipB},
+	} {
+		item := CatalogItem{
+			Repository: tc.repo,
+			Release: ReleaseAsset{
+				ReleaseID: 1, TagName: "v1.0.0", AssetID: 2, AssetName: "plugin.zip", SHA256: tc.sha,
+			},
+			Manifest: Manifest{
+				ID: tc.id, Name: tc.name, Kind: ThemeKind, Version: "1.0.0", APIVersion: 1, MinAppVersion: "0.1.0",
+			},
+		}
+		if _, err := store.StageAndInstall(ctx, tc.raw, item, "0.1.0", nil); err != nil {
+			t.Fatalf("StageAndInstall %s: %v", tc.id, err)
+		}
+	}
+
+	// Simulate tvOS purging Library/Caches completely.
+	if err := os.RemoveAll(cacheDir); err != nil {
+		t.Fatalf("RemoveAll cacheDir: %v", err)
+	}
+
+	fresh := NewPackageStore(cacheDir)
+	fresh.SetBackup(backup)
+	loaded, missing, purged, _ := fresh.LoadAllWithMissing(ctx, "0.1.0")
+	if !purged || len(loaded) != 0 || len(missing) != 2 {
+		t.Fatalf("expected 2 missing receipts after purge, got loaded=%d missing=%d purged=%v", len(loaded), len(missing), purged)
+	}
+
+	// Simulate receipts.json absent again before restoring only the first plugin.
+	_ = os.Remove(filepath.Join(cacheDir, "receipts.json"))
+	if _, err := fresh.RestoreReceipt(ctx, missing[0], zipA, "0.1.0"); err != nil {
+		t.Fatalf("RestoreReceipt alpha: %v", err)
+	}
+
+	// Next launch must still have alpha loaded AND beta discoverable in missing for retry.
+	next := NewPackageStore(cacheDir)
+	next.SetBackup(backup)
+	loaded2, missing2, _, _ := next.LoadAllWithMissing(ctx, "0.1.0")
+	if len(loaded2) != 1 || loaded2[0].Receipt.ID != "theme-alpha" {
+		t.Fatalf("expected theme-alpha loaded, got %+v", loaded2)
+	}
+	if len(missing2) != 1 || missing2[0].ID != "theme-beta" {
+		t.Fatalf("expected theme-beta preserved in missing receipts, got %+v", missing2)
+	}
+}
+
 func TestCatalogClientDownloadReleaseAsset(t *testing.T) {
 	zipBytes, shaHex := buildTestThemeZip(t, "test-night", "Test Night", "1.0.0")
 	var srv *httptest.Server

@@ -387,7 +387,7 @@ func (a *Auth) confirm(credential provider.Credential) {
 				return
 			}
 			if err == nil {
-				err = a.saveAccount(updated)
+				err = a.updateAccount(credential.Account.ID, updated)
 			}
 			if err == nil && a.accounts.CurrentID == updated.Account.ID && a.service != nil {
 				err = a.service.SetAccount(&updated)
@@ -532,8 +532,24 @@ func (a *Auth) clearAvatar() {
 }
 
 func (a *Auth) saveAccount(credential provider.Credential) error {
-	record := accountRecord{Selected: credential.Account.ID, Accounts: slices.Clone(a.record.Accounts)}
-	index := slices.IndexFunc(record.Accounts, func(item provider.Credential) bool { return item.Account.ID == credential.Account.ID })
+	return a.upsertAccount(credential, credential.Account.ID, true)
+}
+
+func (a *Auth) updateAccount(previousID string, credential provider.Credential) error {
+	return a.upsertAccount(credential, previousID, false)
+}
+
+func (a *Auth) upsertAccount(credential provider.Credential, matchID string, selectAccount bool) error {
+	selected := a.record.Selected
+	if selectAccount {
+		selected = credential.Account.ID
+	} else if matchID != "" && selected == matchID {
+		selected = credential.Account.ID
+	}
+	record := accountRecord{Selected: selected, Accounts: slices.Clone(a.record.Accounts)}
+	index := slices.IndexFunc(record.Accounts, func(item provider.Credential) bool {
+		return item.Account.ID == credential.Account.ID || (matchID != "" && item.Account.ID == matchID)
+	})
 	if index < 0 {
 		record.Accounts = append(record.Accounts, credential)
 	} else {

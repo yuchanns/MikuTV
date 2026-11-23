@@ -35,6 +35,7 @@ type hlsChildEntry struct {
 	resource provider.PlaybackResource
 	playlist bool
 	usedAt   uint64
+	refs     int
 }
 
 type speedBucket struct {
@@ -160,6 +161,7 @@ type Media struct {
 	mu               sync.Mutex
 	closed           bool
 	hlsChildren      map[string]hlsChildEntry
+	hlsPlaylistRefs  map[string]map[string]struct{}
 	hlsSeq           uint64
 	hlsPrefetchBody  string
 	hlsPrefetchUntil time.Time
@@ -195,7 +197,8 @@ func OpenMediaWithAudio(ctx context.Context, playback provider.Playback, selecte
 	m := &Media{
 		transport: playback.Transport, prefix: "/" + rand.Text() + "/",
 		mux: http.NewServeMux(), ctx: mctx, cancel: mcancel,
-		hlsChildren: make(map[string]hlsChildEntry),
+		hlsChildren:     make(map[string]hlsChildEntry),
+		hlsPlaylistRefs: make(map[string]map[string]struct{}),
 		speed:       speedMeter{origin: time.Now()},
 	}
 	m.mux.HandleFunc(m.prefix+"c/", m.serveHLSChild)
@@ -760,6 +763,18 @@ func (m *Media) fetchPlaylist(ctx context.Context, resource provider.PlaybackRes
 		m.lastURL.Store(&u)
 	}
 	var body strings.Builder
+	pending := make(map[string]hlsChildEntry)
+	addChild := func(value string, isPlaylist bool) string {
+		name, entry, ok := m.resolvePlaylistChild(res.Request.URL, value, resource.Headers, isPlaylist)
+		if !ok {
+			return "unavailable"
+		}
+		if prev, exists := pending[name]; exists {
+			entry.playlist = entry.playlist || prev.playlist
+		}
+		pending[name] = entry
+		return m.prefix + "c/" + name
+	}
 	scanner := bufio.NewScanner(&countingReader{r: res.Body, meter: &m.speed})
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	nextIsPlaylist := false
@@ -773,10 +788,10 @@ func (m *Media) fetchPlaylist(ctx context.Context, resource provider.PlaybackRes
 			uriIsPlaylist := strings.HasPrefix(line, "#EXT-X-MEDIA:") || strings.HasPrefix(line, "#EXT-X-I-FRAME-STREAM-INF:")
 			line = playlistURI.ReplaceAllStringFunc(line, func(pattern string) string {
 				match := playlistURI.FindStringSubmatch(pattern)
-				return "URI=" + strconv.Quote(m.playlistChild(res.Request.URL, match[1], resource.Headers, uriIsPlaylist))
+				return "URI=" + strconv.Quote(addChild(match[1], uriIsPlaylist))
 			})
 		case line != "":
-			line = m.playlistChild(res.Request.URL, line, resource.Headers, nextIsPlaylist)
+			line = addChild(line, nextIsPlaylist)
 			nextIsPlaylist = false
 		}
 		body.WriteString(line)
@@ -785,6 +800,13 @@ func (m *Media) fetchPlaylist(ctx context.Context, resource provider.PlaybackRes
 	if err := scanner.Err(); err != nil || !strings.HasPrefix(body.String(), "#EXTM3U\n") {
 		return "", errors.New("invalid HLS playlist")
 	}
+	playlistKey := ""
+	if len(resource.URLs) > 0 {
+		playlistKey = resource.URLs[0]
+	} else if res.Request != nil && res.Request.URL != nil {
+		playlistKey = res.Request.URL.String()
+	}
+	m.commitPlaylistChildren(playlistKey, pending)
 	return body.String(), nil
 }
 
@@ -843,12 +865,12 @@ func (m *Media) serveHLSChild(w http.ResponseWriter, r *http.Request) {
 	m.serveDirectResource(w, r, entry.resource, "")
 }
 
-func (m *Media) playlistChild(base *url.URL, value string, headers map[string]string, isPlaylist bool) string {
+func (m *Media) resolvePlaylistChild(base *url.URL, value string, headers map[string]string, isPlaylist bool) (string, hlsChildEntry, bool) {
 	ref, err := base.Parse(value)
 	allowedScheme := err == nil && (ref.Scheme == "https" ||
 		(ref.Scheme == "http" && base != nil && base.Scheme == "http" && strings.EqualFold(ref.Host, base.Host)))
 	if err != nil || ref.User != nil || !allowedScheme || ref.Host == "" {
-		return "unavailable"
+		return "", hlsChildEntry{}, false
 	}
 	if !strings.EqualFold(ref.Host, base.Host) {
 		forwarded := make(map[string]string, len(headers))
@@ -871,33 +893,88 @@ func (m *Media) playlistChild(base *url.URL, value string, headers map[string]st
 	}
 	playlist := isPlaylist || strings.EqualFold(ext, ".m3u8") || strings.EqualFold(ext, ".m3u")
 	name := fmt.Sprintf("%x%s", sum[:16], ext)
+	return name, hlsChildEntry{
+		resource: provider.PlaybackResource{URLs: []string{ref.String()}, Headers: headers},
+		playlist: playlist,
+	}, true
+}
+
+func (m *Media) commitPlaylistChildren(playlistKey string, pending map[string]hlsChildEntry) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.hlsPlaylistRefs == nil {
+		m.hlsPlaylistRefs = make(map[string]map[string]struct{})
+	}
+	prev := m.hlsPlaylistRefs[playlistKey]
+	next := make(map[string]struct{}, len(pending))
+	for name, entry := range pending {
+		m.hlsSeq++
+		if existing, ok := m.hlsChildren[name]; ok {
+			existing.usedAt = m.hlsSeq
+			if entry.playlist {
+				existing.playlist = true
+			}
+			if _, had := prev[name]; !had {
+				existing.refs++
+			}
+			m.hlsChildren[name] = existing
+		} else {
+			entry.usedAt = m.hlsSeq
+			entry.refs = 1
+			m.hlsChildren[name] = entry
+		}
+		next[name] = struct{}{}
+	}
+	for name := range prev {
+		if _, kept := next[name]; kept {
+			continue
+		}
+		if existing, ok := m.hlsChildren[name]; ok && existing.refs > 0 {
+			existing.refs--
+			m.hlsChildren[name] = existing
+		}
+	}
+	m.hlsPlaylistRefs[playlistKey] = next
+	m.evictHLSChildrenLocked()
+}
+
+func (m *Media) evictHLSChildrenLocked() {
+	for len(m.hlsChildren) > hlsMaxChildren {
+		var oldestKey string
+		var oldestSeq uint64
+		for key, item := range m.hlsChildren {
+			if item.refs > 0 {
+				continue
+			}
+			if oldestKey == "" || item.usedAt < oldestSeq {
+				oldestKey, oldestSeq = key, item.usedAt
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(m.hlsChildren, oldestKey)
+	}
+}
+
+func (m *Media) playlistChild(base *url.URL, value string, headers map[string]string, isPlaylist bool) string {
+	name, entry, ok := m.resolvePlaylistChild(base, value, headers, isPlaylist)
+	if !ok {
+		return "unavailable"
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.hlsSeq++
 	if existing, ok := m.hlsChildren[name]; ok {
 		existing.usedAt = m.hlsSeq
-		if playlist {
+		if entry.playlist {
 			existing.playlist = true
 		}
 		m.hlsChildren[name] = existing
 		return m.prefix + "c/" + name
 	}
-	if len(m.hlsChildren) >= hlsMaxChildren {
-		var oldestKey string
-		var oldestSeq uint64
-		for key, item := range m.hlsChildren {
-			if oldestKey == "" || item.usedAt < oldestSeq {
-				oldestKey, oldestSeq = key, item.usedAt
-			}
-		}
-		if oldestKey != "" {
-			delete(m.hlsChildren, oldestKey)
-		}
-	}
-	m.hlsChildren[name] = hlsChildEntry{
-		resource: provider.PlaybackResource{URLs: []string{ref.String()}, Headers: headers},
-		playlist: playlist,
-		usedAt:   m.hlsSeq,
-	}
+	entry.usedAt = m.hlsSeq
+	m.hlsChildren[name] = entry
+	m.evictHLSChildrenLocked()
 	return m.prefix + "c/" + name
 }
