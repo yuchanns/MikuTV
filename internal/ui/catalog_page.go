@@ -290,26 +290,34 @@ func (p *PageContext) catalogRegions(shelves []catalogShelf, emptyFeed bool) {
 		p.region(homeCards, focusEdges{app.Up: previous})
 		return
 	}
-	p.region(homeHeader, focusEdges{app.Down: {Region: homeHero}})
+	shelfDest := func(s catalogShelf) focusDestination {
+		d := focusDestination{Region: s.id}
+		if len(s.items) > 0 {
+			d.Focus = catalogCardFocus(s.id, s.items[0].Ref)
+		}
+		return d
+	}
+	firstShelf := shelfDest(shelves[0])
+	p.region(homeHeader, focusEdges{app.Down: {Focus: homePlayAction, Region: homeHero}})
 	p.region(homeHero, focusEdges{
-		app.Up: {Focus: app.ContentAction}, app.Down: {Region: shelves[0].id}, app.Right: {Region: homePager},
+		app.Up: {Focus: app.ContentAction}, app.Down: firstShelf, app.Right: {Region: homePager},
 	})
 	p.region(homePager, focusEdges{
-		app.Up: {Focus: app.ContentAction}, app.Down: {Region: shelves[0].id}, app.Left: {Focus: homeLaterAction, Region: homeHero},
+		app.Up: {Focus: app.ContentAction}, app.Down: firstShelf, app.Left: {Focus: homeLaterAction, Region: homeHero},
 	})
-	previous := homeHero
+	previous := focusDestination{Focus: homePlayAction, Region: homeHero}
 	for idx, shelf := range shelves {
-		next := homeCards
+		next := focusDestination{Region: homeCards}
 		if idx+1 < len(shelves) {
-			next = shelves[idx+1].id
+			next = shelfDest(shelves[idx+1])
 		} else if emptyFeed {
-			next = homeFeedRefresh
+			next = focusDestination{Region: homeFeedRefresh}
 		}
-		p.region(shelf.id, focusEdges{app.Up: {Region: previous}, app.Down: {Region: next}})
-		previous = shelf.id
+		p.region(shelf.id, focusEdges{app.Up: previous, app.Down: next})
+		previous = shelfDest(shelf)
 	}
-	p.region(homeCards, focusEdges{app.Up: {Region: previous}})
-	refresh := focusEdges{app.Up: {Region: previous}}
+	p.region(homeCards, focusEdges{app.Up: previous})
+	refresh := focusEdges{app.Up: previous}
 	if len(home.layout.sections) != 0 {
 		cards := home.layout.sections[0].cards
 		refresh[app.Down] = focusDestination{Focus: cards[min(len(cards), home.layout.grid.columns)-1]}

@@ -31,7 +31,11 @@ func (navigationRail) Render(c *ui.Context, p *PageContext) {
 	p.host.railSpan = width
 	buttonWidth := width - 48
 	if p.active {
-		p.host.focus.groups["rail"] = focusRegion{navigation: true, edges: focusEdges{app.Right: {Focus: p.State.ContentFocus(), Region: "content"}}}
+		rightRegion := "content"
+		if p.Location.Page == app.Library {
+			rightRegion = favoriteTabs
+		}
+		p.host.focus.groups["rail"] = focusRegion{navigation: true, edges: focusEdges{app.Right: {Focus: p.State.ContentFocus(), Region: rightRegion}}}
 	}
 	colors, d := p.Theme.Colors, p.uiColors()
 	railBg := paint(colors.Surface.Sidebar)

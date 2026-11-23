@@ -364,6 +364,11 @@ func (p *PageContext) renderPluginsDiscover(c *ui.Context) {
 					ui.Text(c, l.RefreshAction).FontSize(17)
 				})
 			})
+		} else if snap.Status == app.PluginCatalogLoading && snap.HasCache {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				p.loadingSpinner(c, 22)
+				ui.Text(c, l.LoadingTitle).FontSize(17).TextColor(paint(colors.Text.Muted))
+			})
 		}
 	})
 
@@ -389,7 +394,7 @@ func (p *PageContext) renderPluginsDiscover(c *ui.Context) {
 	// Results / status body
 	switch {
 	case snap.Status == app.PluginCatalogLoading && !snap.HasCache:
-		p.renderPluginStatusBox(c, "refresh", l.LoadingTitle, "", "", "", "", nil)
+		p.renderPluginStatusBox(c, "spinner", l.LoadingTitle, "", "", "", "", nil)
 	case (snap.Status == app.PluginCatalogFailed || snap.Status == app.PluginCatalogOffline || snap.Status == app.PluginCatalogRateLimited) && !snap.HasCache:
 		note := l.ErrorNote
 		if snap.Status == app.PluginCatalogRateLimited {
@@ -742,7 +747,11 @@ func (p *PageContext) renderCatalogPluginDetail(c *ui.Context, item plugin.Catal
 func (p *PageContext) renderPluginStatusBox(c *ui.Context, iconName, title, note, btnLabel, btnIcon string, btnID app.FocusID, onAction func()) {
 	colors, d := p.Theme.Colors, p.uiColors()
 	ui.Column(c.Key("plugins-status-box")).FillWidth().Padding(64, 24).AlignItems(ui.Center).Gap(14).Children(func() {
-		ui.Icon(c, p.Assets.Icon(iconName)).Size(44, 44).TextColor(paint(colors.Accent.Soft))
+		if iconName == "spinner" {
+			p.loadingSpinner(c, 48)
+		} else {
+			ui.Icon(c, p.Assets.Icon(iconName)).Size(44, 44).TextColor(paint(colors.Accent.Soft))
+		}
 		ui.Text(c, title).FontSize(26).FontWeight(500).TextColor(paint(colors.Text.Primary))
 		if note != "" {
 			ui.Text(c, note).FontSize(18).LineHeight(1.6).TextColor(paint(colors.Text.Muted))

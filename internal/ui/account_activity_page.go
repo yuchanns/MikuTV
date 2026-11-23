@@ -1,6 +1,8 @@
 package tvui
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
 	"github.com/yuchanns/MikuTV/internal/provider"
@@ -62,6 +64,23 @@ func (l accountActivityLabels) filter(filter provider.NoticeFilter) string {
 
 func libraryRoute(section provider.AccountSection) app.Route {
 	return app.Route{Page: app.Library, Section: string(section)}
+}
+
+func (v *View) selectLibraryTab(next app.FocusID) {
+	raw, ok := strings.CutPrefix(string(next), "library/tab/")
+	if !ok || raw == "" {
+		return
+	}
+	section := provider.AccountSection(raw)
+	for _, candidate := range libraryTabs {
+		if candidate == section {
+			if v.State.Navigate(libraryRoute(section)) {
+				v.favorites.management = favoriteManagement{}
+				v.State.Focus, v.State.Area, v.reveal = next, app.ContentArea, true
+			}
+			return
+		}
+	}
 }
 
 func syncAccountOverview(v *View) {

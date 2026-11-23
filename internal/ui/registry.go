@@ -72,6 +72,13 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	home := content(app.Home, "")
 	home.Component, home.Sync = catalogPage{}, syncHome
 	home.ScreenInsets = &[4]float32{0, 0, 80, 0}
+	home.Policy.ContentFocus = ""
+	home.Policy.ResolveFocus = func(s *app.State) app.FocusID {
+		if entry, ok := s.Current(); ok && entry.Capabilities.Has(provider.BrowseCatalog) {
+			return homePlayAction
+		}
+		return app.ContentAction
+	}
 	home.Policy.ExitFocus = app.RailFocus(app.Home)
 	home.Back = (*View).backFromHome
 	home.Leave = func(v *View) { v.home.featureInfo.reset() }
@@ -99,11 +106,17 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			}
 		}
 	}
+	libraryAfterMove := func(v *View, direction app.Direction, group string, next app.FocusID) {
+		if (direction == app.Left || direction == app.Right) && group == favoriteTabs {
+			v.selectLibraryTab(next)
+		}
+	}
 	library := content(app.Library, provider.BrowseLibrary)
 	library.Component, library.Sync = libraryPage{}, syncLibrary
 	library.RawScreen = true
 	library.Back = (*View).backFromLibraryManagement
 	library.Leave = pauseLibraryHistory
+	library.AfterMove = libraryAfterMove
 	search := content(app.Search, provider.SearchCatalog)
 	search.Component, search.Sync = searchPage{}, syncSearch
 	search.RawScreen = true
@@ -318,6 +331,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				Initial: focus(app.ContentAction), ContentFocus: app.ContentAction, RequiresEntry: true,
 				Capability: section.Capability()},
 			Component: libraryContent{}, Sync: syncLibrary, Back: (*View).backFromLibraryManagement,
+			AfterMove: libraryAfterMove,
 		}
 		if section == provider.AccountHistory {
 			tab.Leave = pauseLibraryHistory
@@ -329,6 +343,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Initial: focus(app.ContentAction), ContentFocus: app.ContentAction, RequiresEntry: true,
 			Capability: provider.AccountFavorites.Capability()},
 		Component: libraryContent{}, Sync: syncLibrary, Back: (*View).backFromLibraryManagement,
+		AfterMove: libraryAfterMove,
 	}, Registration{
 		Policy: app.RouteSpec{Route: app.Route{Page: favoriteFolderDialog}, Initial: focus(app.CloseModal),
 			Modal: true, RequiresEntry: true, Capability: provider.EditFavoriteFolders},
@@ -348,6 +363,11 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		reg := Registration{
 			Policy:    app.RouteSpec{Route: app.Route{Page: app.Settings, Section: section.ID}, Parent: app.Route{Page: app.Settings}, Initial: focus(app.SectionFocus(section.ID))},
 			Component: component, Title: section.Name, Icon: section.Icon,
+			AfterMove: func(v *View, direction app.Direction, group string, next app.FocusID) {
+				if (direction == app.Up || direction == app.Down) && group == "sections" {
+					v.selectSettingsSection(next)
+				}
+			},
 		}
 		if section.ID == "danmaku" {
 			reg.Sync = syncDanmakuSettings

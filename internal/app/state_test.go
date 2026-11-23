@@ -107,6 +107,18 @@ func TestRailFocusDoesNotOverwriteContentBookmark(t *testing.T) {
 	}
 }
 
+func TestHoveringUnvisitedPageInRailDoesNotSaveNavigationArea(t *testing.T) {
+	s := stateForTest(t, "first")
+	s.Navigate(Route{Page: Search})
+	s.Focus, s.Area = RailFocus(Search), NavigationArea
+	s.Navigate(Route{Page: Library})
+	s.Focus, s.Area = RailFocus(Library), NavigationArea
+	s.Navigate(Route{Page: Search})
+	if s.Area != ContentArea || s.Focus != ContentAction {
+		t.Fatalf("unvisited hovered page saved navigation area: %+v", s.Location)
+	}
+}
+
 func routesForTest(t *testing.T) *Routes {
 	t.Helper()
 	specs := []RouteSpec{

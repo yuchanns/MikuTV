@@ -88,50 +88,52 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 	}
 	ui.Column(c.Key("library")).FillWidth().Padding(0, 0, 64, 0).Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
 		p.renderLibraryTabs(c, query.Section)
-		if guest {
-			p.libraryEmpty(c, "library", text.Activity.LibraryGuestTitle, text.Activity.LibraryGuestNote,
-				text.Activity.SignInAction, "user", emptyFocus, func() { p.State.Push(app.Route{Page: app.Account}) })
-			return
-		}
-		ui.Box(c.Key("library-heading")).FillWidth().Height(headingHeight).Children(func() {
-			ui.Row(c).Absolute().Top(actionTop).Right(83).Gap(16).Children(func() {
-				if available {
-					p.libraryHeaderActions(c, query, rows, managing)
+		ui.Column(c.Key("library-body/" + string(query.Section) + "/" + query.Folder)).FillWidth().Children(func() {
+			if guest {
+				p.libraryEmpty(c, "library", text.Activity.LibraryGuestTitle, text.Activity.LibraryGuestNote,
+					text.Activity.SignInAction, "user", emptyFocus, func() { p.State.Push(app.Route{Page: app.Account}) })
+				return
+			}
+			ui.Box(c.Key("library-heading")).FillWidth().Height(headingHeight).Children(func() {
+				ui.Row(c).Absolute().Top(actionTop).Right(83).Gap(16).Children(func() {
+					if available {
+						p.libraryHeaderActions(c, query, rows, managing)
+					}
+				})
+				p.libraryHeading(c, activity.Folder(), query.Folder != "", total)
+				switch {
+				case managing:
+					p.favoriteManagementBar(c, snapshot, metaTop)
+				case !directory && len(rows) != 0:
+					p.libraryCollectionMeta(c, query, total, metaTop)
 				}
 			})
-			p.libraryHeading(c, activity.Folder(), query.Folder != "", total)
-			switch {
-			case managing:
-				p.favoriteManagementBar(c, snapshot, metaTop)
-			case !directory && len(rows) != 0:
-				p.libraryCollectionMeta(c, query, total, metaTop)
+			if !available {
+				p.libraryEmpty(c, "library", text.Activity.LibraryUnavailable, "", text.Activity.DiscoverContent, "", emptyFocus, p.openLibraryHome)
+				return
 			}
-		})
-		if !available {
-			p.libraryEmpty(c, "library", text.Activity.LibraryUnavailable, "", text.Activity.DiscoverContent, "", emptyFocus, p.openLibraryHome)
-			return
-		}
-		if len(rows) == 0 && !directory {
-			switch snapshot.Phase {
-			case app.CatalogIdle, app.CatalogLoading:
-				p.libraryEmpty(c, "", text.LoadingTitle, "", "", "", "", nil)
-			case app.CatalogFailed:
-				p.libraryEmpty(c, "", text.FailedTitle, p.authError(snapshot.Error), text.Retry, "", emptyFocus, func() { activity.Retry(query) })
-			case app.CatalogCanceled:
-				p.libraryEmpty(c, "", text.CanceledTitle, "", text.Retry, "", emptyFocus, func() { activity.Retry(query) })
-			default:
-				t := text.Activity
-				emptyTitle, emptyNote := p.libraryEmptyText(query.Section)
-				icon := "library"
-				if query.Section == provider.AccountTracking {
-					icon = "series"
+			if len(rows) == 0 && !directory {
+				switch snapshot.Phase {
+				case app.CatalogIdle, app.CatalogLoading:
+					p.libraryEmpty(c, "spinner", text.LoadingTitle, "", "", "", "", nil)
+				case app.CatalogFailed:
+					p.libraryEmpty(c, "", text.FailedTitle, p.authError(snapshot.Error), text.Retry, "", emptyFocus, func() { activity.Retry(query) })
+				case app.CatalogCanceled:
+					p.libraryEmpty(c, "", text.CanceledTitle, "", text.Retry, "", emptyFocus, func() { activity.Retry(query) })
+				default:
+					t := text.Activity
+					emptyTitle, emptyNote := p.libraryEmptyText(query.Section)
+					icon := "library"
+					if query.Section == provider.AccountTracking {
+						icon = "series"
+					}
+					p.libraryEmpty(c, icon, emptyTitle, emptyNote, t.DiscoverContent, "", emptyFocus, p.openLibraryHome)
 				}
-				p.libraryEmpty(c, icon, emptyTitle, emptyNote, t.DiscoverContent, "", emptyFocus, p.openLibraryHome)
+				return
 			}
-			return
-		}
-		p.libraryGrid(c, query, snapshot, 102+headingHeight, managing)
-		p.favoritePageStatus(c, query, snapshot)
+			p.libraryGrid(c, query, snapshot, 102+headingHeight, managing)
+			p.favoritePageStatus(c, query, snapshot)
+		})
 	})
 }
 
@@ -153,7 +155,11 @@ func (p *PageContext) libraryEmpty(c *ui.Context, icon, title, note, action, act
 		top = 105
 	}
 	ui.Column(c).FillWidth().Padding(top, 0, 40, 0).AlignItems(ui.Center).Children(func() {
-		ui.Icon(c, p.Assets.Icon(icon)).Size(65, 65).TextColor(paint(colors.Accent.Soft))
+		if icon == "spinner" {
+			p.loadingSpinner(c, 52)
+		} else {
+			ui.Icon(c, p.Assets.Icon(icon)).Size(65, 65).TextColor(paint(colors.Accent.Soft))
+		}
 		ui.Text(c, title).Margin(32, 0, 18, 0).FontSize(36).FontWeight(450).LineHeight(1.39)
 		if note != "" {
 			ui.Text(c, note).Margin(0, 0, 34, 0).FontSize(21).LineHeight(1.38).TextColor(paint(colors.Text.Muted))

@@ -1,9 +1,25 @@
 package tvui
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
 )
+
+func (v *View) selectSettingsSection(next app.FocusID) {
+	section, ok := strings.CutPrefix(string(next), "section/")
+	if !ok || section == "" {
+		return
+	}
+	route := app.Route{Page: app.Settings, Section: section}
+	if v.State.Route == route {
+		return
+	}
+	if v.State.Navigate(route) {
+		v.State.Focus, v.State.Area, v.reveal = next, app.ContentArea, true
+	}
+}
 
 type settingsLayout struct{}
 
@@ -54,7 +70,7 @@ func (settingsLayout) Render(c *ui.Context, p *PageContext) {
 					p.bind(e, id, "sections")
 				}
 			})
-			ui.Column(c).Grow(1).MaxWidth(1145).Padding(8, 0, 0, 0).Children(func() { p.Outlet(c) })
+			ui.Column(c.Key("settings-section/" + p.Location.Section)).Grow(1).MaxWidth(1145).Padding(8, 0, 0, 0).Children(func() { p.Outlet(c) })
 		})
 	})
 }

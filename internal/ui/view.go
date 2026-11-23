@@ -327,7 +327,11 @@ func (v *View) renderScreen(c *ui.Context, page *PageContext) {
 		insets = *override
 	}
 	insets[2] = max(insets[2], screenBottomInset)
-	screen := ui.Scroll(c.Key(page.Location.Route)).Fill().TrackScroll(scroll)
+	screenKey := page.Location.Route
+	if page.Location.Page == app.Settings || page.Location.Page == app.Library {
+		screenKey = app.Route{Page: page.Location.Page}
+	}
+	screen := ui.Scroll(c.Key(screenKey)).Fill().TrackScroll(scroll)
 	transition := menuTransition
 	if rootReg.Transition != nil {
 		transition = *rootReg.Transition

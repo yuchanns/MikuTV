@@ -245,15 +245,20 @@ func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem
 			}).Width(185).Center()
 		}
 		if item != nil && entry.Capabilities.Has(provider.EditVideo) {
-			background, ink := d.secondaryFill, paint(colors.Text.Primary)
-			if p.State.Focus == homeLaterAction {
+			focused := p.State.Focus == homeLaterAction
+			background, ink, borderColor := d.secondaryFill, paint(colors.Text.Primary), d.secondaryBorder
+			if focused {
 				background, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+				if !p.Theme.Dark && d.focusBorder.A != 0 {
+					borderColor = d.focusBorder
+				}
 			}
 			featured := *item
 			button := ui.Button(c.Key(string(homeLaterAction)), "").Label(text.Later).Size(62, 62).Radius(12).
-				Border(1, d.secondaryBorder).Background(background).TextColor(ink).Center().
+				Border(1, borderColor).Background(background).TextColor(ink).Center().
 				OnClick(func() { p.dispatch(func() { p.addCatalogWatchLater(featured) }) })
 			p.animateFocus(button, background, ink)
+			p.applyFocusElevation(button, focused)
 			p.bind(button, homeLaterAction, homeHero)
 			button.Children(func() { ui.Icon(c, p.Assets.Icon("plus")).Size(28, 28) })
 		}

@@ -380,10 +380,10 @@ func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 
 		case pluginInstallPending:
 			p.framelessHeader(c, "PLUGINS \u00b7 INSTALLING", "refresh", l.InstallPendingTitle, ctxLine)
-			ui.Box(c).FillWidth().Height(6).Margin(28, 0, 20, 0).Radius(3).Background(d.subtleFill).Clip().Children(func() {
-				ui.Box(c).FillHeight().Width(380).Radius(3).Background(paint(colors.Accent.Primary))
+			ui.Row(c).FillWidth().Margin(28, 0, 0, 0).Gap(16).AlignItems(ui.Center).Children(func() {
+				p.loadingSpinner(c, 32)
+				ui.Text(c, l.InstallPendingBody).Grow(1).MinWidth(0).FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Muted))
 			})
-			ui.Text(c, l.InstallPendingBody).FillWidth().FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Muted))
 			ui.Row(c).Margin(36, 0, 0, 0).Gap(16).Children(func() {
 				p.styledButton(c, p.Assets.Text.Cancel, "", app.CloseModal, "plugin-install-actions", func() {
 					if v.PluginCatalog != nil {

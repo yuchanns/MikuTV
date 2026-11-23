@@ -209,8 +209,12 @@ func (s *State) remember() {
 	}
 	key := viewKey{s.CurrentEntry, s.Route}
 	location := s.Location
-	if previous, ok := s.positions[key]; ok && location.Area == NavigationArea {
-		location.Focus, location.Area = previous.Focus, previous.Area
+	if location.Area == NavigationArea {
+		if previous, ok := s.positions[key]; ok {
+			location.Focus, location.Area = previous.Focus, previous.Area
+		} else {
+			location = s.routes.initial(s, spec)
+		}
 	}
 	s.positions[key] = location
 	if s.CurrentEntry != "" {

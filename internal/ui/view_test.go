@@ -135,6 +135,10 @@ func TestHomeBackScrollsToTheCurrentTabBeforeExpandingRail(t *testing.T) {
 	session.page <- provider.CollectionPage{}
 	(<-completion)()
 	tester.Frame()
+	if state.Focus != homePlayAction {
+		t.Fatalf("Home did not start focused on hero play action: %q", state.Focus)
+	}
+	tester.Key(0, ui.KeyUp)
 	tester.Key(0, ui.KeyRight)
 	if view.home.tab != "popular" {
 		t.Fatalf("Right selected home tab %q, want popular", view.home.tab)
@@ -200,15 +204,21 @@ func TestNavigationConfirmationReturnsFocusToContent(t *testing.T) {
 	var context *ui.Context
 	tester := ui.NewTester(func(c *ui.Context) { context = c; view.Render(c) }, 1920, 1080)
 	for _, step := range []struct {
-		key  ui.Key
-		page app.Page
-	}{{0, app.Home}, {ui.KeyDown, app.Search}, {ui.KeyUp, app.Home}, {0, app.Home}} {
+		key   ui.Key
+		page  app.Page
+		focus app.FocusID
+	}{
+		{0, app.Home, homePlayAction},
+		{ui.KeyDown, app.Search, app.ContentAction},
+		{ui.KeyUp, app.Home, homePlayAction},
+		{0, app.Home, homePlayAction},
+	} {
 		tester.Key(0, ui.KeyLeft)
 		if step.key != 0 {
 			tester.Key(0, step.key)
 		}
 		tester.Key(0, ui.KeyEnter)
-		if state.Page != step.page || state.Area != app.ContentArea || ui.FocusedValue(context, &state.Focus) != app.ContentAction {
+		if state.Page != step.page || state.Area != app.ContentArea || ui.FocusedValue(context, &state.Focus) != step.focus {
 			t.Fatalf("confirming %s kept focus in navigation: %+v", step.page, state.Location)
 		}
 	}
@@ -434,8 +444,8 @@ func TestHomeKeepsFocusThroughArtworkPagingAndFiltering(t *testing.T) {
 	tester := ui.NewTester(func(c *ui.Context) { frame = c; view.Render(c) }, 1920, 1080)
 	view.SyncEntry()
 	tester.Frame()
-	if !tester.Focused(assets.Text.Home.ForYou) {
-		t.Fatal("loading changed the active home tab focus")
+	if state.Focus != homePlayAction || !tester.Focused(assets.Text.Home.Play) {
+		t.Fatalf("loading changed the initial home hero focus: %q", state.Focus)
 	}
 
 	first := provider.MediaRef{Kind: provider.Video, ID: "first"}
@@ -452,12 +462,16 @@ func TestHomeKeepsFocusThroughArtworkPagingAndFiltering(t *testing.T) {
 	session.artwork <- image.NewRGBA(image.Rect(0, 0, 16, 9))
 	(<-completion)()
 	tester.Frame()
-	if !tester.Focused(assets.Text.Home.ForYou) {
-		t.Fatal("loading the backdrop lost the focused home tab")
+	if state.Focus != homePlayAction || !tester.Focused(assets.Text.Home.Play) {
+		t.Fatalf("loading the backdrop lost the focused hero action: %q", state.Focus)
 	}
-	tester.Key(0, ui.KeyDown)
+	tester.Key(0, ui.KeyRight)
+	if view.home.tab != "" {
+		t.Fatalf("Right from initial Home focus unexpectedly switched tab to %q", view.home.tab)
+	}
+	tester.Key(0, ui.KeyLeft)
 	if state.Focus != homePlayAction {
-		t.Fatalf("down from the first tab focused %s", state.Focus)
+		t.Fatalf("Left did not return to homePlayAction: %s", state.Focus)
 	}
 	tester.Key(0, ui.KeyDown)
 	if state.Focus != app.FocusID("home/shelf/continue") {
@@ -651,6 +665,7 @@ func TestCatalogHoldMovesAtConstantSpeedUntilRelease(t *testing.T) {
 	(<-completion)()
 	tester.Frame()
 
+	tester.Key(0, ui.KeyUp)
 	playBounds := view.focus.item(homePlayAction).target
 	tester.KeyDown(ui.KeyDown)
 	tester.Advance(500 * time.Millisecond)
@@ -769,5 +784,140 @@ func TestCatalogBitmapInitializesLazilyAndEvictsLRU(t *testing.T) {
 	page.pruneCatalogBitmaps()
 	if len(view.home.images) > maxCatalogBitmaps {
 		t.Fatalf("home.images exceeded bound: %d > %d", len(view.home.images), maxCatalogBitmaps)
+	}
+}
+
+func TestRailLibraryAndSettingsHoverSwitchImmediately(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := testEntries()
+	entries[0].Capabilities = provider.Capabilities{
+		provider.BrowseCatalog,
+		provider.SearchCatalog,
+		provider.BrowseFollowing,
+		provider.BrowseSeries,
+		provider.BrowseLive,
+		provider.BrowseLibrary,
+		provider.AccountHistory.Capability(),
+		provider.AccountWatchLater.Capability(),
+		provider.AccountFavorites.Capability(),
+		provider.AccountTracking.Capability(),
+		provider.AccountCourses.Capability(),
+		provider.SignIn,
+	}
+	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.DefaultLight(), Version: "test"})
+	var context *ui.Context
+	tester := ui.NewTester(func(c *ui.Context) { context = c; view.Render(c) }, 1920, 1080)
+	tester.Frame()
+
+	// 1. Expanding the rail keeps Home active; scrolling Down switches every rail page immediately without Enter.
+	tester.Key(0, ui.KeyLeft)
+	if state.Page != app.Home || state.Area != app.NavigationArea || ui.FocusedValue(context, &state.Focus) != app.RailFocus(app.Home) {
+		t.Fatalf("Left did not expand rail on Home: %+v", state.Location)
+	}
+	wantRailOrder := []app.Page{
+		app.Search, app.Following, app.Series, app.Live, app.Library, app.Entries, app.Settings, app.Account,
+	}
+	for _, want := range wantRailOrder {
+		tester.Key(0, ui.KeyDown)
+		if state.Page != want || state.Area != app.NavigationArea || ui.FocusedValue(context, &state.Focus) != app.RailFocus(want) {
+			t.Fatalf("Down in rail did not switch immediately to %s while staying in rail: %+v", want, state.Location)
+		}
+	}
+
+	// 2. Scroll Up to Settings and press Right into the left settings sidebar, then Down switches sections without Enter.
+	tester.Key(0, ui.KeyUp)
+	if state.Page != app.Settings || state.Area != app.NavigationArea || state.Focus != app.RailFocus(app.Settings) {
+		t.Fatalf("Up from Account did not switch to Settings in rail: %+v", state.Location)
+	}
+	tester.Key(0, ui.KeyRight)
+	if state.Page != app.Settings || state.Area != app.ContentArea || state.Focus != app.SectionFocus("playback") {
+		t.Fatalf("Right from rail/settings did not enter playback section: %+v", state.Location)
+	}
+	tester.Advance(menuTransition.Duration + time.Millisecond)
+	settingsTitleBefore, ok := tester.Find(assets.Text.SettingsTitle)
+	if !ok {
+		t.Fatal("settings title missing")
+	}
+	for _, wantSection := range []string{"danmaku", "appearance", "privacy", "plugins", "about"} {
+		tester.Key(0, ui.KeyDown)
+		tester.Advance(menuTransition.Duration / 4)
+		settingsTitleAfter, ok := tester.Find(assets.Text.SettingsTitle)
+		if !ok || math.Abs(float64(settingsTitleAfter.Y-settingsTitleBefore.Y)) > 0.01 {
+			t.Fatalf("switching settings section %s remounted or shifted the outer page: before=%+v after=%+v", wantSection, settingsTitleBefore, settingsTitleAfter)
+		}
+		if state.Page != app.Settings || state.Section != wantSection || state.Focus != app.SectionFocus(wantSection) {
+			t.Fatalf("Down in settings sidebar did not switch immediately to %s: %+v", wantSection, state.Location)
+		}
+	}
+	tester.Key(0, ui.KeyUp)
+	tester.Key(0, ui.KeyUp)
+	tester.Key(0, ui.KeyUp)
+	if state.Section != "appearance" || state.Focus != app.SectionFocus("appearance") {
+		t.Fatalf("Up in settings sidebar did not return to appearance: %+v", state.Location)
+	}
+	tester.Key(0, ui.KeyRight)
+	if state.Focus != appearanceModeRow {
+		t.Fatalf("Right from appearance sidebar focused %q, want %q", state.Focus, appearanceModeRow)
+	}
+
+	// 3. Return to rail, hover Up to Library, enter Library tabs, and verify Left/Right switch tabs immediately without Enter.
+	tester.Key(0, ui.KeyLeft)
+	tester.Key(0, ui.KeyLeft)
+	if state.Area != app.NavigationArea || state.Focus != app.RailFocus(app.Settings) {
+		t.Fatalf("Left did not return to rail/settings: %+v", state.Location)
+	}
+	tester.Key(0, ui.KeyUp) // Entries
+	tester.Key(0, ui.KeyUp) // Library
+	if state.Page != app.Library || state.Area != app.NavigationArea || state.Focus != app.RailFocus(app.Library) {
+		t.Fatalf("Up did not hover Library in rail: %+v", state.Location)
+	}
+	tester.Key(0, ui.KeyRight)
+	if state.Page != app.Library || state.Area != app.ContentArea {
+		t.Fatalf("Right from rail/library did not enter Library content: %+v", state.Location)
+	}
+	state.Focus = app.FocusID("library/tab/" + provider.AccountHistory)
+	tester.Frame()
+	tester.Advance(menuTransition.Duration + time.Millisecond)
+	libTabBefore, ok := tester.Find(assets.Text.Activity.LibraryHistory)
+	if !ok {
+		t.Fatal("library history tab missing")
+	}
+	wantLibraryTabs := []provider.AccountSection{
+		provider.AccountWatchLater, provider.AccountFavorites, provider.AccountTracking, provider.AccountCourses,
+	}
+	for _, sec := range wantLibraryTabs {
+		tester.Key(0, ui.KeyRight)
+		tester.Advance(menuTransition.Duration / 4)
+		libTabAfter, ok := tester.Find(assets.Text.Activity.LibraryHistory)
+		if !ok || math.Abs(float64(libTabAfter.Y-libTabBefore.Y)) > 0.01 {
+			t.Fatalf("switching library tab %s remounted or shifted the top tab bar: before=%+v after=%+v", sec, libTabBefore, libTabAfter)
+		}
+		wantFocus := app.FocusID("library/tab/" + sec)
+		if state.Route != libraryRoute(sec) || state.Focus != wantFocus {
+			t.Fatalf("Right on library tabs did not switch immediately to %s: route=%+v focus=%q", sec, state.Route, state.Focus)
+		}
+	}
+	for i := len(wantLibraryTabs) - 2; i >= 0; i-- {
+		sec := wantLibraryTabs[i]
+		tester.Key(0, ui.KeyLeft)
+		wantFocus := app.FocusID("library/tab/" + sec)
+		if state.Route != libraryRoute(sec) || state.Focus != wantFocus {
+			t.Fatalf("Left on library tabs did not switch back immediately to %s: route=%+v focus=%q", sec, state.Route, state.Focus)
+		}
+	}
+	tester.Key(0, ui.KeyLeft)
+	if state.Route != libraryRoute(provider.AccountHistory) || state.Focus != app.FocusID("library/tab/"+provider.AccountHistory) {
+		t.Fatalf("Left on watch_later tab did not switch immediately back to history: route=%+v focus=%q", state.Route, state.Focus)
 	}
 }

@@ -2,6 +2,7 @@ package tvui
 
 import (
 	"log"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
@@ -100,8 +101,26 @@ func (v *View) move(direction app.Direction) {
 		return
 	}
 	v.moveFocus(next, direction, true)
+	if current.group == "rail" && (direction == app.Up || direction == app.Down) {
+		v.selectRailFocus(next)
+		return
+	}
 	if reg.AfterMove != nil {
 		reg.AfterMove(v, direction, current.group, next)
+	}
+}
+
+func (v *View) selectRailFocus(next app.FocusID) {
+	raw, ok := strings.CutPrefix(string(next), "rail/")
+	if !ok || raw == "" {
+		return
+	}
+	page := app.Page(raw)
+	if v.Pages.navigationOwner(v.State.Route) == page {
+		return
+	}
+	if v.State.Navigate(app.Route{Page: page}) {
+		v.State.Focus, v.State.Area, v.reveal = next, app.NavigationArea, true
 	}
 }
 

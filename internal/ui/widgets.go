@@ -1,6 +1,8 @@
 package tvui
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
 )
@@ -154,4 +156,19 @@ func (p *PageContext) animateFocus(element ui.Element, background, foreground ui
 
 func (p *PageContext) applyFocusElevation(_ ui.Element, _ bool) {
 	// Light themes preserve the same flat frosted-glass surface language as Dark themes without heavy drop shadows.
+}
+
+func (p *PageContext) loadingSpinner(c *ui.Context, size float32) {
+	colors, d := p.Theme.Colors, p.uiColors()
+	var degrees float32
+	if !p.host.reduceMotionEnabled(c) {
+		degrees = float32(c.Now().UnixNano()%int64(time.Second)) / float32(time.Second) * 360
+		c.AnimationFrame()
+	}
+	stroke := max(float32(2.5), size*0.06)
+	ui.Box(c.Key("spinner")).Size(size, size).Shrink(0).Children(func() {
+		ui.Box(c.Key("track")).Absolute().Top(0).Left(0).Fill().Radius(size/2).Border(stroke, d.spinnerTrack)
+		ui.Icon(c.Key("arc"), p.Assets.Icon("playback-spinner")).Absolute().Top(0).Left(0).Size(size, size).
+			TextColor(paint(colors.Accent.Soft)).Rotate(degrees)
+	})
 }
