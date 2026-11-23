@@ -163,6 +163,7 @@ func (catalogPage) Render(c *ui.Context, p *PageContext) {
 	if home.hold.key == ui.KeyUnknown {
 		p.selectCatalogFeature(c, current, shelves, picks)
 		p.syncCatalogFeatureInfo(c, current)
+		p.host.SyncTopShelf()
 	} else {
 		// Keep the current artwork while the user is moving through rows.
 		home.featureInfo.stop()

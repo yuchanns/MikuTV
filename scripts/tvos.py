@@ -104,6 +104,13 @@ def build():
         "CFBundleIcons": {"CFBundlePrimaryIcon": APP_ICON},
         "CFBundlePackageType": "APPL", "CFBundleShortVersionString": APP_VERSION,
         "CFBundleVersion": number, "CFBundleSupportedPlatforms": ["AppleTVOS"],
+        "CFBundleLocalizations": ["zh-Hans", "en"],
+        "LSApplicationCategoryType": "public.app-category.entertainment",
+        "CFBundleURLTypes": [{
+            "CFBundleTypeRole": "Viewer",
+            "CFBundleURLName": "dev.yuchanns.MikuTV",
+            "CFBundleURLSchemes": ["mikutv"],
+        }],
         "UIDeviceFamily": [3], "MinimumOSVersion": MINIMUM,
         "LSRequiresIPhoneOS": True, "UILaunchScreen": {},
         "NSAppTransportSecurity": {"NSExceptionDomains": {"127.0.0.1": {"NSExceptionAllowsInsecureHTTPLoads": True}}},
@@ -114,9 +121,38 @@ def build():
     icon = ROOT / "resources/tvos" / f"{APP_ICON}.psd"
     run(["xcrun", "--sdk", "appletvos", "layerutil", "-c", "-l", "1",
          "-o", str(APP / "Assets.car"), str(icon)])
+    bundle_topshelf(environment, number)
     bundle_plugins()
     bundle_licenses(environment)
     print(APP)
+
+
+def bundle_topshelf(build_env, number):
+    ext = APP / "PlugIns/TopShelf.appex"
+    ext.mkdir(parents=True, exist_ok=True)
+    run(["go", "build", "-trimpath", "-tags=tvos,mygo_noinspector",
+         "-ldflags=-s -w",
+         "-o", str(ext / "TopShelf"), "./cmd/topshelf"], env=build_env)
+    ext_info = {
+        "CFBundleDevelopmentRegion": "en",
+        "CFBundleDisplayName": "MikuTV TopShelf",
+        "CFBundleExecutable": "TopShelf",
+        "CFBundleIdentifier": "dev.yuchanns.MikuTV.TopShelf",
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleName": "TopShelf",
+        "CFBundlePackageType": "XPC!",
+        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleVersion": number,
+        "CFBundleSupportedPlatforms": ["AppleTVOS"],
+        "CFBundleLocalizations": ["zh-Hans", "en"],
+        "UIDeviceFamily": [3],
+        "MinimumOSVersion": MINIMUM,
+        "NSExtension": {
+            "NSExtensionPointIdentifier": "com.apple.tv-top-shelf",
+            "NSExtensionPrincipalClass": "MikuTVTopShelfProvider",
+        },
+    }
+    (ext / "Info.plist").write_bytes(plistlib.dumps(ext_info))
 
 
 def detect_license_id(text):
@@ -169,7 +205,7 @@ def collect_go_licenses(build_env=None):
         )
     fmt = "{{with .Module}}{{if not .Main}}{{.Path}}\t{{.Version}}\t{{.Indirect}}\t{{.Dir}}{{end}}{{end}}"
     raw = subprocess.check_output(
-        ["go", "list", "-tags=tvos,mygo_noinspector", "-deps", "-f", fmt, "."],
+        ["go", "list", "-tags=tvos,mygo_noinspector", "-deps", "-f", fmt, ".", "./cmd/topshelf"],
         cwd=ROOT, env=environment, text=True,
     )
     seen = {}

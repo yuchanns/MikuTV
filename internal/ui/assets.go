@@ -41,7 +41,14 @@ type labels struct {
 	Danmaku                                                               danmakuSettingsLabels
 	Privacy                                                               privacySettingsLabels
 	About                                                                 aboutLabels
+	TopShelf                                                              topShelfLabels
 	Modal                                                                 modalLabels
+}
+
+type topShelfLabels struct {
+	SectionContinue, SectionRecommended                     string
+	SectionContinueWithSource, SectionRecommendedWithSource string
+	EntryUnavailable                                        string
 }
 
 type aboutLabels struct {

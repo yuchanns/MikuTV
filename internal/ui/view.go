@@ -8,6 +8,7 @@ import (
 	"github.com/yuchanns/MikuTV/internal/app"
 	"github.com/yuchanns/MikuTV/internal/provider"
 	"github.com/yuchanns/MikuTV/internal/theme"
+	"github.com/yuchanns/MikuTV/internal/topshelf"
 )
 
 const (
@@ -61,6 +62,7 @@ type Options struct {
 	Theme            theme.Theme
 	Version          string
 	About            app.AboutInfo
+	TopShelf         topshelf.Store
 }
 
 type View struct {
@@ -83,9 +85,16 @@ type View struct {
 	Theme           theme.Theme
 	Version         string
 	About           app.AboutInfo
+	TopShelf        topshelf.Store
 	Trace           bool
 	projectQRURL    string
 	projectQRImage  ui.ImageSource
+	lastTopShelfHash   [32]byte
+	hasTopShelfHash    bool
+	topShelfSnapshot   topshelf.Snapshot
+	pendingTopShelfURL string
+	lastOpenedURL      string
+	lastOpenedAt       time.Time
 	lastNavigation  navigationTrace
 	native          ui.Theme
 	focus           focusController
@@ -140,16 +149,20 @@ func NewView(options Options) *View {
 	v := &View{
 		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
-		Version: options.Version, About: options.About.Normalized(options.Version), scrolls: make(map[scrollKey]*ui.ScrollState),
+		Version: options.Version, About: options.About.Normalized(options.Version), TopShelf: options.TopShelf, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}
 	v.SetTheme(options.Theme)
-	if v.Auth != nil && v.Catalog != nil {
+	if v.Auth != nil {
 		v.Auth.SetOnSettled(func() {
-			if v.home.tab != "" || v.home.filter != "" {
-				v.Catalog.Show(v.home.tab, v.home.filter)
-				return
+			if v.Catalog != nil {
+				if v.home.tab != "" || v.home.filter != "" {
+					v.Catalog.Show(v.home.tab, v.home.filter)
+				} else {
+					v.Catalog.EnsureLoaded()
+				}
 			}
-			v.Catalog.EnsureLoaded()
+			v.SyncTopShelf()
+			v.FlushPendingTopShelfURL()
 		})
 	}
 	return v
@@ -511,4 +524,6 @@ func (v *View) SyncAccountActivity() {
 	if sync := v.Pages.components[v.State.Route].Sync; sync != nil {
 		sync(v)
 	}
+	v.SyncTopShelf()
+	v.FlushPendingTopShelfURL()
 }

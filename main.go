@@ -16,6 +16,7 @@ import (
 	"github.com/yuchanns/MikuTV/internal/plugin"
 	"github.com/yuchanns/MikuTV/internal/provider"
 	"github.com/yuchanns/MikuTV/internal/theme"
+	"github.com/yuchanns/MikuTV/internal/topshelf"
 	tvui "github.com/yuchanns/MikuTV/internal/ui"
 )
 
@@ -40,6 +41,28 @@ func main() {
 		log.Printf("bundled licenses unavailable: %v", err)
 		aboutDeps = app.RuntimeDependencies()
 	}
+	var topShelfStore topshelf.Store
+	if shared, err := topshelf.NewSharedStore(); err == nil {
+		topShelfStore = shared
+		log.Printf("topshelf: host store mode=%s", shared.Mode())
+	} else {
+		log.Printf("topshelf store unavailable: %v", err)
+	}
+	var pendingOpenURL string
+	var activeView *tvui.View
+	var invalidateWindow func()
+	mygo.App.OnOpenURL(func(raw string) {
+		log.Printf("topshelf: received openURL=%s", raw)
+		mygo.RunOnMain(func() {
+			if activeView == nil {
+				pendingOpenURL = raw
+				return
+			}
+			if activeView.OpenTopShelfURL(raw) && invalidateWindow != nil {
+				invalidateWindow()
+			}
+		})
+	})
 	mygo.App.WhenReady(func() {
 		assets, err := tvui.LoadAssets()
 		if err != nil {
@@ -132,7 +155,10 @@ func main() {
 		auth.SetCleaner(preferences)
 		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, PrivateMessages: privateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, Pages: pages, Assets: assets,
 			Preferences: preferences, Theme: theme.Default(), Version: appVersion,
-			About: app.AboutInfo{Version: appVersion, Build: appBuild, Commit: appCommit, Plugins: aboutPlugins, Dependencies: aboutDeps}})
+			About: app.AboutInfo{Version: appVersion, Build: appBuild, Commit: appCommit, Plugins: aboutPlugins, Dependencies: aboutDeps},
+			TopShelf: topShelfStore})
+		activeView = view
+		invalidateWindow = invalidate
 		view.Trace = os.Getenv("MIKUTV_NAV_TRACE") == "1"
 		if view.Trace {
 			log.SetFlags(log.LstdFlags | log.Lmicroseconds)
@@ -151,14 +177,27 @@ func main() {
 				invalidate()
 			})
 			view.Playback.SetPreferences(playbackSettings)
+			if pendingOpenURL != "" {
+				raw := pendingOpenURL
+				pendingOpenURL = ""
+				view.OpenTopShelfURL(raw)
+			}
+			view.FlushPendingTopShelfURL()
+			invalidate()
 		})
 		mygo.Power.OnSuspend(func() {
+			view.SyncTopShelf()
 			if view.Playback != nil {
 				view.Playback.Suspend()
 			}
 		})
 		window.OnReadyToShow(func() { log.Print("MikuTV: first frame ready") })
 		view.SyncEntry()
+		if pendingOpenURL != "" {
+			raw := pendingOpenURL
+			pendingOpenURL = ""
+			view.OpenTopShelfURL(raw)
+		}
 		mygo.App.OnQuit(func() {
 			if view.Playback != nil {
 				view.Playback.Close()

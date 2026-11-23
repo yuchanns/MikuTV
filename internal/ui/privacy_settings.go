@@ -105,7 +105,9 @@ func (privacySettingsPage) Render(c *ui.Context, p *PageContext) {
 		p.danmakuToggleRow(c, app.HistorySync, "history", act.HistorySync, act.HistorySyncNote, enabled, func() {
 			if err := v.Activity.ToggleHistorySync(); err != nil {
 				v.showSettingsFeedback(priv.SyncSaveFailed)
+				return
 			}
+			v.SyncTopShelf()
 		})
 	}
 	if showSearch {
@@ -160,6 +162,9 @@ func (privacyConfirmPage) Render(c *ui.Context, p *PageContext) {
 				p.State.Back()
 				if clearedKind == privacyClearKindSearch && !entry.Capabilities.Has(provider.SearchCatalog) {
 					p.State.Focus, v.reveal = v.firstPrivacyFocus(), true
+				}
+				if clearedKind == privacyClearKindHistory {
+					v.SyncTopShelf()
 				}
 				v.showSettingsFeedback(priv.Cleared)
 			}, p.framelessButtonAppearance())

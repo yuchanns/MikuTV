@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MikuTV <dev@mikutv.local>
+Date: Mon, 23 Nov 2026 12:52:00 +0800
+Subject: [PATCH] tvos: forward UIApplication openURL delegate calls to OpenURLs
+
+---
+ internal/tvos/app.go | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/internal/tvos/app.go b/internal/tvos/app.go
+index 1b12a76..7e3d4c1 100644
+--- a/internal/tvos/app.go
++++ b/internal/tvos/app.go
+@@ -73,6 +73,21 @@ func (b *Backend) registerClasses() error {
+ 			b.h.Ready()
+ 			return true
+ 		}},
++		{Cmd: sel("application:openURL:options:"), Fn: func(_ id, _ objc.SEL, _ id, urlObj id, _ id) bool {
++			if urlObj == 0 {
++				return false
++			}
++			abs := send(urlObj, "absoluteString")
++			if abs == 0 {
++				return false
++			}
++			raw := objc.Send[string](abs, sel("UTF8String"))
++			if raw == "" {
++				return false
++			}
++			b.h.OpenURLs([]string{raw})
++			return true
++		}},
+ 		{Cmd: sel("window"), Fn: func(id, objc.SEL) id {
+ 			if b.window != nil {
+ 				return b.window.native
+-- 
+2.47.0
