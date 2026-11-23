@@ -526,16 +526,26 @@ func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, cur
 					}
 				}
 				if hasEpisodes {
-					p.styledButton(c, text.Episodes, "following", playerPanelExit, playerPanelGroup,
+					episodesHeading := text.Episodes
+					if current.item.Ref.Kind == provider.Course {
+						episodesHeading = p.Assets.Text.Detail.CourseUnit
+					}
+					p.styledButton(c, episodesHeading, "following", playerPanelExit, playerPanelGroup,
 						func() { v.moveFocus(playerEpisodeID(s.index), app.Down, true) }, buttonAppearance{
 							height: 62, padding: 27, radius: 12, fontSize: 22, iconSize: 28, iconGap: 13,
 							background: d.secondaryFill, foreground: d.secondaryText,
 						}).Margin(8, 0, 0, 0)
 					ui.Row(c).FillWidth().Margin(30, 0, 4, 0).AlignItems(ui.Baseline).Justify(ui.SpaceBetween).Children(func() {
-						ui.Text(c, text.Episodes).FontSize(24).TextColor(paint(colors.Text.Secondary))
+						ui.Text(c, episodesHeading).FontSize(24).TextColor(paint(colors.Text.Secondary))
 						total := len(s.items) + len(upcoming)
-						if len(upcoming) > 0 {
-							ui.Text(c, fmt.Sprintf("%d / %d", len(s.items), total)).FontSize(17).
+						unlocked := 0
+						for _, row := range s.items {
+							if !row.locked {
+								unlocked++
+							}
+						}
+						if len(upcoming) > 0 || unlocked < len(s.items) {
+							ui.Text(c, fmt.Sprintf("%d / %d", unlocked, total)).FontSize(17).
 								TextColor(paint(colors.Text.Muted))
 						} else {
 							ui.Text(c, fmt.Sprintf("%d / %d", min(max(1, s.index+1), len(s.items)), len(s.items))).FontSize(17).
@@ -567,8 +577,17 @@ func (p *PageContext) playbackEpisodeRow(c *ui.Context, row playbackItem, index 
 	selected, focused := index == s.index, p.paintFocus() == id
 	fill, ink := d.subtleFill, paint(colors.Text.Primary)
 	meta, icon := paint(colors.Text.Muted), "play"
+	status := row.status
 	if selected {
 		fill, icon = d.subtleHoverFill, "check"
+	} else if row.locked {
+		fill = withAlpha(colors.Surface.Raised, 0x55)
+		ink = paint(colors.Text.Muted)
+		meta = withAlpha(colors.Text.Muted, 0x99)
+		icon = "lock"
+		if status == "" {
+			status = p.Assets.Text.Detail.EpisodeLocked
+		}
 	}
 	if focused {
 		fill, ink, meta = paint(colors.Focus.Background), paint(colors.Focus.Foreground), d.focusSubtext
@@ -589,8 +608,8 @@ func (p *PageContext) playbackEpisodeRow(c *ui.Context, row playbackItem, index 
 			ui.Text(c, number).FontSize(25).FontWeight(450).TextColor(meta)
 			ui.Column(c).Grow(1).Shrink(1).Gap(4).Children(func() {
 				ui.Text(c, title).FillWidth().FontSize(20).MaxLines(1).TextColor(ink)
-				if row.status != "" {
-					ui.Text(c, row.status).FillWidth().FontSize(14).MaxLines(1).TextColor(meta)
+				if status != "" {
+					ui.Text(c, status).FillWidth().FontSize(14).MaxLines(1).TextColor(meta)
 				}
 			})
 			ui.Icon(c, p.Assets.Icon(icon)).Size(21, 21).TextColor(meta)

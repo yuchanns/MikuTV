@@ -90,9 +90,9 @@ type playbackAccessAction struct {
 }
 
 type playbackAccessDialog struct {
-	title, body, work, instructions string
-	actions                         []playbackAccessAction
-	workAccess, returnToDetail      bool
+	title, body, work, instructions     string
+	actions                             []playbackAccessAction
+	workAccess, returnToDetail, purchase bool
 }
 
 func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item playbackItem) playbackAccessDialog {
@@ -116,10 +116,11 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 		}
 	}
 	if state.PreviewPending || playbackPreviewEnded(state) || playbackHasWorkRestriction(state) {
-		dialog := playbackAccessDialog{
-			title: p.sourceText(labels.VIPTitle), body: p.sourceText(labels.VIPNoPreview), work: item.item.Title, workAccess: true,
-		}
 		purchase := state.Limit == provider.PlaybackPurchase || plan.PreviewRestriction == provider.PlaybackPurchase
+		dialog := playbackAccessDialog{
+			title: p.sourceText(labels.VIPTitle), body: p.sourceText(labels.VIPNoPreview), work: item.item.Title,
+			workAccess: true, returnToDetail: true, purchase: purchase,
+		}
 		if purchase {
 			dialog.title, dialog.body = p.sourceText(labels.PurchaseTitle), p.sourceText(labels.PurchaseBody)
 		}
@@ -150,7 +151,6 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 			}})
 		}
 		if !purchase {
-			dialog.returnToDetail = true
 			dialog.actions = append(dialog.actions, playbackAccessAction{labels.MembershipHelp, "", func() { s.showAccessHelp = true }})
 			if s.showAccessHelp {
 				dialog.instructions = p.sourceText(labels.MembershipInstructions)
@@ -232,7 +232,11 @@ func (p *PageContext) drawPlaybackAccess(c *ui.Context, state app.PlaybackState,
 	eyebrow := "PLAYBACK \u00b7 ACCESS"
 	icon := "lock"
 	if dialog.work != "" {
-		eyebrow = "MEMBERSHIP \u00b7 " + dialog.work
+		if dialog.purchase {
+			eyebrow = "ACCESS \u00b7 " + dialog.work
+		} else {
+			eyebrow = "MEMBERSHIP \u00b7 " + dialog.work
+		}
 	}
 	p.renderPlayerFrameless(c, "playback-access", 860, func() {
 		p.framelessHeader(c, eyebrow, icon, dialog.title, dialog.body)

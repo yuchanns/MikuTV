@@ -48,6 +48,7 @@ type playbackItem struct {
 	partID string
 	label  string
 	status string
+	locked bool
 }
 
 type playbackView struct {
@@ -148,7 +149,7 @@ func playbackEpisodes(item provider.MediaItem, segments []provider.VideoSegment,
 		if segment.Unavailable || segment.Ref == nil && segment.PartID == "" {
 			continue
 		}
-		row := playbackItem{item: item, partID: segment.PartID, label: segment.Title, status: segment.Status}
+		row := playbackItem{item: item, partID: segment.PartID, label: segment.Title, status: segment.Status, locked: segment.Locked}
 		if segment.Ref != nil && *segment.Ref != item.Ref {
 			row.item = provider.MediaItem{Ref: *segment.Ref, Title: segment.Title, DurationSeconds: segment.DurationSeconds}
 		}
@@ -404,7 +405,9 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 		s.index+1 < len(s.items) && state.Duration >= 30 &&
 		state.Duration-state.Position <= 20 && state.Duration-state.Position > 1 {
 		next := s.items[s.index+1]
-		v.Playback.PreloadNext(provider.PlaybackTarget{Ref: next.item.Ref, PartID: next.partID}, v.Playback.Owner())
+		if !next.locked {
+			v.Playback.PreloadNext(provider.PlaybackTarget{Ref: next.item.Ref, PartID: next.partID}, v.Playback.Owner())
+		}
 	}
 	if !playbackShowNetworkSpeed(state, s) {
 		s.resetNetworkSpeed()

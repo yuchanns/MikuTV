@@ -675,7 +675,7 @@ func (p *PageContext) searchResultsBody(c *ui.Context, current app.SearchSnapsho
 func (p *PageContext) searchMediaCard(c *ui.Context, item provider.MediaItem, width float32, direction func(app.Direction) bool) {
 	id := searchItemFocus(item.Ref)
 	size := catalogCardSize{width: width, height: searchCardHeight, cover: searchCoverHeight, title: 21}
-	if item.Ref.Kind == provider.Video && p.canOpenVideoDetail(item.Ref) {
+	if (item.Ref.Kind == provider.Video || item.Ref.Kind == provider.Series || item.Ref.Kind == provider.Course) && p.canOpenVideoDetail(item.Ref) {
 		p.catalogCard(c, id, searchResultsRegion, item, size, direction)
 		return
 	}

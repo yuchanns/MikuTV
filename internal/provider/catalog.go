@@ -30,13 +30,14 @@ const (
 	Movie          MediaKind = "movie"
 	Series         MediaKind = "series"
 	Episode        MediaKind = "episode"
+	Course         MediaKind = "course"
 	Live           MediaKind = "live"
 	CollectionKind MediaKind = "collection"
 )
 
 func (k MediaKind) Valid() bool {
 	switch k {
-	case Video, Movie, Series, Episode, Live, CollectionKind:
+	case Video, Movie, Series, Episode, Course, Live, CollectionKind:
 		return true
 	default:
 		return false
@@ -117,6 +118,7 @@ type VideoSegment struct {
 	PartID          string    `json:"partID,omitempty"`
 	StartSeconds    int64     `json:"startSeconds,omitempty"`
 	Unavailable     bool      `json:"unavailable,omitempty"`
+	Locked          bool      `json:"locked,omitempty"`
 	Status          string    `json:"status,omitempty"`
 }
 

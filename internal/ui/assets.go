@@ -134,7 +134,8 @@ type detailLabels struct {
 	CommentPlaceholder, ReplyTo, CreatorMark, Pinned, Dislike, EditComment                 string
 	PostComment, CommentInput, CommentPosted, CommentLoadFailed, Done, KeyboardPlaceholder string
 	MinutesAgo, HoursAgo, DaysAgo, JustNow, Kicker, SeriesKicker                           string
-	SeriesUnit, EpisodeUpcoming, EpisodeUpcomingNotice                                     string
+	CourseKicker, SeriesUnit, CourseUnit, EpisodeUpcoming, EpisodeUpcomingNotice           string
+	EpisodeLocked                                                                          string
 }
 
 type homeLabels struct {

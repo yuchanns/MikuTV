@@ -178,7 +178,7 @@ func (p *PageContext) noticeJumpItem(row provider.AccountRow) (provider.MediaIte
 
 func (p *PageContext) canOpenNoticeTarget(ref provider.MediaRef) bool {
 	switch ref.Kind {
-	case provider.Video, provider.Movie, provider.Series, provider.Episode:
+	case provider.Video, provider.Movie, provider.Series, provider.Episode, provider.Course:
 		return p.canOpenVideoDetail(ref)
 	case provider.Live:
 		return p.canPlay(ref) || p.canOpenVideoDetail(ref)

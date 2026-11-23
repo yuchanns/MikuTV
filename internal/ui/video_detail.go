@@ -288,7 +288,8 @@ func (v *View) loadVideoDetail() {
 		}
 		detail.item = item
 		episodes := videoEpisodes(item.VideoDetails)
-		if detail.part < 0 || detail.part >= len(episodes) || episodes[detail.part].Unavailable {
+		if detail.part < 0 || detail.part >= len(episodes) || episodes[detail.part].Unavailable ||
+			(detail.part == 0 && len(episodes) > 0 && episodes[0].Locked) {
 			detail.part = firstPlayableEpisode(episodes)
 		}
 		if v.Trace && item.VideoDetails != nil {
@@ -410,8 +411,11 @@ func (p *PageContext) videoDetailSummary(c *ui.Context, detail *videoDetailState
 			AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Size(24, 1).Background(paint(colors.Accent.Soft))
 			kicker := p.Assets.Text.Detail.Kicker
-			if item.Ref.Kind == provider.Series {
+			switch item.Ref.Kind {
+			case provider.Series:
 				kicker = p.Assets.Text.Detail.SeriesKicker
+			case provider.Course:
+				kicker = p.Assets.Text.Detail.CourseKicker
 			}
 			if item.Category != "" {
 				kicker = item.Category + " / " + kicker

@@ -228,8 +228,11 @@ func (p *PageContext) videoDetailAbout(c *ui.Context, detail *videoDetailState, 
 			segment := provider.VideoSegment{Title: item.Title, DurationSeconds: item.DurationSeconds}
 			if index := detail.episodeIndex(); index >= 0 {
 				label, segment = text.Collection, videoEpisodes(item.VideoDetails)[index]
-				if item.Ref.Kind == provider.Series {
+				switch item.Ref.Kind {
+				case provider.Series:
 					label = text.SeriesUnit
+				case provider.Course:
+					label = text.CourseUnit
 				}
 			}
 			ui.Text(c, label).FontSize(13).LetterSpacing(3).LineHeight(1.8).TextColor(paint(colors.Text.Muted))
@@ -251,6 +254,11 @@ func videoEpisodes(info *provider.VideoDetails) []provider.VideoSegment {
 
 func firstPlayableEpisode(episodes []provider.VideoSegment) int {
 	for i, ep := range episodes {
+		if !ep.Unavailable && !ep.Locked {
+			return i
+		}
+	}
+	for i, ep := range episodes {
 		if !ep.Unavailable {
 			return i
 		}
@@ -261,7 +269,7 @@ func firstPlayableEpisode(episodes []provider.VideoSegment) int {
 func playableEpisodeCount(episodes []provider.VideoSegment) int {
 	n := 0
 	for _, ep := range episodes {
-		if !ep.Unavailable {
+		if !ep.Unavailable && !ep.Locked {
 			n++
 		}
 	}
@@ -304,7 +312,11 @@ func (p *PageContext) videoDetailSegments(c *ui.Context, detail *videoDetailStat
 	current := detail.episodeIndex()
 	p.region(videoDetailSegmentsRegion, focusEdges{app.Up: {Focus: videoDetailEpisodes.focusID()}})
 	ui.Row(c).FillWidth().AlignItems(ui.Baseline).Margin(25, 0).Children(func() {
-		ui.Text(c, text.Collection).FontSize(24).TextColor(paint(colors.Text.Secondary))
+		heading := text.Collection
+		if detail.item.Ref.Kind == provider.Course {
+			heading = text.CourseUnit
+		}
+		ui.Text(c, heading).FontSize(24).TextColor(paint(colors.Text.Secondary))
 		ui.Spacer(c).Grow(1)
 		total := len(episodes)
 		playable := playableEpisodeCount(episodes)
@@ -346,6 +358,7 @@ func (p *PageContext) videoEpisode(c *ui.Context, detail *videoDetailState, segm
 	id := videoSegmentFocus(index)
 	focused := p.State.Focus == id
 	unavailable := segment.Unavailable
+	locked := !unavailable && segment.Locked
 	background, foreground := d.subtleFill, paint(colors.Text.Secondary)
 	number, icon, subInk := paint(colors.Text.Muted), paint(colors.Text.Muted), paint(colors.Text.Muted)
 	glyph := "detail/play"
@@ -360,6 +373,17 @@ func (p *PageContext) videoEpisode(c *ui.Context, detail *videoDetailState, segm
 		subInk = withAlpha(colors.Text.Muted, 0x99)
 		if status == "" {
 			status = text.EpisodeUpcoming
+		}
+	} else if locked {
+		selected = false
+		glyph = "lock"
+		background = withAlpha(colors.Surface.Raised, 0x66)
+		foreground = paint(colors.Text.Muted)
+		number = withAlpha(colors.Text.Muted, 0xaa)
+		icon = withAlpha(colors.Text.Muted, 0xaa)
+		subInk = withAlpha(colors.Text.Muted, 0xaa)
+		if status == "" {
+			status = text.EpisodeLocked
 		}
 	} else if selected {
 		glyph, icon = "check", paint(colors.Accent.Soft)
@@ -384,7 +408,7 @@ func (p *PageContext) videoEpisode(c *ui.Context, detail *videoDetailState, segm
 					if p.host.Trace {
 						log.Printf("video detail part: selected=%d", index+1)
 					}
-					if detail.item.Ref.Kind == provider.Series && p.canPlay(detail.item.Ref) {
+					if (detail.item.Ref.Kind == provider.Series || detail.item.Ref.Kind == provider.Course) && p.canPlay(detail.item.Ref) {
 						p.startDetailPlayback(detail.item, nil)
 					}
 				})
