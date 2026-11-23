@@ -304,10 +304,27 @@ func main() {
 			},
 			invalidate,
 		)
+		systemDark := mygo.Theme.IsDark()
+		overrideAppearance := strings.ToLower(strings.TrimSpace(os.Getenv("MIKUTV_SYSTEM_APPEARANCE_OVERRIDE")))
+		switch overrideAppearance {
+		case "light":
+			systemDark = false
+		case "dark":
+			systemDark = true
+		}
+		log.Printf("appearance: systemDark=%v override=%q", systemDark, overrideAppearance)
+		appearance.SetSystemDark(systemDark)
+		if overrideAppearance == "" {
+			mygo.Theme.OnUpdated(func() {
+				dark := mygo.Theme.IsDark()
+				log.Printf("appearance: system theme updated systemDark=%v", dark)
+				appearance.SetSystemDark(dark)
+			})
+		}
 		activeThemeID := appearance.ActiveThemeID()
 		for i := range installedPlugins {
 			if installedPlugins[i].Kind == plugin.ThemeKind {
-				installedPlugins[i].Enabled = activeThemeID != theme.BaseMikuTVDark && strings.EqualFold(installedPlugins[i].ID, activeThemeID)
+				installedPlugins[i].Enabled = !theme.IsBuiltin(activeThemeID) && strings.EqualFold(installedPlugins[i].ID, activeThemeID)
 			}
 		}
 		pluginCatalog = app.NewPluginCatalog(

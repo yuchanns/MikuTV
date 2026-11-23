@@ -24,19 +24,27 @@ func (settingsLayout) Render(c *ui.Context, p *PageContext) {
 					id := section.Policy.Initial.Focus
 					selected := p.Pages.contains(section.Policy.Route, p.Location.Route)
 					background, foreground := ui.Transparent, paint(colors.Text.Secondary)
+					borderW, borderColor := float32(0), ui.Transparent
 					if selected {
 						background, foreground = paint(colors.Selected.Background), paint(colors.Selected.Foreground)
 						p.left = focusDestination{Focus: id}
 					}
-					if p.State.Focus == id {
-						background, foreground = d.subtleHoverFill, paint(colors.Text.Primary)
+					focused := p.State.Focus == id
+					if focused {
+						if !p.Theme.Dark {
+							background, foreground = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+							borderW, borderColor = 1, d.focusBorder
+						} else {
+							background, foreground = d.subtleHoverFill, paint(colors.Text.Primary)
+						}
 					}
 					e := ui.Button(c.Key(string(id)), "").FillWidth().Height(68).Padding(0, 19).Radius(13).
-						Border(0, ui.Transparent).Background(background).TextColor(foreground).Label(section.Title).
+						Border(borderW, borderColor).Background(background).TextColor(foreground).Label(section.Title).
 						OnClick(func() {
 							p.dispatch(func() { p.State.Navigate(section.Policy.Route); p.State.Focus = id; p.State.Area = app.ContentArea })
 						})
 					p.animateFocus(e, background, foreground)
+					p.applyFocusElevation(e, focused)
 					e.Children(func() {
 						ui.Row(c).Fill().Gap(16).AlignItems(ui.Center).Children(func() {
 							ui.Icon(c, p.Assets.Icon(section.Icon)).Size(24, 24)

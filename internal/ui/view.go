@@ -200,6 +200,9 @@ func (v *View) Render(c *ui.Context) {
 		c.Root().Background(ui.Transparent)
 	}
 	screen := ui.Box(c).Fill().Clip().Background(background)
+	if !v.Theme.Dark && !rootReg.TransparentCanvas {
+		screen.Gradient(paint(v.Theme.Colors.Surface.Raised), paint(v.Theme.Colors.Surface.Canvas), 145)
+	}
 	fromVideo := rootReg.PreserveFocusUnderlay
 	top := layers[len(layers)-1]
 	fromMedia := fromVideo || top.Page == app.SignInQR && rootReg.TransparentCanvas

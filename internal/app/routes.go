@@ -33,6 +33,7 @@ const (
 	PlaybackSettingPicker Page = "playbackSettingPicker"
 	DanmakuSettingPicker  Page = "danmakuSettingPicker"
 	DanmakuRuleEditor     Page = "danmakuRuleEditor"
+	AppearanceModePicker  Page = "appearanceModePicker"
 	ThemePicker           Page = "themePicker"
 	ThemeError            Page = "themeError"
 	PrivacyConfirm        Page = "privacyConfirm"

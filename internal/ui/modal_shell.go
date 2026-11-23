@@ -3,6 +3,7 @@ package tvui
 import (
 	"time"
 
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
 )
@@ -111,8 +112,12 @@ func (v *View) renderModal(c *ui.Context, page *PageContext, _ bool) {
 
 		panel := ui.Box(c.Key(page.Location.Route)).Absolute().Right(0).Top(0).
 			Size(drawerW, page.Height).Modal().Transition(dTrans).
-			Gradient(d.drawerStart, d.drawerEnd, 180).
-			Shadow(-36, 0, 90, 0, paint(colors.Overlay.Shadow))
+			Gradient(d.drawerStart, d.drawerEnd, 180)
+		if !v.Theme.Dark {
+			panel.Material(glass.Blur{Radius: 36})
+		} else {
+			panel.Shadow(-36, 0, 90, 0, paint(colors.Overlay.Shadow))
+		}
 		panel.Children(func() {
 			ui.Box(c).Absolute().Left(0).Top(0).Bottom(0).Width(1).Background(d.drawerBorder)
 			ui.Box(c).Absolute().Left(1).Top(0).Bottom(0).Width(1).Background(d.drawerAccentRim)
@@ -138,9 +143,14 @@ func (p *PageContext) renderPlayerDrawer(c *ui.Context, key string, width float3
 			{Color: d.drawerScrimRight, At: 1},
 		},
 	})
-	ui.Box(c.Key(key)).Absolute().Right(0).Top(0).Size(drawerW, p.Height).Modal().
-		Gradient(d.drawerStart, d.drawerEnd, 180).
-		Shadow(-36, 0, 90, 0, paint(colors.Overlay.Shadow)).Children(func() {
+	panel := ui.Box(c.Key(key)).Absolute().Right(0).Top(0).Size(drawerW, p.Height).Modal().
+		Gradient(d.drawerStart, d.drawerEnd, 180)
+	if !p.Theme.Dark {
+		panel.Material(glass.Blur{Radius: 36})
+	} else {
+		panel.Shadow(-36, 0, 90, 0, paint(colors.Overlay.Shadow))
+	}
+	panel.Children(func() {
 		ui.Box(c).Absolute().Left(0).Top(0).Bottom(0).Width(1).Background(d.drawerBorder)
 		ui.Box(c).Absolute().Left(1).Top(0).Bottom(0).Width(1).Background(d.drawerAccentRim)
 		ui.Column(c).Fill().Padding(66, padX, 46, padX).Children(body)
@@ -216,14 +226,19 @@ func (p *PageContext) drawerOptionRow(c *ui.Context, id app.FocusID, region, lab
 	colors, d := p.Theme.Colors, p.uiColors()
 	focused := p.paintFocus() == id
 	bg, fg, subFg := ui.Transparent, paint(colors.Text.Secondary), paint(colors.Text.Muted)
+	borderW, borderColor := float32(0), ui.Transparent
 	if selected {
 		bg, fg = withAlpha(colors.Accent.Primary, 0x16), paint(colors.Accent.Soft)
 	}
 	if focused {
 		bg, fg, subFg = paint(colors.Focus.Background), paint(colors.Focus.Foreground), d.focusSubtext
+		if !p.Theme.Dark {
+			bg = withAlpha(colors.Focus.Background, 0xc4)
+			borderW, borderColor = 1, d.focusBorder
+		}
 	}
 	btn := ui.Button(c.Key(string(id)), "").Label(label).FillWidth().Height(64).
-		Margin(0, 0, 6, 0).Padding(0, 22).Radius(14).Border(0, ui.Transparent).
+		Margin(0, 0, 6, 0).Padding(0, 22).Radius(14).Border(borderW, borderColor).
 		Background(bg).TextColor(fg).
 		OnClick(func() { p.dispatch(action) })
 	p.addVideoFocusShadow(btn, focused)

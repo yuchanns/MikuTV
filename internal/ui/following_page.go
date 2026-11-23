@@ -416,21 +416,27 @@ func (p *PageContext) followingHeader(c *ui.Context, activeTab followingTab, sup
 	}
 	ui.Box(c.Key("following-header")).FillWidth().Height(followingHeaderHeight).Children(func() {
 		ui.Row(c).Absolute().Top(45).Left(78).Height(61).Gap(18).AlignItems(ui.Center).Children(func() {
+			d := p.uiColors()
 			for _, item := range tabs {
 				selected := item.tab == activeTab
 				focused := p.paintFocus() == item.id
 				background, ink := ui.Transparent, paint(colors.Text.Muted)
+				borderW, borderColor := float32(0), ui.Transparent
 				if selected {
 					background, ink = withAlpha(colors.Text.Primary, 0x12), paint(colors.Text.Primary)
 				}
 				if focused {
-					background, ink = withAlpha(colors.Focus.Background, 0x13), paint(colors.Text.Primary)
+					background, ink = d.tabSubtleFocusFill, paint(colors.Text.Primary)
+					if !p.Theme.Dark {
+						borderW, borderColor = 1, d.focusBorder
+					}
 				}
 				const tabWidth float32 = 148
 				button := ui.Button(c.Key(string(item.id)), "").Label(item.label).Size(tabWidth, 61).Padding(0, 0).
-					Radius(30).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
+					Radius(30).Border(borderW, borderColor).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
 					OnClick(func() { p.dispatch(func() { p.host.showFollowingTab(item.tab) }) })
 				p.animateFocus(button, background, ink)
+				p.applyFocusElevation(button, focused)
 				p.bind(button, item.id, followingHeaderRegion)
 				button.Children(func() {
 					ui.Text(c, item.label).FontSize(24).LetterSpacing(1)

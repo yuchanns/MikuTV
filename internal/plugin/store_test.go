@@ -369,4 +369,19 @@ func TestPackageStoreDisableBundledExternalAndRemove(t *testing.T) {
 	if len(failures) != 0 || len(loaded) != 1 || loaded[0].Receipt.ID != "src-b" {
 		t.Fatalf("expected only src-b remaining after remove, got loaded=%+v failures=%v", loaded, failures)
 	}
+
+	// 3. Three-way appearance mode and dual-theme state persistence round-trip.
+	if err := store.SaveAppearanceConfig("system", "tokyonight-day", "tokyonight"); err != nil {
+		t.Fatalf("SaveAppearanceConfig: %v", err)
+	}
+	if err := store.SaveAppearanceMotion(false, true); err != nil {
+		t.Fatalf("SaveAppearanceMotion: %v", err)
+	}
+	st, err := store.LoadAppearanceState()
+	if err != nil {
+		t.Fatalf("LoadAppearanceState: %v", err)
+	}
+	if st.AppearanceMode != "system" || !st.FollowSystem || st.LightTheme != "tokyonight-day" || st.DarkTheme != "tokyonight" || st.HoverPreview || !st.ReduceMotion {
+		t.Fatalf("unexpected appearance state after round-trip: %+v", st)
+	}
 }

@@ -118,15 +118,26 @@ type pluginLabels struct {
 
 type appearanceSettingsLabels struct {
 	Title, Intro                                    string
-	ThemeLabel, ThemeNote                           string
+	ModeLabel                                       string
+	ModeSystem, ModeLight, ModeDark                 string
+	ModeSystemNote, ModeLightNote, ModeDarkNote     string
+	ModePickerTitle, ModePickerSubtitle             string
+	ModeAppliedToast                                string
+	LightThemeLabel, LightThemeNote                 string
+	LightThemeActiveNote                            string
+	DarkThemeLabel, DarkThemeNote                   string
+	DarkThemeActiveNote                             string
 	HoverPreviewLabel, HoverPreviewNote             string
 	ReduceMotionLabel, ReduceMotionNote             string
-	PickerTitle, PickerSubtitle                     string
-	BuiltinThemeNote, InstalledThemeNote            string
+	LightPickerTitle, LightPickerSubtitle           string
+	DarkPickerTitle, DarkPickerSubtitle             string
+	BuiltinDarkThemeNote, BuiltinLightThemeNote     string
+	InstalledDarkThemeNote, InstalledLightThemeNote string
 	BuiltinOnlyHint, DiscoverMoreThemes             string
 	ErrorTitle, ErrorBody                           string
 	ErrorReselect, ErrorReturn                      string
 	ThemeAppliedToast                               string
+	LightThemeSavedToast, DarkThemeSavedToast       string
 }
 
 type topShelfLabels struct {

@@ -157,7 +157,8 @@ func (p *PageContext) preferenceSwitch(c *ui.Context, enabled bool) {
 	if enabled {
 		fill = paint(colors.Accent.Strong)
 	}
-	ui.Box(c).Size(49, 27).Shrink(0).Radius(18).Background(fill).Children(func() {
+	ui.Box(c).Size(49, 27).Shrink(0).Radius(18).Background(fill).
+		Border(1, withAlpha(colors.Selected.FocusForeground, 0x38)).Children(func() {
 		dot := ui.Box(c).Absolute().Top(3).Size(21, 21).Radius(10.5).Background(paint(colors.Selected.FocusForeground))
 		if enabled {
 			dot.Right(3)

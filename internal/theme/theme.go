@@ -143,3 +143,49 @@ func Default() Theme {
 	c.Decoration.CardEnd = 0x0a1b23ff
 	return t
 }
+
+func DefaultLight() Theme {
+	t := Theme{ID: BaseMikuTVLight, Name: "MikuTV Light", Dark: false}
+	c := &t.Colors
+	c.Surface.Canvas = 0xedf1f5ff
+	c.Surface.Sidebar = 0xe3e9f0ff
+	c.Surface.Panel = 0xf4f7faff
+	c.Surface.Raised = 0xf7fafcff
+	c.Surface.Input = 0xe4ebf2ff
+	c.Text.Primary = 0x131b24ff
+	c.Text.Secondary = 0x3b4958ff
+	c.Text.Muted = 0x526170ff
+	c.Accent.Primary = 0x0e7c75ff
+	c.Accent.Soft = 0x0f7f78ff
+	c.Accent.Strong = 0x09635dff
+	c.Accent.Foreground = 0xffffffff
+	c.Border.Subtle = 0x101c2a18
+	c.Border.Strong = 0x101c2a38
+	c.Focus.Background = 0xd0dae4ff
+	c.Focus.Foreground = 0x111922ff
+	c.Focus.Ring = 0x2a3a4aff
+	c.Selected.Background = 0xd9eceaff
+	c.Selected.Foreground = 0x0b4f4bff
+	c.Selected.FocusBackground = 0x0c756eff
+	c.Selected.FocusForeground = 0xffffffff
+	c.Hover = Pair{Background: 0xdbe4edff, Foreground: 0x131b24ff}
+	c.Pressed = Pair{Background: 0xc6d3e0ff, Foreground: 0x0e1822ff}
+	c.Disabled = Pair{Background: 0xe0e6ecff, Foreground: 0x63707dff}
+	c.Status.Error = Pair{Background: 0xfce4e8ff, Foreground: 0x9b1c31ff}
+	c.Status.Warning = Pair{Background: 0xfaf0d7ff, Foreground: 0x7a5200ff}
+	c.Status.Success = Pair{Background: 0xdcf4eaff, Foreground: 0x0d5e43ff}
+	c.Overlay.Scrim = 0x0e162166
+	c.Overlay.PlayerTop = 0x080b11d9
+	c.Overlay.PlayerBottom = 0x080b11f2
+	c.Overlay.Shadow = 0x0e1a261c
+	c.Playback.Foreground = 0xffffffff
+	c.Playback.Secondary = 0xc0cad8ff
+	c.Playback.Track = 0xffffff40
+	c.Playback.Progress = 0x39c5bbff
+	c.Playback.Subtitle = 0xffffffff
+	c.Playback.SubtitleOutline = 0x000000ff
+	c.Decoration.Ambient = 0x0e7c751a
+	c.Decoration.CardStart = 0xdcecebff
+	c.Decoration.CardEnd = 0xebf3f5ff
+	return t
+}

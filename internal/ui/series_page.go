@@ -478,23 +478,29 @@ func (p *PageContext) seriesHeader(c *ui.Context, snap app.SeriesHubSnapshot) {
 	}
 	ui.Box(c.Key("series-header")).FillWidth().Height(seriesHeaderHeight).Children(func() {
 		ui.Row(c).Absolute().Top(45).Left(78).Height(61).Gap(18).AlignItems(ui.Center).Children(func() {
+			d := p.uiColors()
 			for _, genre := range genres {
 				id := seriesGenreFocus(genre.Value)
 				selected := genre.Value == snap.Genre
 				focused := p.paintFocus() == id
 				background, ink := ui.Transparent, paint(colors.Text.Muted)
+				borderW, borderColor := float32(0), ui.Transparent
 				if selected {
 					background, ink = withAlpha(colors.Text.Primary, 0x12), paint(colors.Text.Primary)
 				}
 				if focused {
-					background, ink = withAlpha(colors.Focus.Background, 0x13), paint(colors.Text.Primary)
+					background, ink = d.tabSubtleFocusFill, paint(colors.Text.Primary)
+					if !p.Theme.Dark {
+						borderW, borderColor = 1, d.focusBorder
+					}
 				}
 				w := seriesGenreWidth(genre.Label)
 				val := genre.Value
 				btn := ui.Button(c.Key(string(id)), "").Label(genre.Label).Size(w, 61).Padding(0, 0).
-					Radius(30).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
+					Radius(30).Border(borderW, borderColor).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
 					OnClick(func() { p.dispatch(func() { p.host.selectSeriesGenre(val) }) })
 				p.animateFocus(btn, background, ink)
+				p.applyFocusElevation(btn, focused)
 				p.bind(btn, id, seriesHeaderRegion)
 				btn.Children(func() {
 					ui.Text(c, genre.Label).FontSize(24).LetterSpacing(1)

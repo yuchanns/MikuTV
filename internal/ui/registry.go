@@ -405,6 +405,14 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		},
 		Registration{
 			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.AppearanceModePicker, Section: "appearance"},
+				Parent: app.Route{Page: app.Settings, Section: "appearance"},
+				Modal:  true, Initial: focus(appearanceModeOptionID(app.AppearanceModeDark)),
+			},
+			Component: appearanceModePickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 560,
+		},
+		Registration{
+			Policy: app.RouteSpec{
 				Route:  app.Route{Page: app.ThemePicker, Section: "appearance"},
 				Parent: app.Route{Page: app.Settings, Section: "appearance"},
 				Modal:  true, Initial: focus(themePickerOptionID("mikutv-dark")),

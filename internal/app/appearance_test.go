@@ -310,8 +310,8 @@ func TestAppearanceThemeLifecyclePersistenceUpdateRollbackAndFallback(t *testing
 	if appearance.ActiveThemeID() != theme.BaseMikuTVDark || len(appliedThemes) != 0 {
 		t.Fatalf("installing themes must NOT auto-apply: active=%q applied=%d", appearance.ActiveThemeID(), len(appliedThemes))
 	}
-	if snap := appearance.Snapshot(); len(snap.Options) != 3 {
-		t.Fatalf("expected 3 theme options (builtin + 2 installed), got %d", len(snap.Options))
+	if snap := appearance.Snapshot(); len(snap.Options) != 4 {
+		t.Fatalf("expected 4 theme options (2 builtin + 2 installed), got %d", len(snap.Options))
 	}
 	if inst, ok := cat.FindInstalled("twilight"); !ok || inst.Enabled {
 		t.Fatalf("newly installed theme should be inactive: %+v", inst)
@@ -426,7 +426,7 @@ func TestAppearanceThemeLifecyclePersistenceUpdateRollbackAndFallback(t *testing
 	if err := cat.Remove("twilight", false); err != nil {
 		t.Fatalf("Remove active twilight: %v", err)
 	}
-	if appearance.ActiveThemeID() != theme.BaseMikuTVDark || len(appearance.Snapshot().Options) != 2 {
+	if appearance.ActiveThemeID() != theme.BaseMikuTVDark || len(appearance.Snapshot().Options) != 3 {
 		t.Fatalf("removing active theme did not restore baseline/prune picker: active=%q opts=%d",
 			appearance.ActiveThemeID(), len(appearance.Snapshot().Options))
 	}
@@ -451,5 +451,145 @@ func TestAppearanceThemeLifecyclePersistenceUpdateRollbackAndFallback(t *testing
 	// 10. Content-source lifecycle hooks were NEVER touched across the entire theme lifecycle!
 	if sourceTouched {
 		t.Fatal("theme lifecycle wrongly invoked content-source hooks")
+	}
+}
+
+const daylightTestThemeJSON = `{
+	"schemaVersion": 1,
+	"base": "mikutv-light",
+	"appearance": "light",
+	"colors": {
+		"surface": {
+			"canvas": "#E6E7ED",
+			"sidebar": "#DCDDE6",
+			"panel": "#F3F4F8",
+			"raised": "#FFFFFF",
+			"input": "#EAEBF0"
+		},
+		"text": {
+			"primary": "#262B40",
+			"secondary": "#434A66",
+			"muted": "#505773"
+		},
+		"accent": {
+			"primary": "#2464BF",
+			"soft": "#1D57AD",
+			"strong": "#17468C",
+			"foreground": "#FFFFFF"
+		},
+		"focus": {
+			"background": "#262B40",
+			"foreground": "#F3F4F8",
+			"ring": "#262B40"
+		},
+		"selected": {
+			"background": "#CDD6EE",
+			"foreground": "#1D3B70",
+			"focusBackground": "#2464BF",
+			"focusForeground": "#FFFFFF"
+		}
+	}
+}`
+
+func TestAppearanceDualThemeFollowSystemAndSlotFallback(t *testing.T) {
+	dayZip := makeThemeAppTestZip(t, "daylight", "Daylight", "1.0.0", daylightTestThemeJSON)
+	dayPkg, err := plugin.OpenTheme(dayZip, "0.1.0")
+	if err != nil {
+		t.Fatalf("OpenTheme daylight: %v", err)
+	}
+	nightZip := makeThemeAppTestZip(t, "twilight", "Twilight Purple", "1.0.0", twilightThemeV1JSON)
+	nightPkg, err := plugin.OpenTheme(nightZip, "0.1.0")
+	if err != nil {
+		t.Fatalf("OpenTheme twilight: %v", err)
+	}
+
+	pkgStore := plugin.NewPackageStore(filepath.Join(t.TempDir(), "plugins"))
+	var lastApplied theme.Theme
+	var syncedActive string
+	appearance := NewAppearanceSettings(
+		pkgStore,
+		[]*plugin.ThemePackage{dayPkg, nightPkg},
+		func(th theme.Theme) { lastApplied = th },
+		func(activeID string) { syncedActive = activeID },
+		func() {},
+	)
+	appearance.SetSystemDark(true)
+
+	// Default mode is Dark (built-in MikuTV Dark), Light slot defaults to MikuTV Light.
+	if appearance.Mode() != AppearanceModeDark || appearance.ActiveThemeID() != theme.BaseMikuTVDark || appearance.LightThemeID() != theme.BaseMikuTVLight {
+		t.Fatalf("unexpected initial mode state: mode=%q active=%q light=%q", appearance.Mode(), appearance.ActiveThemeID(), appearance.LightThemeID())
+	}
+
+	// Assign Daylight to Light slot while in Dark mode: persisted without disturbing live dark theme!
+	if _, err := appearance.SelectThemeForSlot(ThemeSlotLight, "daylight"); err != nil {
+		t.Fatal(err)
+	}
+	if appearance.LightThemeID() != "daylight" || appearance.ActiveThemeID() != theme.BaseMikuTVDark {
+		t.Fatalf("assigning light slot in dark mode disturbed live theme: light=%q active=%q", appearance.LightThemeID(), appearance.ActiveThemeID())
+	}
+
+	// Assign Twilight to Dark slot while in Dark mode: live theme switches immediately to Twilight!
+	if _, err := appearance.SelectThemeForSlot(ThemeSlotDark, "twilight"); err != nil {
+		t.Fatal(err)
+	}
+	if appearance.ActiveThemeID() != "twilight" || lastApplied.ID != "twilight" || syncedActive != "twilight" {
+		t.Fatalf("expected dark slot active: active=%q applied=%q synced=%q", appearance.ActiveThemeID(), lastApplied.ID, syncedActive)
+	}
+
+	// Switch mode to Light (always daytime) -> immediately switches to Daylight even while OS is dark!
+	if err := appearance.SetMode(AppearanceModeLight); err != nil {
+		t.Fatal(err)
+	}
+	if appearance.Mode() != AppearanceModeLight || appearance.ActiveThemeID() != "daylight" || lastApplied.ID != "daylight" || lastApplied.Dark || syncedActive != "daylight" {
+		t.Fatalf("Light mode did not apply daylight: mode=%q active=%q applied=%q synced=%q", appearance.Mode(), appearance.ActiveThemeID(), lastApplied.ID, syncedActive)
+	}
+	// OS changing while locked to Light mode must NOT override Light mode!
+	appearance.SetSystemDark(false)
+	appearance.SetSystemDark(true)
+	if appearance.ActiveThemeID() != "daylight" {
+		t.Fatalf("OS change disturbed locked Light mode: got %q", appearance.ActiveThemeID())
+	}
+
+	// Switch mode to System (follow OS): since OS is currently dark, immediately switches to Twilight!
+	if err := appearance.SetMode(AppearanceModeSystem); err != nil {
+		t.Fatal(err)
+	}
+	if appearance.Mode() != AppearanceModeSystem || appearance.ActiveThemeID() != "twilight" || syncedActive != "twilight" {
+		t.Fatalf("System mode in dark OS did not apply twilight: mode=%q active=%q synced=%q", appearance.Mode(), appearance.ActiveThemeID(), syncedActive)
+	}
+
+	// Live OS switch to Light in System mode -> atomically switches to Daylight!
+	appearance.SetSystemDark(false)
+	if appearance.ActiveThemeID() != "daylight" || lastApplied.ID != "daylight" || lastApplied.Dark || syncedActive != "daylight" {
+		t.Fatalf("OS switch to light did not apply daylight: active=%q applied=%+v synced=%q", appearance.ActiveThemeID(), lastApplied.ID, syncedActive)
+	}
+
+	// Cold restart preserves Mode + both slots and resolves based on OS style.
+	restarted := NewAppearanceSettings(pkgStore, []*plugin.ThemePackage{dayPkg, nightPkg}, nil, nil, nil)
+	if restarted.Mode() != AppearanceModeSystem || restarted.LightThemeID() != "daylight" || restarted.DarkThemeID() != "twilight" {
+		t.Fatalf("cold restart lost dual-theme config: mode=%q light=%q dark=%q", restarted.Mode(), restarted.LightThemeID(), restarted.DarkThemeID())
+	}
+	restarted.SetSystemDark(false)
+	if restarted.ActiveThemeID() != "daylight" {
+		t.Fatalf("restarted light resolution failed: got %q", restarted.ActiveThemeID())
+	}
+	restarted.SetSystemDark(true)
+	if restarted.ActiveThemeID() != "twilight" {
+		t.Fatalf("restarted dark resolution failed: got %q", restarted.ActiveThemeID())
+	}
+
+	// Removing active daytime theme falls back to built-in MikuTV Light while keeping dark slot intact!
+	appearance.RemoveTheme("daylight")
+	if appearance.ActiveThemeID() != theme.BaseMikuTVLight || appearance.ActiveTheme().Dark || appearance.DarkThemeID() != "twilight" || syncedActive != "" {
+		t.Fatalf("removing active light theme did not fall back to MikuTV Light: active=%q dark=%v darkSlot=%q synced=%q",
+			appearance.ActiveThemeID(), appearance.ActiveTheme().Dark, appearance.DarkThemeID(), syncedActive)
+	}
+
+	// Switching mode to Dark uses preserved Twilight nighttime theme!
+	if err := appearance.SetMode(AppearanceModeDark); err != nil {
+		t.Fatal(err)
+	}
+	if appearance.ActiveThemeID() != "twilight" || syncedActive != "twilight" {
+		t.Fatalf("Dark mode did not apply preserved twilight theme: active=%q synced=%q", appearance.ActiveThemeID(), syncedActive)
 	}
 }

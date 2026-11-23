@@ -11,7 +11,9 @@ import (
 )
 
 const (
-	appearanceThemeRow        app.FocusID = "settings/appearance/theme"
+	appearanceModeRow         app.FocusID = "settings/appearance/mode"
+	appearanceLightThemeRow   app.FocusID = "settings/appearance/light-theme"
+	appearanceDarkThemeRow    app.FocusID = "settings/appearance/dark-theme"
 	appearanceHoverPreviewRow app.FocusID = "settings/appearance/hover-preview"
 	appearanceReduceMotionRow app.FocusID = "settings/appearance/reduce-motion"
 
@@ -19,11 +21,17 @@ const (
 	themeErrorReselectBtn  app.FocusID = "appearance/theme-error/reselect"
 )
 
+func appearanceModeOptionID(mode app.AppearanceMode) app.FocusID {
+	return app.FocusID("appearance/mode/" + string(mode))
+}
+
 func themePickerOptionID(id string) app.FocusID {
 	return app.FocusID("appearance/theme/" + strings.ToLower(strings.TrimSpace(id)))
 }
 
 type appearanceSettingsUI struct {
+	pickerSlot      app.ThemeSlot
+	pickerScroll    ui.ScrollState
 	failedThemeID   string
 	failedThemeName string
 }
@@ -32,19 +40,36 @@ func (v *View) appearanceSnapshot() app.AppearanceSnapshot {
 	if v.Appearance != nil {
 		return v.Appearance.Snapshot()
 	}
-	def := theme.Default()
+	darkDef := theme.Default()
+	lightDef := theme.DefaultLight()
 	return app.AppearanceSnapshot{
-		ActiveID:     def.ID,
+		ActiveID:     darkDef.ID,
 		ActiveTheme:  v.Theme,
+		ActiveSlot:   app.ThemeSlotDark,
+		Mode:         app.AppearanceModeDark,
+		SystemDark:   true,
+		LightID:      lightDef.ID,
+		LightName:    lightDef.Name,
+		DarkID:       darkDef.ID,
+		DarkName:     darkDef.Name,
 		HoverPreview: true,
 		ReduceMotion: false,
 		Options: []app.ThemeOption{{
-			ID:       def.ID,
-			Name:     def.Name,
+			ID:       darkDef.ID,
+			Name:     darkDef.Name,
+			Dark:     true,
 			Bundled:  true,
 			Active:   true,
-			Swatches: def.Swatches(),
-			Theme:    def,
+			Swatches: darkDef.Swatches(),
+			Theme:    darkDef,
+		}, {
+			ID:       lightDef.ID,
+			Name:     lightDef.Name,
+			Dark:     false,
+			Bundled:  true,
+			Active:   false,
+			Swatches: lightDef.Swatches(),
+			Theme:    lightDef,
 		}},
 	}
 }
@@ -63,11 +88,75 @@ func (v *View) reduceMotionEnabled(c *ui.Context) bool {
 	return c != nil && c.Preferences().ReduceMotion
 }
 
+func appearanceRowForSlot(slot app.ThemeSlot) app.FocusID {
+	if slot == app.ThemeSlotLight {
+		return appearanceLightThemeRow
+	}
+	return appearanceDarkThemeRow
+}
+
+func selectedIDForSlot(snap app.AppearanceSnapshot, slot app.ThemeSlot) string {
+	if slot == app.ThemeSlotLight {
+		return snap.LightID
+	}
+	return snap.DarkID
+}
+
+func (p *PageContext) appearanceModeLabel(mode app.AppearanceMode) string {
+	l := p.Assets.Text.Appearance
+	switch mode {
+	case app.AppearanceModeSystem:
+		return l.ModeSystem
+	case app.AppearanceModeLight:
+		return l.ModeLight
+	default:
+		return l.ModeDark
+	}
+}
+
+func (p *PageContext) appearanceModeNote(mode app.AppearanceMode) string {
+	l := p.Assets.Text.Appearance
+	switch mode {
+	case app.AppearanceModeSystem:
+		return l.ModeSystemNote
+	case app.AppearanceModeLight:
+		return l.ModeLightNote
+	default:
+		return l.ModeDarkNote
+	}
+}
+
+func (v *View) openAppearanceModePicker() {
+	snap := v.appearanceSnapshot()
+	v.State.Push(app.Route{Page: app.AppearanceModePicker, Section: "appearance"})
+	v.State.Focus, v.reveal = appearanceModeOptionID(snap.Mode), true
+}
+
 func (v *View) openThemePicker(focusThemeID string) {
 	snap := v.appearanceSnapshot()
+	slot := snap.ActiveSlot
+	if focusThemeID != "" {
+		for _, opt := range snap.Options {
+			if strings.EqualFold(opt.ID, focusThemeID) {
+				if opt.Dark {
+					slot = app.ThemeSlotDark
+				} else {
+					slot = app.ThemeSlotLight
+				}
+				break
+			}
+		}
+	}
+	v.openThemePickerForSlot(slot, focusThemeID)
+}
+
+func (v *View) openThemePickerForSlot(slot app.ThemeSlot, focusThemeID string) {
+	snap := v.appearanceSnapshot()
+	v.appearanceUI.pickerSlot = slot
+	v.appearanceUI.pickerScroll = ui.ScrollState{}
 	target := focusThemeID
 	if target == "" {
-		target = snap.ActiveID
+		target = selectedIDForSlot(snap, slot)
 	}
 	focus := themePickerOptionID(target)
 	found := false
@@ -114,30 +203,55 @@ func (v *View) openDiscoverThemesFromPicker() {
 }
 
 func (v *View) returnToAppearanceThemePicker(focusThemeID string) {
+	fromPicker := v.pluginsUI.returnToThemePicker
 	v.pluginsUI.returnToThemePicker = false
 	v.pluginsUI.selectedInstalledID = ""
 	v.pluginsUI.selectedCatalogRepo = ""
 	v.pluginsUI.editing = false
+	snap := v.appearanceSnapshot()
+	slot := v.appearanceUI.pickerSlot
+	if !fromPicker {
+		slot = snap.ActiveSlot
+		for _, opt := range snap.Options {
+			if strings.EqualFold(opt.ID, focusThemeID) {
+				if opt.Dark {
+					slot = app.ThemeSlotDark
+				} else {
+					slot = app.ThemeSlotLight
+				}
+				break
+			}
+		}
+	}
 	v.State.Navigate(app.Route{Page: app.Settings, Section: "appearance"})
-	v.State.Focus = appearanceThemeRow
-	v.openThemePicker(focusThemeID)
+	v.State.Focus = appearanceRowForSlot(slot)
+	v.openThemePickerForSlot(slot, focusThemeID)
 }
 
 func (v *View) selectThemeOption(opt app.ThemeOption) {
+	slot := v.appearanceUI.pickerSlot
+	l := v.Assets.Text.Appearance
 	if v.Appearance == nil {
 		v.SetTheme(opt.Theme)
 		v.State.Back()
 		return
 	}
-	if _, err := v.Appearance.SelectTheme(opt.ID); err != nil {
+	if _, err := v.Appearance.SelectThemeForSlot(slot, opt.ID); err != nil {
 		// Retain current active theme and open Scheme B ThemeError modal (§7.2).
 		v.State.Back()
 		v.openThemeError(opt.ID, opt.Name)
 		return
 	}
+	snap := v.appearanceSnapshot()
 	v.State.Back()
-	v.State.Focus, v.reveal = appearanceThemeRow, true
-	v.showSettingsFeedback(fmt.Sprintf(v.Assets.Text.Appearance.ThemeAppliedToast, opt.Name))
+	v.State.Focus, v.reveal = appearanceRowForSlot(slot), true
+	if slot == snap.ActiveSlot {
+		v.showSettingsFeedback(fmt.Sprintf(l.ThemeAppliedToast, opt.Name))
+	} else if slot == app.ThemeSlotLight {
+		v.showSettingsFeedback(fmt.Sprintf(l.LightThemeSavedToast, opt.Name))
+	} else {
+		v.showSettingsFeedback(fmt.Sprintf(l.DarkThemeSavedToast, opt.Name))
+	}
 }
 
 type appearanceSettingsPage struct{}
@@ -148,17 +262,35 @@ func (appearanceSettingsPage) Render(c *ui.Context, p *PageContext) {
 	snap := v.appearanceSnapshot()
 	p.region("content", nil)
 
-	activeName := snap.ActiveTheme.Name
-	if activeName == "" {
-		activeName = theme.Default().Name
+	lightName := snap.LightName
+	if lightName == "" {
+		lightName = theme.DefaultLight().Name
+	}
+	darkName := snap.DarkName
+	if darkName == "" {
+		darkName = theme.Default().Name
+	}
+
+	lightNote := l.LightThemeNote
+	darkNote := l.DarkThemeNote
+	if snap.ActiveSlot == app.ThemeSlotLight {
+		lightNote = l.LightThemeActiveNote
+	} else {
+		darkNote = l.DarkThemeActiveNote
 	}
 
 	ui.Text(c, l.Title).Height(45).FontSize(32).FontWeight(550).LineHeight(1.4).Margin(0, 0, 13, 0)
 	ui.Text(c, l.Intro).Height(32).FontSize(19).LineHeight(1.7).TextColor(paint(colors.Text.Muted)).Margin(0, 0, 27, 0)
 	ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
 
-	p.danmakuValueRow(c, appearanceThemeRow, "palette", l.ThemeLabel, l.ThemeNote, activeName, func() {
-		v.openThemePicker("")
+	p.danmakuValueRow(c, appearanceModeRow, "sparkles", l.ModeLabel, p.appearanceModeNote(snap.Mode), p.appearanceModeLabel(snap.Mode), func() {
+		v.openAppearanceModePicker()
+	})
+	p.danmakuValueRow(c, appearanceLightThemeRow, "sun", l.LightThemeLabel, lightNote, lightName, func() {
+		v.openThemePickerForSlot(app.ThemeSlotLight, "")
+	})
+	p.danmakuValueRow(c, appearanceDarkThemeRow, "moon", l.DarkThemeLabel, darkNote, darkName, func() {
+		v.openThemePickerForSlot(app.ThemeSlotDark, "")
 	})
 	p.danmakuToggleRow(c, appearanceHoverPreviewRow, "series", l.HoverPreviewLabel, l.HoverPreviewNote, snap.HoverPreview, func() {
 		if v.Appearance != nil {
@@ -176,43 +308,101 @@ func (appearanceSettingsPage) Render(c *ui.Context, p *PageContext) {
 	})
 }
 
+type appearanceModePickerPage struct{}
+
+func (appearanceModePickerPage) Render(c *ui.Context, p *PageContext) {
+	v := p.host
+	l := p.Assets.Text.Appearance
+	snap := v.appearanceSnapshot()
+	p.region("modal", nil)
+
+	choices := [...]struct {
+		mode  app.AppearanceMode
+		label string
+		note  string
+	}{
+		{app.AppearanceModeSystem, l.ModeSystem, l.ModeSystemNote},
+		{app.AppearanceModeLight, l.ModeLight, l.ModeLightNote},
+		{app.AppearanceModeDark, l.ModeDark, l.ModeDarkNote},
+	}
+
+	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		p.drawerHeader(c, "APPEARANCE \u00b7 MODE", l.ModePickerTitle, "", l.ModePickerSubtitle)
+		ui.Column(c).FillWidth().Grow(1).Children(func() {
+			for _, choice := range choices {
+				ch := choice
+				p.drawerOptionRow(c, appearanceModeOptionID(ch.mode), "modal", ch.label, "", snap.Mode == ch.mode, func() {
+					if v.Appearance != nil {
+						if err := v.Appearance.SetMode(ch.mode); err != nil {
+							v.showSettingsFeedback(p.Assets.Text.SaveFailed)
+							p.State.Back()
+							return
+						}
+					}
+					p.State.Back()
+					p.State.Focus, v.reveal = appearanceModeRow, true
+					v.showSettingsFeedback(fmt.Sprintf(l.ModeAppliedToast, ch.label))
+				})
+			}
+		})
+		p.drawerFooter(c, p.Assets.Text.Modal.HintSelect, p.Assets.Text.Modal.HintApply)
+	})
+}
+
 type themePickerPage struct{}
 
 func (themePickerPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
 	l, colors, d := p.Assets.Text.Appearance, p.Theme.Colors, p.uiColors()
 	snap := v.appearanceSnapshot()
+	slot := v.appearanceUI.pickerSlot
+	selectedID := selectedIDForSlot(snap, slot)
+
+	eyebrow, title, subtitle := "APPEARANCE \u00b7 NIGHT THEME", l.DarkPickerTitle, l.DarkPickerSubtitle
+	if slot == app.ThemeSlotLight {
+		eyebrow, title, subtitle = "APPEARANCE \u00b7 DAY THEME", l.LightPickerTitle, l.LightPickerSubtitle
+	}
 
 	p.region("modal", nil)
 
 	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
-		p.drawerHeader(c, "APPEARANCE \u00b7 THEME", l.PickerTitle, "", l.PickerSubtitle)
+		p.drawerHeader(c, eyebrow, title, "", subtitle)
 
-		ui.Column(c).FillWidth().Grow(1).Children(func() {
-			for _, option := range snap.Options {
-				opt := option
-				id := themePickerOptionID(opt.ID)
-				sub := l.InstalledThemeNote
-				if opt.Bundled {
-					sub = l.BuiltinThemeNote
+		ui.Scroll(c.Key("theme-picker-scroll")).FillWidth().Grow(1).MinHeight(0).
+			TrackScroll(&v.appearanceUI.pickerScroll).Padding(4, 6, 12, 6).Children(func() {
+			ui.Column(c).FillWidth().Children(func() {
+				for _, option := range snap.Options {
+					opt := option
+					id := themePickerOptionID(opt.ID)
+					selected := strings.EqualFold(selectedID, opt.ID)
+					sub := l.InstalledDarkThemeNote
+					if opt.Bundled {
+						if opt.Dark {
+							sub = l.BuiltinDarkThemeNote
+						} else {
+							sub = l.BuiltinLightThemeNote
+						}
+					} else if !opt.Dark {
+						sub = l.InstalledLightThemeNote
+					}
+					p.renderThemeOptionRow(c, id, "modal", opt, sub, selected, func() {
+						v.selectThemeOption(opt)
+					})
 				}
-				p.renderThemeOptionRow(c, id, "modal", opt, sub, func() {
-					v.selectThemeOption(opt)
+
+				if len(snap.Options) <= 2 {
+					ui.Text(c, l.BuiltinOnlyHint).FillWidth().Margin(14, 4, 6, 4).
+						FontSize(17).LineHeight(1.6).TextColor(paint(colors.Text.Muted))
+				}
+
+				ui.Box(c).Height(18)
+				p.styledButton(c, l.DiscoverMoreThemes, "search", themePickerDiscoverBtn, "modal", func() {
+					v.openDiscoverThemesFromPicker()
+				}, buttonAppearance{
+					height: 54, padding: 24, radius: 13, fontSize: 19, fontWeight: 500, iconSize: 20, iconGap: 10,
+					focusShadow: true,
+					background:  d.secondaryFill, foreground: paint(colors.Text.Primary), border: d.secondaryBorder,
 				})
-			}
-
-			if len(snap.Options) <= 1 {
-				ui.Text(c, l.BuiltinOnlyHint).FillWidth().Margin(14, 4, 6, 4).
-					FontSize(17).LineHeight(1.6).TextColor(paint(colors.Text.Muted))
-			}
-
-			ui.Box(c).Height(18)
-			p.styledButton(c, l.DiscoverMoreThemes, "search", themePickerDiscoverBtn, "modal", func() {
-				v.openDiscoverThemesFromPicker()
-			}, buttonAppearance{
-				height: 54, padding: 24, radius: 13, fontSize: 19, fontWeight: 500, iconSize: 20, iconGap: 10,
-				focusShadow: true,
-				background:  d.secondaryFill, foreground: paint(colors.Text.Primary), border: d.secondaryBorder,
 			})
 		})
 
@@ -220,18 +410,22 @@ func (themePickerPage) Render(c *ui.Context, p *PageContext) {
 	})
 }
 
-func (p *PageContext) renderThemeOptionRow(c *ui.Context, id app.FocusID, region string, opt app.ThemeOption, sub string, action func()) {
+func (p *PageContext) renderThemeOptionRow(c *ui.Context, id app.FocusID, region string, opt app.ThemeOption, sub string, selected bool, action func()) {
 	colors, d := p.Theme.Colors, p.uiColors()
 	focused := p.paintFocus() == id
 	bg, fg, subFg := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Muted)
 	border := d.subtleBorder
-	if opt.Active {
+	if selected {
 		bg = withAlpha(colors.Accent.Primary, 0x16)
 		border = withAlpha(colors.Accent.Primary, 0x44)
 	}
 	if focused {
 		bg, fg, subFg = paint(colors.Focus.Background), paint(colors.Focus.Foreground), d.focusSubtext
-		border = ui.Transparent
+		if !p.Theme.Dark {
+			border = d.focusBorder
+		} else {
+			border = ui.Transparent
+		}
 	}
 	btn := ui.Button(c.Key(string(id)), "").Label(opt.Name).FillWidth().Height(94).
 		Margin(0, 0, 12, 0).Padding(0, 20).Radius(14).Border(1, border).
@@ -249,7 +443,7 @@ func (p *PageContext) renderThemeOptionRow(c *ui.Context, id app.FocusID, region
 					ui.Text(c, sub).FontSize(16).SingleLine().TextColor(subFg)
 				}
 			})
-			if opt.Active {
+			if selected {
 				checkColor := paint(colors.Accent.Soft)
 				if focused {
 					checkColor = paint(colors.Focus.Foreground)
@@ -294,7 +488,7 @@ func (themeErrorPage) Render(c *ui.Context, p *PageContext) {
 		ui.Row(c.Key("theme-error-actions")).Margin(36, 0, 0, 0).Gap(16).Children(func() {
 			p.styledButton(c, l.ErrorReselect, "", themeErrorReselectBtn, "theme-error-actions", func() {
 				p.State.Back()
-				v.openThemePicker("")
+				v.openThemePickerForSlot(v.appearanceUI.pickerSlot, "")
 			}, p.framelessButtonAppearance())
 			p.styledButton(c, l.ErrorReturn, "", app.CloseModal, "theme-error-actions", func() {
 				p.State.Back()

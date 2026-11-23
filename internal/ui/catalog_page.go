@@ -432,7 +432,7 @@ func catalogSelectionPinned(focus app.FocusID) bool {
 }
 
 func (p *PageContext) catalogHeader(c *ui.Context) {
-	home, text, colors := &p.host.home, p.Assets.Text, p.Theme.Colors
+	home, text, colors, d := &p.host.home, p.Assets.Text, p.Theme.Colors, p.uiColors()
 	titles := [...]string{text.Home.ForYou, text.Home.Popular, text.Home.Ranking, text.Home.Regions}
 	widths := [...]float32{148, 148, 123, 148}
 	ui.Box(c.Key("home-navigation")).FillWidth().Height(homeHeaderHeight).Children(func() {
@@ -440,17 +440,22 @@ func (p *PageContext) catalogHeader(c *ui.Context) {
 			for idx, tab := range homeTabs {
 				id := homeTabID(tab)
 				background, ink := ui.Transparent, paint(colors.Text.Muted)
+				borderW, borderColor := float32(0), ui.Transparent
 				selected, focused := tab == home.tab, p.State.Focus == id
 				if selected {
 					background, ink = withAlpha(colors.Text.Primary, 0x12), paint(colors.Text.Primary)
 				}
 				if focused {
-					background, ink = withAlpha(colors.Focus.Background, 0x13), paint(colors.Text.Primary)
+					background, ink = d.tabSubtleFocusFill, paint(colors.Text.Primary)
+					if !p.Theme.Dark {
+						borderW, borderColor = 1, d.focusBorder
+					}
 				}
 				button := ui.Button(c.Key(string(id)), "").Label(titles[idx]).Size(widths[idx], 61).Padding(0, 0).
-					Radius(30).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
+					Radius(30).Border(borderW, borderColor).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
 					OnClick(func() { p.dispatch(func() { p.host.showHomeTab(tab, "") }) })
 				p.animateFocus(button, background, ink)
+				p.applyFocusElevation(button, focused)
 				p.bind(button, id, homeHeader)
 				button.Children(func() {
 					ui.Text(c, titles[idx]).FontSize(24).LetterSpacing(1)

@@ -13,8 +13,15 @@ import (
 const (
 	SchemaVersion     = 1
 	BaseMikuTVDark    = "mikutv-dark"
+	BaseMikuTVLight   = "mikutv-light"
 	MaxThemeJSONBytes = 64 << 10
 )
+
+// IsBuiltin reports whether id refers to a built-in MikuTV baseline theme.
+func IsBuiltin(id string) bool {
+	trimmed := strings.TrimSpace(id)
+	return trimmed == "" || strings.EqualFold(trimmed, BaseMikuTVDark) || strings.EqualFold(trimmed, BaseMikuTVLight)
+}
 
 var (
 	ErrInvalidTheme      = errors.New("invalid theme configuration")
@@ -27,7 +34,8 @@ var (
 func (t Theme) Swatches() [6]Color {
 	c := t.Colors
 	third := c.Decoration.CardStart
-	if c.Selected.Background != Default().Colors.Selected.Background {
+	if !t.Dark || (c.Selected.Background != Default().Colors.Selected.Background &&
+		c.Selected.Background != DefaultLight().Colors.Selected.Background) {
 		third = c.Selected.Background
 	}
 	return [6]Color{
@@ -165,7 +173,7 @@ func Parse(id, name string, data []byte) (Theme, error) {
 	if *raw.SchemaVersion != SchemaVersion {
 		return Theme{}, fmt.Errorf("%w: got %d want %d", ErrUnsupportedSchema, *raw.SchemaVersion, SchemaVersion)
 	}
-	if raw.Base == nil || *raw.Base != BaseMikuTVDark {
+	if raw.Base == nil || (*raw.Base != BaseMikuTVDark && *raw.Base != BaseMikuTVLight) {
 		return Theme{}, fmt.Errorf("%w: unsupported base theme", ErrInvalidTheme)
 	}
 	if raw.Appearance == nil || (*raw.Appearance != "dark" && *raw.Appearance != "light") {
@@ -176,6 +184,9 @@ func Parse(id, name string, data []byte) (Theme, error) {
 	}
 
 	resolved := Default()
+	if *raw.Base == BaseMikuTVLight {
+		resolved = DefaultLight()
+	}
 	if strings.TrimSpace(id) != "" {
 		resolved.ID = strings.TrimSpace(id)
 	}

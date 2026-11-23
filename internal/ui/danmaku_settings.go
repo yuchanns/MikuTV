@@ -252,15 +252,21 @@ func (p *PageContext) danmakuToggleRow(c *ui.Context, id app.FocusID, iconName, 
 	if enabled {
 		status = p.Assets.Text.Activity.Enabled
 	}
+	focused := p.paintFocus() == id
 	fill, ink, noteColor, iconColor := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Muted), paint(colors.Text.Secondary)
-	if p.paintFocus() == id {
+	borderW, borderColor := float32(0), ui.Transparent
+	if focused {
 		fill, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
 		noteColor, iconColor = d.focusSubtext, d.focusSubtext
+		if !p.Theme.Dark {
+			borderW, borderColor = 1, d.focusBorder
+		}
 	}
 	control := ui.Button(c.Key(string(id)), "").FillWidth().MinHeight(88).
-		Radius(7).Border(0, ui.Transparent).Padding(0).Role(ui.RoleSwitch).
+		Radius(7).Border(borderW, borderColor).Padding(0).Role(ui.RoleSwitch).
 		Label(label + " " + status).OnClick(func() { p.dispatch(action) })
 	p.animateFocus(control, fill, ink)
+	p.applyFocusElevation(control, focused)
 	p.bind(control, id, "content")
 	control.Children(func() {
 		ui.Row(c).Fill().Padding(14, 20).Gap(20).AlignItems(ui.Center).Children(func() {
@@ -275,25 +281,33 @@ func (p *PageContext) danmakuToggleRow(c *ui.Context, id app.FocusID, iconName, 
 			})
 			p.preferenceSwitch(c, enabled)
 		})
-		ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
+		if !focused || p.Theme.Dark {
+			ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
+		}
 	})
 }
 
 func (p *PageContext) danmakuValueRow(c *ui.Context, id app.FocusID, iconName, label, note, value string, action func()) {
 	colors, d := p.Theme.Colors, p.uiColors()
+	focused := p.paintFocus() == id
 	fill, ink, noteColor, iconColor, valColor := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Muted), paint(colors.Text.Secondary), paint(colors.Text.Secondary)
-	if p.paintFocus() == id {
+	borderW, borderColor := float32(0), ui.Transparent
+	if focused {
 		fill, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
 		noteColor, iconColor, valColor = d.focusSubtext, d.focusSubtext, d.focusSubtext
+		if !p.Theme.Dark {
+			borderW, borderColor = 1, d.focusBorder
+		}
 	}
 	fullLabel := label
 	if value != "" {
 		fullLabel += " " + value
 	}
 	control := ui.Button(c.Key(string(id)), "").FillWidth().MinHeight(88).
-		Radius(7).Border(0, ui.Transparent).Padding(0).Label(fullLabel).
+		Radius(7).Border(borderW, borderColor).Padding(0).Label(fullLabel).
 		OnClick(func() { p.dispatch(action) })
 	p.animateFocus(control, fill, ink)
+	p.applyFocusElevation(control, focused)
 	p.bind(control, id, "content")
 	control.Children(func() {
 		ui.Row(c).Fill().Padding(14, 20).Gap(20).AlignItems(ui.Center).Children(func() {
@@ -310,7 +324,9 @@ func (p *PageContext) danmakuValueRow(c *ui.Context, id app.FocusID, iconName, l
 				ui.Text(c, value).FontSize(21).Shrink(0).TextColor(valColor)
 			}
 		})
-		ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
+		if !focused || p.Theme.Dark {
+			ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
+		}
 	})
 }
 

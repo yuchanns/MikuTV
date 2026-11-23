@@ -39,9 +39,13 @@ type uiColors struct {
 	secondaryBorder ui.Color
 	subtleFill      ui.Color
 	subtleHoverFill ui.Color
-	subtleBorder    ui.Color
-	strongBorder    ui.Color
-	focusSubtext    ui.Color
+	subtleBorder          ui.Color
+	strongBorder          ui.Color
+	focusSubtext          ui.Color
+	focusBorder           ui.Color
+	tabFocusFill          ui.Color
+	tabSubtleFocusFill    ui.Color
+	lightFocusShadow      ui.Color
 	dialogStart           ui.Color
 	dialogEnd             ui.Color
 	dialogBorder          ui.Color
@@ -86,6 +90,9 @@ func deriveColors(t theme.Theme) uiColors {
 	c := t.Colors
 	secondaryText := theme.Blend(c.Text.Primary, c.Text.Secondary, 0.28)
 	focusSubtext := theme.Blend(c.Focus.Foreground, c.Focus.Background, 0.25)
+	if !t.Dark {
+		focusSubtext = theme.Blend(c.Focus.Foreground, c.Focus.Background, 0.30)
+	}
 	sliderTrack := theme.Blend(c.Overlay.PlayerBottom.WithAlpha(0xff), c.Playback.Foreground, 0.22)
 	sliderEdge := theme.Blend(c.Overlay.PlayerBottom.WithAlpha(0xff), c.Playback.Foreground, 0.36)
 	sliderFillEdge := theme.Blend(c.Accent.Soft, c.Overlay.PlayerBottom.WithAlpha(0xff), 0.14)
@@ -94,14 +101,34 @@ func deriveColors(t theme.Theme) uiColors {
 	drawerStart := c.Surface.Raised.WithAlpha(0xe6)
 	drawerEnd := c.Surface.Canvas.WithAlpha(0xf6)
 	drawerBorder := withAlpha(c.Text.Primary, 0x18)
+	drawerAccentRim := withAlpha(c.Accent.Soft, 0x16)
+	drawerScrimLeft := withAlpha(c.Surface.Canvas, 0x38)
+	drawerScrimMid := withAlpha(c.Surface.Canvas, 0x8c)
+	drawerScrimRight := withAlpha(c.Surface.Canvas, 0xe8)
 	framelessScrim := withAlpha(c.Surface.Canvas, 0xd8)
+	focusBorder := ui.Transparent
+	tabFocusFill := withAlpha(c.Focus.Background, 0x20)
+	tabSubtleFocusFill := withAlpha(c.Focus.Background, 0x13)
+	toastFill := withAlpha(c.Focus.Background, 0xee)
+	toastText := paint(c.Focus.Foreground)
+	toastBorder := withAlpha(c.Focus.Background, 0x88)
 	if !t.Dark {
-		dialogStart = c.Surface.Panel.WithAlpha(0xfa)
-		dialogEnd = c.Surface.Raised.WithAlpha(0xf8)
-		drawerStart = c.Surface.Panel.WithAlpha(0xf8)
-		drawerEnd = c.Surface.Canvas.WithAlpha(0xfc)
-		drawerBorder = paint(c.Border.Subtle)
-		framelessScrim = withAlpha(c.Surface.Canvas, 0xe8)
+		dialogStart = c.Surface.Raised.WithAlpha(0xcc)
+		dialogEnd = c.Surface.Canvas.WithAlpha(0xdc)
+		drawerStart = c.Surface.Raised.WithAlpha(0xbf)
+		drawerEnd = c.Surface.Canvas.WithAlpha(0xd4)
+		drawerBorder = withAlpha(c.Text.Primary, 0x1a)
+		drawerAccentRim = ui.Color{R: 255, G: 255, B: 255, A: 0xb8}
+		drawerScrimLeft = withAlpha(c.Surface.Canvas, 0x12)
+		drawerScrimMid = withAlpha(c.Surface.Canvas, 0x32)
+		drawerScrimRight = withAlpha(c.Surface.Canvas, 0x56)
+		framelessScrim = withAlpha(c.Surface.Canvas, 0xc8)
+		focusBorder = withAlpha(c.Text.Primary, 0x16)
+		tabFocusFill = withAlpha(c.Text.Primary, 0x14)
+		tabSubtleFocusFill = withAlpha(c.Text.Primary, 0x12)
+		toastFill = withAlpha(c.Surface.Raised, 0xc2)
+		toastText = paint(c.Text.Primary)
+		toastBorder = withAlpha(c.Text.Primary, 0x18)
 	}
 	return uiColors{
 		secondaryFill:         withAlpha(c.Text.Primary, 0x13),
@@ -112,25 +139,29 @@ func deriveColors(t theme.Theme) uiColors {
 		subtleBorder:          paint(c.Border.Subtle),
 		strongBorder:          paint(theme.Blend(c.Border.Subtle, c.Border.Strong, 0.45)),
 		focusSubtext:          paint(focusSubtext),
+		focusBorder:           focusBorder,
+		tabFocusFill:          tabFocusFill,
+		tabSubtleFocusFill:    tabSubtleFocusFill,
+		lightFocusShadow:      ui.Transparent,
 		dialogStart:           paint(dialogStart),
 		dialogEnd:             paint(dialogEnd),
 		dialogBorder:          paint(theme.Blend(c.Border.Subtle, c.Border.Strong, 0.25)),
 		drawerStart:           paint(drawerStart),
 		drawerEnd:             paint(drawerEnd),
 		drawerBorder:          drawerBorder,
-		drawerAccentRim:       withAlpha(c.Accent.Soft, 0x16),
+		drawerAccentRim:       drawerAccentRim,
 		drawerHairlineStart:   withAlpha(c.Text.Primary, 0x1f),
 		drawerHairlineEnd:     withAlpha(c.Text.Primary, 0x06),
-		drawerScrimLeft:       withAlpha(c.Surface.Canvas, 0x38),
-		drawerScrimMid:        withAlpha(c.Surface.Canvas, 0x8c),
-		drawerScrimRight:      withAlpha(c.Surface.Canvas, 0xe8),
+		drawerScrimLeft:       drawerScrimLeft,
+		drawerScrimMid:        drawerScrimMid,
+		drawerScrimRight:      drawerScrimRight,
 		framelessScrim:        framelessScrim,
 		framelessGlow:         withAlpha(c.Accent.Primary, 0x18),
 		framelessButtonFill:   withAlpha(c.Text.Primary, 0x14),
 		framelessButtonBorder: withAlpha(c.Text.Primary, 0x24),
-		toastFill:             withAlpha(c.Focus.Background, 0xee),
-		toastText:       paint(c.Focus.Foreground),
-		toastBorder:     withAlpha(c.Focus.Background, 0x88),
+		toastFill:             toastFill,
+		toastText:             toastText,
+		toastBorder:           toastBorder,
 		coverFill:       paint(theme.Blend(c.Surface.Panel, c.Surface.Raised, 0.35)),
 		coverShade:      withAlpha(c.Overlay.PlayerBottom, 0xcc),
 		badgeFill:       withAlpha(c.Overlay.PlayerBottom, 0xb8),

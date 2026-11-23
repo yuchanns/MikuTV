@@ -88,14 +88,22 @@ func AddedPermissions(existing, incoming []string) []string {
 }
 
 type AppearanceState struct {
-	ActiveTheme  string
-	HoverPreview bool
-	ReduceMotion bool
+	AppearanceMode string
+	ActiveTheme    string
+	FollowSystem   bool
+	LightTheme     string
+	DarkTheme      string
+	HoverPreview   bool
+	ReduceMotion   bool
 }
 
 type packageStoreState struct {
 	DisabledBundled []string `json:"disabledBundled,omitempty"`
+	AppearanceMode  string   `json:"appearanceMode,omitempty"`
 	ActiveTheme     string   `json:"activeTheme,omitempty"`
+	FollowSystem    bool     `json:"followSystem,omitempty"`
+	LightTheme      string   `json:"lightTheme,omitempty"`
+	DarkTheme       string   `json:"darkTheme,omitempty"`
 	HoverPreview    *bool    `json:"hoverPreview,omitempty"`
 	ReduceMotion    bool     `json:"reduceMotion,omitempty"`
 }
@@ -116,9 +124,13 @@ func (s *PackageStore) LoadAppearanceState() (AppearanceState, error) {
 		hover = *st.HoverPreview
 	}
 	return AppearanceState{
-		ActiveTheme:  strings.TrimSpace(st.ActiveTheme),
-		HoverPreview: hover,
-		ReduceMotion: st.ReduceMotion,
+		AppearanceMode: strings.TrimSpace(st.AppearanceMode),
+		ActiveTheme:    strings.TrimSpace(st.ActiveTheme),
+		FollowSystem:   st.FollowSystem,
+		LightTheme:     strings.TrimSpace(st.LightTheme),
+		DarkTheme:      strings.TrimSpace(st.DarkTheme),
+		HoverPreview:   hover,
+		ReduceMotion:   st.ReduceMotion,
 	}, nil
 }
 
@@ -132,7 +144,29 @@ func (s *PackageStore) SaveActiveTheme(id string) error {
 	if err != nil {
 		return err
 	}
+	st.AppearanceMode = ""
 	st.ActiveTheme = strings.TrimSpace(id)
+	st.DarkTheme = ""
+	st.LightTheme = ""
+	st.FollowSystem = false
+	return s.saveStateLocked(st)
+}
+
+func (s *PackageStore) SaveAppearanceConfig(mode, lightTheme, darkTheme string) error {
+	if s == nil || s.root == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, err := s.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	st.AppearanceMode = strings.TrimSpace(mode)
+	st.LightTheme = strings.TrimSpace(lightTheme)
+	st.DarkTheme = strings.TrimSpace(darkTheme)
+	st.ActiveTheme = ""
+	st.FollowSystem = st.AppearanceMode == "system"
 	return s.saveStateLocked(st)
 }
 

@@ -103,3 +103,40 @@ func TestParseSparseThemeAndStrictValidation(t *testing.T) {
 		t.Fatalf("expected ErrInvalidTheme for >64 KiB payload, got %v", err)
 	}
 }
+
+func TestDefaultLightAndLightBaseParsing(t *testing.T) {
+	light := DefaultLight()
+	if light.ID != BaseMikuTVLight || light.Dark || !IsBuiltin(light.ID) || !IsBuiltin(BaseMikuTVDark) || IsBuiltin("tokyonight") {
+		t.Fatalf("unexpected DefaultLight metadata: %+v", light)
+	}
+	if err := ValidateContrast(light); err != nil {
+		t.Fatalf("DefaultLight failed contrast gate: %v", err)
+	}
+	if light.Colors.Focus.Background != 0xd0dae4ff || light.Colors.Focus.Foreground != 0x111922ff {
+		t.Fatalf("DefaultLight focus should use calm frosted slate-gray glass on light canvas: bg=%08x fg=%08x",
+			light.Colors.Focus.Background, light.Colors.Focus.Foreground)
+	}
+	if sw := light.Swatches(); sw[0] != light.Colors.Surface.Canvas || sw[2] != light.Colors.Selected.Background || sw[3] != light.Colors.Accent.Primary {
+		t.Fatalf("unexpected DefaultLight swatches: %+v", sw)
+	}
+	sparseLight := `{
+		"schemaVersion": 1,
+		"base": "mikutv-light",
+		"appearance": "light",
+		"colors": {
+			"accent": {
+				"primary": "#2464BF",
+				"soft": "#1D57AD",
+				"strong": "#17468C",
+				"foreground": "#FFFFFF"
+			}
+		}
+	}`
+	parsed, err := Parse("day-accent", "Day Accent", []byte(sparseLight))
+	if err != nil {
+		t.Fatalf("Parse sparse mikutv-light theme: %v", err)
+	}
+	if parsed.Dark || parsed.Colors.Surface.Canvas != light.Colors.Surface.Canvas || parsed.Colors.Accent.Primary != 0x2464bfff {
+		t.Fatalf("unexpected sparse light theme: %+v", parsed)
+	}
+}

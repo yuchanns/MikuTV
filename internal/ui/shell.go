@@ -1,6 +1,7 @@
 package tvui
 
 import (
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
 )
@@ -32,15 +33,23 @@ func (navigationRail) Render(c *ui.Context, p *PageContext) {
 	if p.active {
 		p.host.focus.groups["rail"] = focusRegion{navigation: true, edges: focusEdges{app.Right: {Focus: p.State.ContentFocus(), Region: "content"}}}
 	}
-	colors := p.Theme.Colors
+	colors, d := p.Theme.Colors, p.uiColors()
+	railBg := paint(colors.Surface.Sidebar)
+	if !p.Theme.Dark {
+		railBg = withAlpha(colors.Surface.Sidebar, 0xcc)
+		rail.Material(glass.Blur{Radius: 28})
+	}
 	rail.Width(width).Height(p.Height).Shrink(0).
-		Padding(40, 24, 36, 24).Background(paint(colors.Surface.Sidebar)).Clip()
+		Padding(40, 24, 36, 24).Background(railBg).Clip()
 	opacity := float32(0)
 	if expanded {
 		opacity = 1
 	}
 	opacity = rail.AnimateTo("brand", opacity, ui.Animation{Duration: railDuration, NonMotion: true})
 	rail.Children(func() {
+		if !p.Theme.Dark {
+			ui.Box(c).Absolute().Right(0).Top(0).Bottom(0).Width(1).Background(d.subtleBorder)
+		}
 		ui.Box(c).Width(240).Height(103).Children(func() {
 			ui.Row(c).Width(240).Height(48).Gap(18).AlignItems(ui.Center).Children(func() {
 				ui.Box(c).Size(68, 48).Center().Children(func() { ui.Image(c, p.Assets.Brand).Size(48, 48) })
@@ -71,16 +80,21 @@ func (p *PageContext) railButton(c *ui.Context, registration Registration, width
 	page := registration.Policy.Route.Page
 	id := app.RailFocus(page)
 	selected := p.Pages.navigationOwner(p.Location.Route) == page
-	colors := p.Theme.Colors
+	colors, d := p.Theme.Colors, p.uiColors()
 	background, foreground := ui.Transparent, paint(colors.Text.Muted)
+	borderW, borderColor := float32(0), ui.Transparent
 	if selected {
 		background, foreground = withAlpha(colors.Text.Primary, 0x0e), paint(colors.Text.Primary)
 	}
-	if p.State.Focus == id {
+	focused := p.State.Focus == id
+	if focused {
 		background, foreground = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+		if !p.Theme.Dark {
+			borderW, borderColor = 1, d.focusBorder
+		}
 	}
 	e := ui.Button(c.Key(string(id)), "").Width(width).Height(66).Padding(0, 12).
-		Radius(16).Border(0, ui.Transparent).Background(background).TextColor(foreground).
+		Radius(16).Border(borderW, borderColor).Background(background).TextColor(foreground).
 		Label(label).
 		OnClick(func() {
 			p.dispatch(func() {
@@ -90,6 +104,7 @@ func (p *PageContext) railButton(c *ui.Context, registration Registration, width
 			})
 		})
 	p.animateFocus(e, background, foreground)
+	p.applyFocusElevation(e, focused)
 	opacity := float32(0)
 	if expanded {
 		opacity = 1

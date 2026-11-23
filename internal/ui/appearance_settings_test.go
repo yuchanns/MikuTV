@@ -273,8 +273,8 @@ func TestAppearanceThemePickerDiscoverInstallApplyErrorAndTeardown(t *testing.T)
 		t.Fatal("expected reduceMotion enabled after toggle")
 	}
 
-	// 2. Open ThemePicker -> built-in only initially; click [发现更多主题] -> Discover pre-filtered to ThemeKind!
-	view.State.Focus = appearanceThemeRow
+	// 2. Open Night ThemePicker -> built-in only initially; click [发现更多主题] -> Discover pre-filtered to ThemeKind!
+	view.State.Focus = appearanceDarkThemeRow
 	tester.Frame()
 	tester.Key(0, ui.KeyEnter)
 	tester.Frame()
@@ -340,8 +340,8 @@ func TestAppearanceThemePickerDiscoverInstallApplyErrorAndTeardown(t *testing.T)
 	// 5. Confirm focused Twilight -> atomic theme switch, closes picker, keeps CurrentEntry & focus!
 	tester.Key(0, ui.KeyEnter)
 	tester.Frame()
-	if state.Page != app.Settings || state.Section != "appearance" || state.Focus != appearanceThemeRow {
-		t.Fatalf("expected return to Settings/appearance theme row after apply, got route=%+v focus=%q",
+	if state.Page != app.Settings || state.Section != "appearance" || state.Focus != appearanceDarkThemeRow {
+		t.Fatalf("expected return to Settings/appearance dark theme row after apply, got route=%+v focus=%q",
 			state.Route, state.Focus)
 	}
 	if view.Theme.ID != "twilight" || view.Theme.Colors.Accent.Primary != 0xbda0ecff {
@@ -422,5 +422,184 @@ func TestAppearanceThemePickerDiscoverInstallApplyErrorAndTeardown(t *testing.T)
 	}
 	if state.CurrentEntry != "sample-source" || len(state.Entries()) != 1 {
 		t.Fatalf("uninstalling theme affected content source entries: current=%q entries=%+v", state.CurrentEntry, state.Entries())
+	}
+}
+
+const uiDaylightThemeJSON = `{
+	"schemaVersion": 1,
+	"base": "mikutv-light",
+	"appearance": "light",
+	"colors": {
+		"surface": {
+			"canvas": "#E6E7ED",
+			"sidebar": "#DCDDE6",
+			"panel": "#F3F4F8",
+			"raised": "#FFFFFF",
+			"input": "#EAEBF0"
+		},
+		"text": {
+			"primary": "#262B40",
+			"secondary": "#434A66",
+			"muted": "#505773"
+		},
+		"accent": {
+			"primary": "#2464BF",
+			"soft": "#1D57AD",
+			"strong": "#17468C",
+			"foreground": "#FFFFFF"
+		},
+		"focus": {
+			"background": "#262B40",
+			"foreground": "#F3F4F8",
+			"ring": "#262B40"
+		},
+		"selected": {
+			"background": "#CDD6EE",
+			"foreground": "#1D3B70",
+			"focusBackground": "#2464BF",
+			"focusForeground": "#FFFFFF"
+		}
+	}
+}`
+
+func TestAppearanceDualThemeUIFollowSystemDayNightPickersAndLiveSwitch(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := app.NewState([]app.Entry{{ID: "sample-source", SourceID: "sample-source", Name: "SampleSource"}}, "sample-source", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dayZip := buildUIThemeZip(t, "daylight", "Daylight", "Crisp day theme", "1.0.0", uiDaylightThemeJSON)
+	dayPkg, err := plugin.OpenTheme(dayZip, "0.1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nightZip := buildUIThemeZip(t, "twilight", "Twilight Purple", "Soft night theme", "1.0.0", uiTwilightThemeJSON)
+	nightPkg, err := plugin.OpenTheme(nightZip, "0.1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pkgStore := plugin.NewPackageStore(filepath.Join(t.TempDir(), "plugins"))
+	var view *View
+	appearance := app.NewAppearanceSettings(
+		pkgStore,
+		[]*plugin.ThemePackage{dayPkg, nightPkg},
+		func(next theme.Theme) {
+			if view != nil {
+				view.SetTheme(next)
+			}
+		},
+		nil,
+		func() {},
+	)
+	appearance.SetSystemDark(true)
+
+	view = newTestView(t, Options{
+		State:      state,
+		Appearance: appearance,
+		Pages:      pages,
+		Assets:     assets,
+		Theme:      appearance.ActiveTheme(),
+		Version:    "0.1.0",
+	})
+
+	state.Navigate(app.Route{Page: app.Settings, Section: "appearance"})
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	tester.Frame()
+
+	// 1. Open Appearance Mode picker -> switch to System (跟随系统) -> verify Scheme A drawer and focus return.
+	view.State.Focus = appearanceModeRow
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.AppearanceModePicker || state.Focus != appearanceModeOptionID(app.AppearanceModeDark) {
+		t.Fatalf("expected AppearanceModePicker focused on dark, got page=%v focus=%q", state.Page, state.Focus)
+	}
+	view.State.Focus = appearanceModeOptionID(app.AppearanceModeSystem)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.Settings || state.Focus != appearanceModeRow || appearance.Mode() != app.AppearanceModeSystem {
+		t.Fatalf("expected System mode applied: route=%+v focus=%q mode=%q", state.Route, state.Focus, appearance.Mode())
+	}
+
+	// 2. Open Daytime theme picker -> initially focused on MikuTV Light -> select Daylight.
+	view.State.Focus = appearanceLightThemeRow
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.ThemePicker || view.appearanceUI.pickerSlot != app.ThemeSlotLight || state.Focus != themePickerOptionID(theme.BaseMikuTVLight) {
+		t.Fatalf("unexpected daytime picker state: page=%v slot=%v focus=%q", state.Page, view.appearanceUI.pickerSlot, state.Focus)
+	}
+	view.State.Focus = themePickerOptionID("daylight")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.Settings || state.Focus != appearanceLightThemeRow || appearance.LightThemeID() != "daylight" {
+		t.Fatalf("daytime selection failed: route=%+v focus=%q light=%q", state.Route, state.Focus, appearance.LightThemeID())
+	}
+	// System is currently dark, so live theme remains MikuTV Dark until Night slot or mode/OS changes!
+	if view.Theme.ID != theme.BaseMikuTVDark {
+		t.Fatalf("expected live theme to stay MikuTV Dark while OS is dark, got %q", view.Theme.ID)
+	}
+
+	// 3. Open Nighttime theme picker -> select Twilight Purple -> applies live immediately!
+	view.State.Focus = appearanceDarkThemeRow
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.ThemePicker || view.appearanceUI.pickerSlot != app.ThemeSlotDark || state.Focus != themePickerOptionID(theme.BaseMikuTVDark) {
+		t.Fatalf("unexpected nighttime picker state: page=%v slot=%v focus=%q", state.Page, view.appearanceUI.pickerSlot, state.Focus)
+	}
+	view.State.Focus = themePickerOptionID("twilight")
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if view.Theme.ID != "twilight" || !view.Theme.Dark || state.Focus != appearanceDarkThemeRow {
+		t.Fatalf("nighttime selection failed: theme=%q dark=%v focus=%q", view.Theme.ID, view.Theme.Dark, state.Focus)
+	}
+
+	// 4. Switch Mode to Light (白天) while OS is dark -> immediately forces Daylight theme!
+	view.State.Focus = appearanceModeRow
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	view.State.Focus = appearanceModeOptionID(app.AppearanceModeLight)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if appearance.Mode() != app.AppearanceModeLight || view.Theme.ID != "daylight" || view.Theme.Dark {
+		t.Fatalf("Light mode did not force daylight: mode=%q theme=%q dark=%v", appearance.Mode(), view.Theme.ID, view.Theme.Dark)
+	}
+
+	// 5. Switch Mode back to System -> OS dark restores Twilight; live OS switch to light swaps to Daylight without touching route or focus!
+	view.State.Focus = appearanceModeRow
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	view.State.Focus = appearanceModeOptionID(app.AppearanceModeSystem)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if view.Theme.ID != "twilight" || !view.Theme.Dark {
+		t.Fatalf("System mode with dark OS expected twilight, got %q", view.Theme.ID)
+	}
+	appearance.SetSystemDark(false)
+	tester.Frame()
+	if view.Theme.ID != "daylight" || view.Theme.Dark || state.Page != app.Settings || state.Focus != appearanceModeRow {
+		t.Fatalf("live OS light transition failed: theme=%q dark=%v route=%+v focus=%q", view.Theme.ID, view.Theme.Dark, state.Route, state.Focus)
+	}
+	appearance.SetSystemDark(true)
+	tester.Frame()
+	if view.Theme.ID != "twilight" || !view.Theme.Dark {
+		t.Fatalf("live OS dark transition failed: theme=%q dark=%v", view.Theme.ID, view.Theme.Dark)
 	}
 }

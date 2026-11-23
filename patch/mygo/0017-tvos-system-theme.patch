@@ -1,0 +1,168 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: MikuTV <dev@mikutv.local>
+Date: Mon, 23 Nov 2026 18:25:00 +0800
+Subject: [PATCH] tvos: read and observe system UIUserInterfaceStyle
+
+---
+ internal/tvos/app.go    | 14 ++++++++++++-
+ internal/tvos/theme.go  | 82 +++++++++++++++++++++++++++++++++++++++++
+ internal/tvos/window.go |  1 +
+ 3 files changed, 96 insertions(+), 1 deletion(-)
+ create mode 100644 internal/tvos/theme.go
+
+diff --git a/internal/tvos/app.go b/internal/tvos/app.go
+index 7e3d4c1..a91c4e2 100644
+--- a/internal/tvos/app.go
++++ b/internal/tvos/app.go
+@@ -22,6 +22,9 @@ type Backend struct {
+ 	loop, source uintptr
+ 	active       bool
+ 	loadErr      error
++	themeSource  string
++	lastStyle    uintptr
++	styleKnown   bool
+ }
+ 
+ func New() *Backend                 { return &Backend{loadErr: load()} }
+@@ -69,6 +72,8 @@ func (b *Backend) registerClasses() error {
+ 	if err := register("MyGoTVAppDelegate", "UIResponder", []objc.MethodDef{
+ 		{Cmd: sel("application:didFinishLaunchingWithOptions:"), Fn: func(_ id, _ objc.SEL, app id, _ id) bool {
+ 			b.active = send(app, "applicationState") != 2
++			b.lastStyle = b.systemInterfaceStyle()
++			b.styleKnown = true
+ 			log.Print("mygo: tvos/uikit ready on main thread")
+ 			b.h.Ready()
+ 			return true
+@@ -97,6 +102,7 @@ func (b *Backend) registerClasses() error {
+ 		{Cmd: sel("applicationDidBecomeActive:"), Fn: func(id, objc.SEL, id) {
+ 			b.active = true
+ 			b.h.DidBecomeActive()
++			b.syncSystemTheme()
+ 			if b.window != nil {
+ 				b.window.h.Focused()
+ 				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceFocus})
+@@ -122,7 +128,10 @@ func (b *Backend) registerClasses() error {
+ 			}
+ 			b.h.PowerEvent("suspend")
+ 		}},
+-		{Cmd: sel("applicationWillEnterForeground:"), Fn: func(id, objc.SEL, id) { b.h.PowerEvent("resume") }},
++		{Cmd: sel("applicationWillEnterForeground:"), Fn: func(id, objc.SEL, id) {
++			b.syncSystemTheme()
++			b.h.PowerEvent("resume")
++		}},
+ 		{Cmd: sel("applicationDidReceiveMemoryWarning:"), Fn: func(id, objc.SEL, id) {
+ 			b.h.MemoryWarning()
+ 			if b.window != nil {
+@@ -157,6 +166,10 @@ func (b *Backend) registerClasses() error {
+ 				b.window.RequestFrame()
+ 			}
+ 		}},
++		{Cmd: sel("traitCollectionDidChange:"), Fn: func(self id, cmd objc.SEL, prev id) {
++			sendViewSuper(self, cmd, prev)
++			b.syncSystemTheme()
++		}},
+ 		{Cmd: sel("remotePan:"), Fn: func(self id, _ objc.SEL, recognizer id) {
+ 			if w := b.window; w != nil && w.view == self && w.IsFocused() {
+ 				w.updateRemotePan(recognizer)
+diff --git a/internal/tvos/theme.go b/internal/tvos/theme.go
+new file mode 100644
+index 0000000..f84a91b
+--- /dev/null
++++ b/internal/tvos/theme.go
+@@ -0,0 +1,82 @@
++//go:build ios && tvos && arm64
++
++package tvos
++
++import "github.com/egoist/mygo/internal/platform"
++
++const (
++	uiUserInterfaceStyleUnspecified uintptr = 0
++	uiUserInterfaceStyleLight       uintptr = 1
++	uiUserInterfaceStyleDark        uintptr = 2
++)
++
++func (b *Backend) Theme() platform.Theme { return tvTheme{b: b} }
++
++type tvTheme struct{ b *Backend }
++
++func (t tvTheme) IsDark() bool {
++	switch t.b.themeSource {
++	case "light":
++		return false
++	case "dark":
++		return true
++	default:
++		return t.b.systemInterfaceStyle() != uiUserInterfaceStyleLight
++	}
++}
++
++func (t tvTheme) SetSource(source string) {
++	t.b.themeSource = source
++	t.b.applyWindowInterfaceStyle()
++}
++
++func (tvTheme) UIFont() string                        { return "" }
++func (tvTheme) FontRendering() platform.FontRendering { return platform.FontRendering{} }
++func (tvTheme) Preferences() platform.Preferences     { return platform.Preferences{} }
++
++func (b *Backend) systemInterfaceStyle() uintptr {
++	if screen := send(class("UIScreen"), "mainScreen"); screen != 0 {
++		if traits := send(screen, "traitCollection"); traits != 0 {
++			if style := uintptr(send(traits, "userInterfaceStyle")); style != uiUserInterfaceStyleUnspecified {
++				return style
++			}
++		}
++	}
++	if b.window != nil && b.window.view != 0 {
++		if traits := send(b.window.view, "traitCollection"); traits != 0 {
++			if style := uintptr(send(traits, "userInterfaceStyle")); style != uiUserInterfaceStyleUnspecified {
++				return style
++			}
++		}
++	}
++	return uiUserInterfaceStyleDark
++}
++
++func (b *Backend) syncSystemTheme() {
++	style := b.systemInterfaceStyle()
++	if !b.styleKnown {
++		b.styleKnown = true
++		b.lastStyle = style
++		return
++	}
++	if style != b.lastStyle {
++		b.lastStyle = style
++		if b.h != nil {
++			b.h.ThemeChanged()
++		}
++	}
++}
++
++func (b *Backend) applyWindowInterfaceStyle() {
++	if b.window == nil || b.window.native == 0 {
++		return
++	}
++	style := int(uiUserInterfaceStyleUnspecified)
++	switch b.themeSource {
++	case "light":
++		style = int(uiUserInterfaceStyleLight)
++	case "dark":
++		style = int(uiUserInterfaceStyleDark)
++	}
++	send(b.window.native, "setOverrideUserInterfaceStyle:", style)
++}
+diff --git a/internal/tvos/window.go b/internal/tvos/window.go
+index 6c9e241..d42f88c 100644
+--- a/internal/tvos/window.go
++++ b/internal/tvos/window.go
+@@ -52,6 +52,7 @@ func (b *Backend) NewWindow(options *platform.WindowOptions, handler platform.Wi
+ 	send(w.link, "setPaused:", true)
+ 	send(w.link, "addToRunLoop:forMode:", send(class("NSRunLoop"), "mainRunLoop"), native.commonModes)
+ 	b.window = w
++	b.applyWindowInterfaceStyle()
+ 	return w, nil
+ }
+ 
+-- 
+2.47.0

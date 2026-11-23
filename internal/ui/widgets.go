@@ -68,8 +68,8 @@ func (p *PageContext) actionButton(c *ui.Context, label, icon string, id app.Foc
 }
 
 func (p *PageContext) styledButton(c *ui.Context, label, icon string, id app.FocusID, group string, action func(), style buttonAppearance) ui.Element {
-	colors := p.Theme.Colors
-	background, foreground := style.background, style.foreground
+	colors, d := p.Theme.Colors, p.uiColors()
+	background, foreground, borderColor := style.background, style.foreground, style.border
 	focused := p.paintFocus() == id
 	if focused {
 		background, foreground = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
@@ -77,7 +77,10 @@ func (p *PageContext) styledButton(c *ui.Context, label, icon string, id app.Foc
 			background, foreground = style.focusBackground, style.focusForeground
 		}
 		if style.tab {
-			background, foreground = withAlpha(colors.Focus.Background, 0x13), paint(colors.Text.Primary)
+			background, foreground = d.tabSubtleFocusFill, paint(colors.Text.Primary)
+		}
+		if !p.Theme.Dark && d.focusBorder.A != 0 {
+			borderColor = d.focusBorder
 		}
 	}
 	text := label
@@ -85,15 +88,17 @@ func (p *PageContext) styledButton(c *ui.Context, label, icon string, id app.Foc
 		text = ""
 	}
 	border := float32(0)
-	if style.border.A != 0 {
+	if borderColor.A != 0 {
 		border = 1
 	}
 	e := ui.Button(c.Key(string(id)), text).Label(label).Height(style.height).MinWidth(style.minWidth).
 		Padding(0, style.padding).Radius(style.radius).
-		Border(border, style.border).Background(background).TextColor(foreground).FontSize(style.fontSize).
+		Border(border, borderColor).Background(background).TextColor(foreground).FontSize(style.fontSize).
 		AlignSelf(ui.Start).OnClick(func() { p.dispatch(action) })
 	if style.focusShadow {
 		p.addVideoFocusShadow(e, focused)
+	} else {
+		p.applyFocusElevation(e, focused)
 	}
 	if style.fontWeight > 0 {
 		e.FontWeight(style.fontWeight)
@@ -145,4 +150,8 @@ func (p *PageContext) animateFocus(element ui.Element, background, foreground ui
 	color := element.AnimateColor("foreground", foreground, animation)
 	element.Background(element.AnimateColor("background", background, animation)).TextColor(color)
 	return color
+}
+
+func (p *PageContext) applyFocusElevation(_ ui.Element, _ bool) {
+	// Light themes preserve the same flat frosted-glass surface language as Dark themes without heavy drop shadows.
 }

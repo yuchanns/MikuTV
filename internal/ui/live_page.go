@@ -471,18 +471,23 @@ func (p *PageContext) liveHeader(c *ui.Context, snap app.LiveSnapshot) {
 					selected := area.ID == snap.Area
 					focused := p.paintFocus() == id
 					background, ink := ui.Transparent, paint(colors.Text.Muted)
+					borderW, borderColor := float32(0), ui.Transparent
 					if selected {
 						background, ink = withAlpha(colors.Text.Primary, 0x12), paint(colors.Text.Primary)
 					}
 					if focused {
-						background, ink = withAlpha(colors.Focus.Background, 0x13), paint(colors.Text.Primary)
+						background, ink = p.uiColors().tabSubtleFocusFill, paint(colors.Text.Primary)
+						if !p.Theme.Dark {
+							borderW, borderColor = 1, p.uiColors().focusBorder
+						}
 					}
 					w := liveAreaWidth(area.Label)
 					val := area.ID
 					btn := ui.Button(c.Key(string(id)), "").Label(area.Label).Size(w, 61).Shrink(0).Padding(0, 0).
-						Radius(30).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
+						Radius(30).Border(borderW, borderColor).Background(background).TextColor(ink).Center().Role(ui.RoleTab).AccessSelected(selected).
 						OnClick(func() { p.dispatch(func() { p.host.selectLiveArea(val) }) })
 					p.animateFocus(btn, background, ink)
+					p.applyFocusElevation(btn, focused)
 					p.bind(btn, id, liveHeaderRegion)
 					btn.Children(func() {
 						ui.Text(c, area.Label).FontSize(24).LetterSpacing(1).SingleLine()

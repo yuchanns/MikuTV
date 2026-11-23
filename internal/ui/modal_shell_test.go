@@ -39,6 +39,7 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		{Page: app.AccountPicker},
 		{Page: app.PlaybackSettingPicker, Section: "playback"},
 		{Page: app.DanmakuSettingPicker, Section: "danmaku"},
+		{Page: app.AppearanceModePicker, Section: "appearance"},
 		{Page: app.ThemePicker, Section: "appearance"},
 		{Page: app.Licenses, Section: "about"},
 	}

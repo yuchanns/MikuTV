@@ -74,7 +74,7 @@ func (qrSignIn) Render(c *ui.Context, p *PageContext) {
 			switch snapshot.Phase {
 			case app.SignInWaiting:
 				ui.Box(c).Size(qrSide+16, qrSide+16).Radius(20).Padding(8).Center().
-					Background(paint(colors.Focus.Background)).
+					Background(ui.Color{R: 255, G: 255, B: 255, A: 255}).
 					Shadow(0, 24, 64, 0, paint(colors.Overlay.Shadow)).Children(func() {
 					ui.Box(c).Size(qrSide, qrSide).Radius(12).Clip().Children(func() {
 						ui.Image(c, image).Size(qrSide, qrSide).Label(labels.QR)

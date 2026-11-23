@@ -165,7 +165,7 @@ func (p *PageContext) libraryEmpty(c *ui.Context, icon, title, note, action, act
 }
 
 func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSection) {
-	colors := p.Theme.Colors
+	colors, d := p.Theme.Colors, p.uiColors()
 	entry, _ := p.State.Current()
 	ui.Box(c.Key("favorite-tabs")).FillWidth().Height(102).Children(func() {
 		ui.Row(c).Absolute().Top(45).Left(78).Height(61).Gap(18).Children(func() {
@@ -177,6 +177,7 @@ func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSe
 				id := app.FocusID("library/tab/" + section)
 				selected := section == active
 				background, foreground, width := ui.Transparent, paint(colors.Text.Muted), float32(148)
+				borderW, borderColor := float32(0), ui.Transparent
 				if section == provider.AccountFavorites {
 					width = 123
 				}
@@ -185,10 +186,14 @@ func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSe
 				}
 				focused := p.paintFocus() == id
 				if focused {
-					background, foreground = withAlpha(colors.Focus.Background, 0x20), paint(colors.Text.Primary)
+					background, foreground = d.tabFocusFill, paint(colors.Text.Primary)
+					if !p.Theme.Dark {
+						borderW, borderColor = 1, d.focusBorder
+					}
 				}
 				button := ui.Button(c.Key(string(id)), "").Label(title).Role(ui.RoleTab).AccessSelected(selected).
-					Size(width, 61).Padding(0, 0).Center().Radius(30).Background(background).TextColor(foreground).
+					Size(width, 61).Padding(0, 0).Center().Radius(30).Border(borderW, borderColor).
+					Background(background).TextColor(foreground).
 					OnClick(func() {
 						p.dispatch(func() {
 							if p.State.Navigate(libraryRoute(section)) {
@@ -198,6 +203,7 @@ func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSe
 						})
 					})
 				p.animateFocus(button, background, foreground)
+				p.applyFocusElevation(button, focused)
 				p.bind(button, id, favoriteTabs)
 				button.Children(func() {
 					ui.Text(c, title).FontSize(24).LetterSpacing(1)

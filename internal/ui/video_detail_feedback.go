@@ -54,8 +54,10 @@ func (v *View) renderFeedbackToast(c *ui.Context, f *videoDetailFeedback) {
 	width, _ := c.Size()
 	ui.Column(c.Key("video-toast")).Absolute().Left(0).Right(0).Bottom(60).AlignItems(ui.Center).
 		ZIndex(200).PassThrough().Children(func() {
-		toast := ui.Box(c.Key(f.start)).Radius(18).Material(glass.Blur{Radius: 25}).
-			Shadow(0, 12, 40, 0, withAlpha(v.Theme.Colors.Overlay.Shadow, 0x44)).PassThrough()
+		toast := ui.Box(c.Key(f.start)).Radius(18).Material(glass.Blur{Radius: 25}).PassThrough()
+		if v.Theme.Dark {
+			toast.Shadow(0, 12, 40, 0, withAlpha(v.Theme.Colors.Overlay.Shadow, 0x44))
+		}
 		toast.Children(func() {
 			ui.Text(c, f.text).FontSize(22).TextColor(d.toastText).TextAlign(ui.Center).
 				MaxWidth(width-220).Padding(20, 32).Radius(18).Border(1, d.toastBorder).

@@ -579,6 +579,9 @@ func (p *PageContext) videoDetailStats(c *ui.Context, item provider.MediaItem) {
 }
 
 func (p *PageContext) addVideoFocusShadow(element ui.Element, focused bool) {
+	if !p.Theme.Dark {
+		return
+	}
 	color := ui.Transparent
 	if focused {
 		color = withAlpha(p.Theme.Colors.Overlay.Shadow, 0x55)

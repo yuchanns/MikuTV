@@ -93,20 +93,28 @@ func (aboutPage) Render(c *ui.Context, p *PageContext) {
 
 func (p *PageContext) aboutActionRow(c *ui.Context, id app.FocusID, label string, action func()) {
 	colors, d := p.Theme.Colors, p.uiColors()
+	focused := p.paintFocus() == id
 	background, ink := ui.Transparent, d.secondaryText
-	if p.paintFocus() == id {
+	borderW, borderColor := float32(0), ui.Transparent
+	if focused {
 		background, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+		if !p.Theme.Dark {
+			borderW, borderColor = 1, d.focusBorder
+		}
 	}
 	button := ui.Button(c.Key(string(id)), "").Label(label).
-		FillWidth().Height(76).Radius(8).Border(0, ui.Transparent).Padding(0).
+		FillWidth().Height(76).Radius(8).Border(borderW, borderColor).Padding(0).
 		OnClick(func() { p.dispatch(action) })
 	p.animateFocus(button, background, ink)
+	p.applyFocusElevation(button, focused)
 	p.bind(button, id, "content")
 	button.Children(func() {
 		ui.Row(c).Fill().Padding(0, 19).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, label).FontSize(21)
 		})
-		ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
+		if !focused || p.Theme.Dark {
+			ui.Box(c).Absolute().Left(0).Right(0).Bottom(0).Height(1).Background(d.subtleBorder)
+		}
 	})
 }
 
@@ -138,7 +146,7 @@ func (aboutProjectPage) Render(c *ui.Context, p *PageContext) {
 		ui.Row(c).Margin(32, 0, 0, 0).Gap(34).AlignItems(ui.Center).Children(func() {
 			if qr := p.host.projectQRCode(info.ProjectURL); qr != nil {
 				ui.Box(c).Size(196, 196).Radius(18).Padding(10).Center().
-					Background(paint(colors.Focus.Background)).
+					Background(ui.Color{R: 255, G: 255, B: 255, A: 255}).
 					Shadow(0, 20, 56, 0, paint(colors.Overlay.Shadow)).Children(func() {
 					ui.Box(c).Size(176, 176).Radius(10).Clip().Children(func() {
 						ui.Image(c, qr).Size(176, 176).Label(about.ProjectHome)

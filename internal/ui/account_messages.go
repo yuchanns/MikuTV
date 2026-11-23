@@ -230,19 +230,25 @@ func (p *PageContext) openNotification(row provider.AccountRow) {
 }
 
 func (p *PageContext) messagesHeaderTabs(c *ui.Context, hasNotifications, hasPrivate, showingPrivate bool) {
-	text, colors := p.Assets.Text.Activity, p.Theme.Colors
+	text, colors, d := p.Assets.Text.Activity, p.Theme.Colors, p.uiColors()
 	renderTab := func(id app.FocusID, label string, selected bool, kind messagesTabKind) {
 		background, ink := ui.Transparent, paint(colors.Text.Muted)
+		borderW, borderColor := float32(0), ui.Transparent
 		if selected {
 			background, ink = withAlpha(colors.Text.Primary, 0x13), paint(colors.Text.Primary)
 		}
-		if p.paintFocus() == id {
-			background, ink = withAlpha(colors.Focus.Background, 0x20), paint(colors.Text.Primary)
+		focused := p.paintFocus() == id
+		if focused {
+			background, ink = d.tabFocusFill, paint(colors.Text.Primary)
+			if !p.Theme.Dark {
+				borderW, borderColor = 1, d.focusBorder
+			}
 		}
 		tab := ui.Button(c.Key(string(id)), "").Label(label).Role(ui.RoleTab).AccessSelected(selected).
-			Size(98, 61).Center().Radius(30).Border(0, ui.Transparent).Background(background).
+			Size(98, 61).Center().Radius(30).Border(borderW, borderColor).Background(background).
 			OnClick(func() { p.dispatch(func() { p.host.selectMessagesTab(kind) }) })
 		p.animateFocus(tab, background, ink)
+		p.applyFocusElevation(tab, focused)
 		p.bind(tab, id, noticeTabs)
 		tab.Children(func() {
 			ui.Text(c, label).FontSize(24).LetterSpacing(1)
