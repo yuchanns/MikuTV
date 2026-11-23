@@ -50,30 +50,32 @@ type Options struct {
 	Series      *app.SeriesCatalog
 	Live        *app.LiveCatalog
 	LiveChat    *app.LiveChat
-	Auth            *app.Auth
-	Activity        *app.AccountActivity
-	PrivateMessages *app.PrivateMessages
-	DanmakuRules    *app.DanmakuRules
-	Pages           *Pages
-	Assets          *Assets
-	Preferences     app.PreferencesStore
-	Theme           theme.Theme
-	Version         string
+	Auth             *app.Auth
+	Activity         *app.AccountActivity
+	PrivateMessages  *app.PrivateMessages
+	DanmakuRules     *app.DanmakuRules
+	PlaybackSettings *app.PlaybackSettings
+	Pages            *Pages
+	Assets           *Assets
+	Preferences      app.PreferencesStore
+	Theme            theme.Theme
+	Version          string
 }
 
 type View struct {
-	State           *app.State
-	Catalog         *app.Catalog
-	Search          *app.CatalogSearch
-	Following       *app.FollowingFeed
-	Series          *app.SeriesCatalog
-	Live            *app.LiveCatalog
-	LiveChat        *app.LiveChat
-	Auth            *app.Auth
-	Activity        *app.AccountActivity
-	PrivateMessages *app.PrivateMessages
-	DanmakuRules    *app.DanmakuRules
-	Playback        *app.Playback
+	State            *app.State
+	Catalog          *app.Catalog
+	Search           *app.CatalogSearch
+	Following        *app.FollowingFeed
+	Series           *app.SeriesCatalog
+	Live             *app.LiveCatalog
+	LiveChat         *app.LiveChat
+	Auth             *app.Auth
+	Activity         *app.AccountActivity
+	PrivateMessages  *app.PrivateMessages
+	DanmakuRules     *app.DanmakuRules
+	PlaybackSettings *app.PlaybackSettings
+	Playback         *app.Playback
 	Pages           *Pages
 	Assets          *Assets
 	Preferences     app.PreferencesStore
@@ -110,6 +112,7 @@ type View struct {
 	creatorStack     []*creatorState
 	player           playbackView
 	favorites        favoritesUI
+	playbackUI       playbackSettingsUI
 	danmakuUI        danmakuSettingsUI
 	settingsFeedback videoDetailFeedback
 
@@ -125,8 +128,12 @@ func NewView(options Options) *View {
 	if danmakuRules == nil {
 		danmakuRules = app.NewDanmakuRules(options.Preferences, nil, nil)
 	}
+	playbackSettings := options.PlaybackSettings
+	if playbackSettings == nil {
+		playbackSettings = app.NewPlaybackSettings(options.Preferences, nil)
+	}
 	v := &View{
-		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules,
+		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Version: options.Version, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}

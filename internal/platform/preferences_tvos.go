@@ -27,6 +27,7 @@ type Preferences struct {
 	key               objc.ID
 	positionsKey      objc.ID
 	searchHistoryKey  objc.ID
+	playbackPrefsKey  objc.ID
 	danmakuDisplayKey objc.ID
 	danmakuRulesKey   objc.ID
 	domain            objc.ID
@@ -43,6 +44,7 @@ func NewPreferences() (*Preferences, error) {
 	key := strCls.Send(strSel, "recentEntry")
 	positionsKey := strCls.Send(strSel, playbackPositionsDefaultsKey)
 	searchHistoryKey := strCls.Send(strSel, searchHistoryDefaultsKey)
+	playbackPrefsKey := strCls.Send(strSel, playbackPrefsDefaultsKey)
 	danmakuDisplayKey := strCls.Send(strSel, danmakuDisplayDefaultsKey)
 	danmakuRulesKey := strCls.Send(strSel, danmakuRulesDefaultsKey)
 	bundle := objc.ID(objc.GetClass("NSBundle")).Send(objc.RegisterName("mainBundle"))
@@ -54,12 +56,13 @@ func NewPreferences() (*Preferences, error) {
 	key.Send(retain)
 	positionsKey.Send(retain)
 	searchHistoryKey.Send(retain)
+	playbackPrefsKey.Send(retain)
 	danmakuDisplayKey.Send(retain)
 	danmakuRulesKey.Send(retain)
 	domain.Send(retain)
 	return &Preferences{
 		defaults: defaults, key: key, positionsKey: positionsKey, searchHistoryKey: searchHistoryKey,
-		danmakuDisplayKey: danmakuDisplayKey, danmakuRulesKey: danmakuRulesKey, domain: domain,
+		playbackPrefsKey: playbackPrefsKey, danmakuDisplayKey: danmakuDisplayKey, danmakuRulesKey: danmakuRulesKey, domain: domain,
 	}, nil
 }
 
@@ -187,6 +190,37 @@ func (p *Preferences) SaveSearchHistory(entryID, owner string, queries []string)
 			return
 		}
 		saveErr = p.saveStringLocked(p.searchHistoryKey, nsStringObj(encoded), "", 0)
+	})
+	return saveErr
+}
+
+func (p *Preferences) PlaybackPreferences() (app.PlaybackPreferences, bool) {
+	var prefs app.PlaybackPreferences
+	var ok bool
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		value := p.defaults.Send(objc.RegisterName("stringForKey:"), p.playbackPrefsKey)
+		if value == 0 {
+			prefs = app.DefaultPlaybackPreferences()
+			return
+		}
+		prefs, ok = parsePlaybackPreferences(objc.Send[string](value, objc.RegisterName("UTF8String")))
+	})
+	return prefs, ok
+}
+
+func (p *Preferences) SavePlaybackPreferences(prefs app.PlaybackPreferences) error {
+	var saveErr error
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		encoded, err := encodePlaybackPreferences(prefs)
+		if err != nil {
+			saveErr = err
+			return
+		}
+		saveErr = p.saveStringLocked(p.playbackPrefsKey, nsStringObj(encoded), "", 0)
 	})
 	return saveErr
 }

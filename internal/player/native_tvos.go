@@ -117,6 +117,7 @@ var (
 		addOpBlock         func(objc.ID, objc.SEL, objc.Block)
 		addObserverSel     func(objc.ID, objc.SEL, objc.ID, objc.SEL, objc.ID, objc.ID)
 		setObj             func(objc.ID, objc.SEL, objc.ID)
+		setObj2            func(objc.ID, objc.SEL, objc.ID, objc.ID)
 		getObj             func(objc.ID, objc.SEL) objc.ID
 		getObjIdx          func(objc.ID, objc.SEL, uintptr) objc.ID
 		getObjKey          func(objc.ID, objc.SEL, objc.ID) objc.ID
@@ -165,9 +166,10 @@ var (
 		avAudioSessionInterruptionNotification  objc.ID
 		avAudioSessionInterruptionTypeKey       objc.ID
 		avAudioSessionInterruptionOptionKey     objc.ID
-		avMediaTypeAudio                        objc.ID
-		avMediaTypeVideo                        objc.ID
-		avMediaCharacteristicContainsHDRVideo   objc.ID
+		avMediaTypeAudio                      objc.ID
+		avMediaTypeVideo                      objc.ID
+		avMediaCharacteristicAudible          objc.ID
+		avMediaCharacteristicContainsHDRVideo objc.ID
 
 		// Cached selectors.
 		selAlloc, selInit, selRetain, selRelease                    objc.SEL
@@ -202,6 +204,8 @@ var (
 		selCMTimeRangeValue, selStatus, selError, selCode           objc.SEL
 		selTimeControlStatus, selIsReadyForDisplay                  objc.SEL
 		selTracks, selIsEnabled, selAssetTrack, selMediaType        objc.SEL
+		selMediaSelectionGroup, selOptions, selDisplayName          objc.SEL
+		selSelectMediaOption                                        objc.SEL
 		selFormatDescriptions, selFirstObject, selNominalFrameRate  objc.SEL
 		selVariants, selVideoAttributes                             objc.SEL
 		selHasMediaCharacteristic, selCount, selObjectAtIndex       objc.SEL
@@ -224,6 +228,7 @@ var (
 		// Retained constant NSStrings.
 		strPlayable               objc.ID
 		strPreferredDisplayCrit   objc.ID
+		strAvailMediaChars        objc.ID
 		strStatus                 objc.ID
 		strTracks                 objc.ID
 		strReadyForDisplay        objc.ID
@@ -295,7 +300,7 @@ func loadTVOSPlayer() error {
 			&n.setAudioCategory, &n.setAudioActive, &n.setAudioActiveOpts,
 			&n.getBool, &n.getBoolObj, &n.setBool, &n.getInt64, &n.getUintptr, &n.setUintptr,
 			&n.insertSubview, &n.addKVO, &n.removeKVO, &n.loadValues, &n.addOpBlock,
-			&n.addObserverSel, &n.setObj, &n.getObj, &n.getObjIdx, &n.getObjKey,
+			&n.addObserverSel, &n.setObj, &n.setObj2, &n.getObj, &n.getObjIdx, &n.getObjKey,
 			&n.withObj, &n.withObj2, &n.withUint32, &n.withPtr, &n.arrayWithObjects,
 		} {
 			purego.RegisterFunc(target, msgSend)
@@ -383,6 +388,7 @@ func loadTVOSPlayer() error {
 			{avAudioLib, "AVAudioSessionInterruptionOptionKey", &n.avAudioSessionInterruptionOptionKey},
 			{avLib, "AVMediaTypeAudio", &n.avMediaTypeAudio},
 			{avLib, "AVMediaTypeVideo", &n.avMediaTypeVideo},
+			{avLib, "AVMediaCharacteristicAudible", &n.avMediaCharacteristicAudible},
 			{avLib, "AVMediaCharacteristicContainsHDRVideo", &n.avMediaCharacteristicContainsHDRVideo},
 		} {
 			val, err := loadPtr(c.lib, c.name)
@@ -477,6 +483,10 @@ func loadTVOSPlayer() error {
 		n.selIsEnabled = sel("isEnabled")
 		n.selAssetTrack = sel("assetTrack")
 		n.selMediaType = sel("mediaType")
+		n.selMediaSelectionGroup = sel("mediaSelectionGroupForMediaCharacteristic:")
+		n.selOptions = sel("options")
+		n.selDisplayName = sel("displayName")
+		n.selSelectMediaOption = sel("selectMediaOption:inMediaSelectionGroup:")
 		n.selFormatDescriptions = sel("formatDescriptions")
 		n.selFirstObject = sel("firstObject")
 		n.selNominalFrameRate = sel("nominalFrameRate")
@@ -521,11 +531,12 @@ func loadTVOSPlayer() error {
 
 		n.strPlayable = retainNSString("playable")
 		n.strPreferredDisplayCrit = retainNSString("preferredDisplayCriteria")
+		n.strAvailMediaChars = retainNSString("availableMediaCharacteristicsWithMediaSelectionOptions")
 		n.strStatus = retainNSString("status")
 		n.strTracks = retainNSString("tracks")
 		n.strReadyForDisplay = retainNSString("readyForDisplay")
-		keys := [2]objc.ID{n.strPlayable, n.strPreferredDisplayCrit}
-		arr := n.arrayWithObjects(objc.ID(objc.GetClass("NSArray")), n.selArrayWithObjectsCount, unsafe.Pointer(&keys[0]), 2)
+		keys := [3]objc.ID{n.strPlayable, n.strPreferredDisplayCrit, n.strAvailMediaChars}
+		arr := n.arrayWithObjects(objc.ID(objc.GetClass("NSArray")), n.selArrayWithObjectsCount, unsafe.Pointer(&keys[0]), 3)
 		n.getObj(arr, n.selRetain)
 		n.assetLoadKeys = arr
 
@@ -773,6 +784,7 @@ func NewNative(window uintptr) (Engine, func()) {
 		Open:         p.open,
 		Seek:         p.seek,
 		SetRate:      p.setRate,
+		SelectAudio:  p.selectAudio,
 		Snapshot:     p.snapshot,
 		Stop:         p.stop,
 		Fullscreen:   p.setFullscreen,
@@ -1564,6 +1576,50 @@ func (p *tvosPlayer) setRate(rate float64) {
 		}
 	}
 	p.applyRate()
+}
+
+func (p *tvosPlayer) selectAudio(name string) bool {
+	if p.destroyed || p.asset == 0 || name == "" {
+		return false
+	}
+	n := &tvosNative
+	pool := n.poolPush()
+	defer n.poolPop(pool)
+	item := n.getObj(p.player, n.selCurrentItem)
+	if item == 0 {
+		return false
+	}
+	group := n.withObj(p.asset, n.selMediaSelectionGroup, n.avMediaCharacteristicAudible)
+	if group == 0 {
+		if p.trace {
+			log.Printf("player-audio: no audible media selection group for %q", name)
+		}
+		return false
+	}
+	options := n.getObj(group, n.selOptions)
+	if options == 0 {
+		return false
+	}
+	count := n.getUintptr(options, n.selCount)
+	target := nsString(name)
+	for i := range count {
+		opt := n.getObjIdx(options, n.selObjectAtIndex, i)
+		if opt == 0 {
+			continue
+		}
+		display := n.getObj(opt, n.selDisplayName)
+		if display != 0 && n.getBoolObj(display, n.selIsEqualToString, target) {
+			n.setObj2(item, n.selSelectMediaOption, opt, group)
+			if p.trace {
+				log.Printf("player-audio: selected=%s count=%d", name, count)
+			}
+			return true
+		}
+	}
+	if p.trace {
+		log.Printf("player-audio: option %q not found among %d options", name, count)
+	}
+	return false
 }
 
 func (p *tvosPlayer) snapshot() Status {

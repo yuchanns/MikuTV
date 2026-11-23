@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,10 +19,18 @@ import (
 	"golang.org/x/net/http/httpguts"
 )
 
+func validPreferredQuality(pref string) bool {
+	switch pref {
+	case "", "4k-hdr", "4k", "1080p", "720p":
+		return true
+	}
+	return false
+}
+
 func (s *Session) ResolvePlayback(ctx context.Context, request provider.PlaybackRequest) (provider.Playback, error) {
 	var result provider.Playback
-	if !s.ownsPlayback(request.PlaybackTarget) || len(request.Quality) > 512 || len(request.Line) > 128 ||
-		len(request.BranchID) > 256 || len(request.BranchState) > 4096 {
+	if !s.ownsPlayback(request.PlaybackTarget) || len(request.Quality) > 512 || !validPreferredQuality(request.PreferredQuality) ||
+		len(request.Line) > 128 || len(request.BranchID) > 256 || len(request.BranchState) > 4096 {
 		return result, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
@@ -149,18 +158,48 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 			if stream.Audio != nil && (!validDASHTrack(*stream.Audio, false) || !ownPlaybackResource(&stream.Audio.Resource, allow)) {
 				return false
 			}
+			seenAudio := make(map[string]bool, len(stream.AudioTracks))
+			audioTracks := stream.AudioTracks[:0]
 			for i := range stream.AudioTracks {
-				if !validDASHTrack(stream.AudioTracks[i], false) || !ownPlaybackResource(&stream.AudioTracks[i].Resource, allow) {
+				track := stream.AudioTracks[i]
+				if !validDASHTrack(track, false) || !ownPlaybackResource(&track.Resource, allow) {
 					return false
 				}
+				track.ID = strings.TrimSpace(track.ID)
+				if track.ID == "" {
+					track.ID = "audio-" + strconv.Itoa(i)
+				}
+				if len(track.ID) > 128 {
+					track.ID = track.ID[:128]
+				}
+				if seenAudio[track.ID] {
+					continue
+				}
+				seenAudio[track.ID] = true
+				track.Label = strings.TrimSpace(track.Label)
+				if len(track.Label) > 128 {
+					track.Label = track.Label[:128]
+				}
+				track.Language = strings.TrimSpace(track.Language)
+				if len(track.Language) > 64 {
+					track.Language = track.Language[:64]
+				}
+				audioTracks = append(audioTracks, track)
 			}
+			stream.AudioTracks = audioTracks
 		default:
 			return false
 		}
 	}
 	tracks := plan.Subtitles[:0]
 	for _, track := range plan.Subtitles {
-		if track.ID == "" || strings.TrimSpace(track.Label) == "" {
+		track.ID = strings.TrimSpace(track.ID)
+		track.Label = strings.TrimSpace(track.Label)
+		track.Language = strings.TrimSpace(track.Language)
+		if len(track.Language) > 64 {
+			track.Language = track.Language[:64]
+		}
+		if track.ID == "" || track.Label == "" {
 			return false
 		}
 		if ownPlaybackResource(&track.Resource, allow) {

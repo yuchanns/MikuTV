@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/yuchanns/MikuTV/internal/player"
@@ -31,10 +32,11 @@ const (
 )
 
 type preloadedPlayback struct {
-	target provider.PlaybackTarget
-	owner  string
-	result provider.Playback
-	media  *player.Media
+	target           provider.PlaybackTarget
+	owner            string
+	preferredQuality string
+	result           provider.Playback
+	media            *player.Media
 }
 
 type PlaybackState struct {
@@ -46,6 +48,10 @@ type PlaybackState struct {
 	Duration       float64
 	Selected       string
 	SelectedLine   string
+	AudioTracks    []provider.PlaybackTrack
+	SelectedAudio  string
+	ActiveAudio    string
+	DefaultAudio   string
 	Fallback       string
 	Limit          provider.PlaybackLimit
 	Failure        provider.ErrorCode
@@ -66,6 +72,7 @@ type Playback struct {
 	catalog *Catalog
 	engine  player.Engine
 	store   PlaybackStore
+	prefs   *PlaybackSettings
 	post    func(func())
 	changed func()
 
@@ -77,6 +84,9 @@ type Playback struct {
 	media            *player.Media
 	cancel           context.CancelFunc
 	request          uint64
+	selectedAudio    string
+	audioCancel      context.CancelFunc
+	audioRequest     uint64
 	refreshed        bool
 	lastSaved        int64
 	savedAsEnd       bool
@@ -120,10 +130,33 @@ func NewPlayback(catalog *Catalog, native player.Engine, store PlaybackStore, po
 	return &Playback{catalog: catalog, engine: native, store: store, post: post, changed: changed}
 }
 
+func (p *Playback) SetPreferences(prefs *PlaybackSettings) {
+	p.prefs = prefs
+}
+
+func (p *Playback) preferredQuality() string {
+	if p.prefs == nil {
+		return ""
+	}
+	return string(p.prefs.Preferences().Quality)
+}
+
+func (p *Playback) defaultSpeed() float64 {
+	if p.prefs == nil {
+		return 1
+	}
+	return p.prefs.Preferences().Speed
+}
+
 func (p *Playback) State() PlaybackState { return p.state }
 func (p *Playback) Active() bool         { return p.active }
-func (p *Playback) Rate() float64        { return p.rate }
-func (p *Playback) Owner() string        { return p.owner }
+func (p *Playback) Rate() float64 {
+	if p.rate > 0 {
+		return p.rate
+	}
+	return p.defaultSpeed()
+}
+func (p *Playback) Owner() string { return p.owner }
 func (p *Playback) isLive() bool {
 	return p.state.Target.Ref.Kind == provider.Live || p.state.Resolution.Plan.Live
 }
@@ -141,7 +174,8 @@ func (p *Playback) SetBackdropBlur(radius float32) bool {
 // Start resumes a saved position when start is nil.
 func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSource bool, start *float64) {
 	var hit *preloadedPlayback
-	if p.preloaded != nil && p.preloaded.target == target && p.preloaded.owner == owner &&
+	prefQ := p.preferredQuality()
+	if p.preloaded != nil && p.preloaded.target == target && p.preloaded.owner == owner && p.preloaded.preferredQuality == prefQ &&
 		(p.preloaded.result.Plan.ExpiresAt == 0 || time.Now().Unix()+preloadExpiryMarginSec < p.preloaded.result.Plan.ExpiresAt) {
 		hit = p.preloaded
 		p.preloaded = nil
@@ -164,10 +198,13 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 	p.liveEndChecked, p.pausedAt = false, time.Time{}
 	p.previewConfirmed, p.hdrBlocked = false, false
 	p.branchID, p.branchState, p.branchTriggered = "", "", false
+	p.selectedAudio = ""
 	p.lastSaved, p.savedAsEnd = -1, false
 	p.resetAutoQuality(true)
-	if p.rate == 0 || target.Ref.Kind == provider.Live {
+	if target.Ref.Kind == provider.Live {
 		p.rate = 1
+	} else if p.rate == 0 {
+		p.rate = p.defaultSpeed()
 	}
 	if hit != nil {
 		hit.media.Promote()
@@ -192,8 +229,9 @@ func (p *Playback) Close() {
 	}
 	p.active = false
 	p.branchID, p.branchState, p.branchTriggered = "", "", false
+	p.selectedAudio = ""
 	p.state = PlaybackState{Revision: p.state.Revision}
-	p.rate = 1
+	p.rate = 0
 	p.resetAutoQuality(true)
 	p.changed()
 }
@@ -203,6 +241,11 @@ func (p *Playback) clearStream() {
 		p.cancel()
 		p.cancel = nil
 	}
+	if p.audioCancel != nil {
+		p.audioCancel()
+		p.audioCancel = nil
+	}
+	p.audioRequest++
 	if p.engine.Stop != nil {
 		p.engine.Stop()
 	}
@@ -260,8 +303,9 @@ func (p *Playback) PreloadNext(target provider.PlaybackTarget, owner string) {
 	if p.hdrBlocked {
 		caps.HDR = false
 	}
+	prefQ := p.preferredQuality()
 	input := provider.PlaybackRequest{
-		PlaybackTarget: target, Quality: "", HDR: caps.HDR, HEVC: caps.HEVC,
+		PlaybackTarget: target, Quality: "", PreferredQuality: prefQ, HDR: caps.HDR, HEVC: caps.HEVC,
 	}
 	go func() {
 		result, err := resolver.ResolvePlayback(ctx, input)
@@ -293,7 +337,7 @@ func (p *Playback) PreloadNext(target provider.PlaybackTarget, owner string) {
 			}
 			cancel()
 			p.preloadCancel = nil
-			p.preloaded = &preloadedPlayback{target: target, owner: owner, result: result, media: media}
+			p.preloaded = &preloadedPlayback{target: target, owner: owner, preferredQuality: prefQ, result: result, media: media}
 		})
 	}()
 }
@@ -325,6 +369,11 @@ func (p *Playback) resolveMode(selected, requestQuality, selectedLine string, pr
 	if p.cancel != nil {
 		p.cancel()
 	}
+	if p.audioCancel != nil {
+		p.audioCancel()
+		p.audioCancel = nil
+	}
+	p.audioRequest++
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 	p.request++
@@ -339,9 +388,14 @@ func (p *Playback) resolveMode(selected, requestQuality, selectedLine string, pr
 	if p.hdrBlocked || (selected == "" && p.autoHDRBlocked) {
 		caps.HDR = false
 	}
+	preferredQ := ""
+	if requestQuality == "" {
+		preferredQ = p.preferredQuality()
+	}
+	selectedAudio := p.selectedAudio
 	resolver, _ := p.catalog.session.(provider.PlaybackReader)
 	input := provider.PlaybackRequest{
-		PlaybackTarget: p.state.Target, Quality: requestQuality, Line: selectedLine,
+		PlaybackTarget: p.state.Target, Quality: requestQuality, PreferredQuality: preferredQ, Line: selectedLine,
 		BranchID: p.branchID, BranchState: p.branchState, HDR: caps.HDR, HEVC: caps.HEVC,
 	}
 	go func() {
@@ -355,7 +409,7 @@ func (p *Playback) resolveMode(selected, requestQuality, selectedLine string, pr
 		}
 		if err == nil && result.Plan.Access != provider.VideoAccessRestricted && !result.Plan.LiveEnded && (!preserve || result.Plan.Restriction == "") {
 			timeout, stop := context.WithTimeout(ctx, 15*time.Second)
-			media, err = player.OpenMedia(timeout, result)
+			media, err = player.OpenMediaWithAudio(timeout, result, selectedAudio)
 			stop()
 		}
 		p.post(func() {
@@ -513,6 +567,13 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	}
 	p.state.Target, p.state.Resolution = target, result
 	p.state.Selected, p.state.SelectedLine = quality, selectedLine
+	p.state.AudioTracks = media.AudioTracks()
+	p.state.DefaultAudio = media.DefaultAudioID()
+	p.state.ActiveAudio = media.ActiveAudioID()
+	if p.selectedAudio != "" && !slices.ContainsFunc(p.state.AudioTracks, func(t provider.PlaybackTrack) bool { return t.ID == p.selectedAudio }) {
+		p.selectedAudio = ""
+	}
+	p.state.SelectedAudio = p.selectedAudio
 	p.state.Position, p.state.Duration, p.state.VideoRange = position, plan.Duration, media.VideoRange
 	p.state.Clock = player.Status{Position: position, Buffering: true}
 	p.startedAt = time.Now()
@@ -656,7 +717,7 @@ func autoPlayableQualities(qualities []provider.PlaybackQuality) []provider.Play
 }
 
 func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
-	if p.state.Selected != "" || !p.state.Playing || p.media == nil {
+	if p.state.Selected != "" || p.preferredQuality() != "" || !p.state.Playing || p.media == nil {
 		return false
 	}
 	isRebuffering := clock.Buffering && clock.HasFrame
@@ -879,6 +940,79 @@ func (p *Playback) ChooseLine(line string) {
 	p.state.Limit = ""
 	p.loaded, p.didEnd, p.refreshed, p.liveEndChecked = false, false, false, false
 	p.resolveMode(p.state.Selected, p.effectiveQuality(), line, false, false)
+}
+
+func (p *Playback) ChooseAudioTrack(trackID string) bool {
+	if !p.active || p.isLive() || p.state.Loading || p.state.Switching || p.media == nil || trackID == "" {
+		return false
+	}
+	if !slices.ContainsFunc(p.state.AudioTracks, func(t provider.PlaybackTrack) bool { return t.ID == trackID }) {
+		return false
+	}
+	if trackID == p.state.ActiveAudio {
+		return true
+	}
+	prev := p.state.ActiveAudio
+	if p.engine.SelectAudio != nil && p.media.CanSwitchAudioInPlace(prev, trackID) {
+		if name, ok := p.media.AudioOptionName(trackID); ok && p.engine.SelectAudio(name) {
+			p.selectedAudio = trackID
+			p.state.SelectedAudio = trackID
+			p.state.ActiveAudio = trackID
+			p.changed()
+			return true
+		}
+	}
+	if p.audioCancel != nil {
+		p.audioCancel()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	p.audioCancel = cancel
+	p.audioRequest++
+	reqID := p.audioRequest
+	resolution := p.state.Resolution
+	p.state.Switching = true
+	p.changed()
+	go func() {
+		media, err := player.OpenMediaWithAudio(ctx, resolution, trackID)
+		p.post(func() {
+			if !p.active || p.audioRequest != reqID || ctx.Err() != nil {
+				if media != nil {
+					media.Close()
+				}
+				return
+			}
+			cancel()
+			p.audioCancel = nil
+			p.state.Switching = false
+			if err != nil || media == nil {
+				p.changed()
+				return
+			}
+			position := p.state.Position
+			if p.engine.Open == nil || !p.engine.Open(media.URL, position) {
+				media.Close()
+				p.changed()
+				return
+			}
+			if p.media != nil {
+				p.media.Close()
+			}
+			p.media = media
+			p.selectedAudio = trackID
+			p.state.SelectedAudio = trackID
+			p.state.AudioTracks = media.AudioTracks()
+			p.state.DefaultAudio = media.DefaultAudioID()
+			p.state.ActiveAudio = media.ActiveAudioID()
+			p.state.VideoRange = media.VideoRange
+			p.state.Clock = player.Status{Position: position, Buffering: true}
+			p.startedAt = time.Now()
+			p.bufferedAt = time.Time{}
+			p.state.Revision++
+			p.applyRate()
+			p.changed()
+		})
+	}()
+	return true
 }
 
 func (p *Playback) DismissLimit() {

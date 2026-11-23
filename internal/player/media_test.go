@@ -506,3 +506,86 @@ func TestDASHMidSegmentSlowCDNFailoverResumesSeamlessly(t *testing.T) {
 			transport.slowHits.Load(), transport.backupHits.Load())
 	}
 }
+
+type failingTrackTransport struct {
+	data    []byte
+	failURL string
+}
+
+func (f *failingTrackTransport) OpenResource(ctx context.Context, resource provider.PlaybackResource, method, byteRange string) (*http.Response, error) {
+	if len(resource.URLs) > 0 && resource.URLs[0] == f.failURL {
+		return nil, &provider.Error{Code: provider.Network}
+	}
+	return testResource(f.data).OpenResource(ctx, resource, method, byteRange)
+}
+
+func TestDASHMultiAudioSelectionCodecIsolationAndSecondaryResilience(t *testing.T) {
+	movie, initR, idxR, _ := buildMultiFragmentDASH([][]byte{[]byte("abcdefghijkl")}, 3000)
+	transport := &failingTrackTransport{data: movie, failURL: "https://media.example.com/broken.m4s"}
+	res := func(name string) provider.PlaybackResource {
+		return provider.PlaybackResource{URLs: []string{"https://media.example.com/" + name}}
+	}
+	audioTracks := []provider.PlaybackTrack{
+		{ID: "aac-192", Label: "AAC 192k", Default: true, Codec: "mp4a.40.2", Bandwidth: 192000, Resource: res("a192.m4s"), Init: &initR, Index: &idxR},
+		{ID: "dolby", Label: "Dolby Atmos", Codec: "ec-3", Bandwidth: 448000, Resource: res("dolby.m4s"), Init: &initR, Index: &idxR},
+		{ID: "aac-132", Label: "AAC 132k", Codec: "mp4a.40.2", Bandwidth: 132000, Resource: res("a132.m4s"), Init: &initR, Index: &idxR},
+		{ID: "opus", Label: "Opus", Codec: "opus", Bandwidth: 128000, Resource: res("opus.m4s"), Init: &initR, Index: &idxR},
+		{ID: "broken", Label: "Broken AAC", Codec: "mp4a.40.2", Bandwidth: 64000, Resource: res("broken.m4s"), Init: &initR, Index: &idxR},
+	}
+	playback := provider.Playback{
+		Transport: transport,
+		Plan: provider.PlaybackPlan{
+			Streams: []provider.PlaybackStream{{
+				Format:      provider.PlaybackDASH,
+				Video:       provider.PlaybackTrack{Codec: "hvc1.1.6.L150.90", Bandwidth: 4000000, Width: 1920, Height: 1080, Resource: res("v.m4s"), Init: &initR, Index: &idxR},
+				Audio:       &audioTracks[0],
+				AudioTracks: audioTracks,
+			}},
+		},
+	}
+
+	media, err := OpenMediaWithAudio(context.Background(), playback, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer media.Close()
+
+	// Unsupported opus and failing secondary track are cleanly omitted; default is aac-192.
+	tracks := media.AudioTracks()
+	if len(tracks) != 3 || tracks[0].ID != "aac-192" || tracks[1].ID != "dolby" || tracks[2].ID != "aac-132" {
+		t.Fatalf("unexpected prepared audio tracks: %+v", tracks)
+	}
+	if media.DefaultAudioID() != "aac-192" || media.ActiveAudioID() != "aac-192" {
+		t.Fatalf("default=%q active=%q, want aac-192", media.DefaultAudioID(), media.ActiveAudioID())
+	}
+	// Same codec (AAC <-> AAC) supports in-place switching; cross-codec (AAC <-> Dolby ec-3) does not.
+	if !media.CanSwitchAudioInPlace("aac-192", "aac-132") {
+		t.Fatal("expected same-codec AAC tracks to allow in-place switching")
+	}
+	if media.CanSwitchAudioInPlace("aac-192", "dolby") {
+		t.Fatal("expected cross-codec AAC <-> ec-3 to require reload rather than in-place switching")
+	}
+	master := readFixture(t, media.URL, "")
+	if !strings.Contains(master, `NAME="AAC 192k",DEFAULT=YES,AUTOSELECT=YES`) ||
+		!strings.Contains(master, `NAME="AAC 132k",DEFAULT=NO,AUTOSELECT=NO`) ||
+		strings.Contains(master, `Dolby Atmos`) ||
+		!strings.Contains(master, `CODECS="hvc1.1.6.L150.90,mp4a.40.2"`) {
+		t.Fatalf("master playlist should isolate AAC codec group cleanly:\n%s", master)
+	}
+
+	// Opening with Dolby selected emits ec-3 codec group cleanly.
+	dolbyMedia, err := OpenMediaWithAudio(context.Background(), playback, "dolby")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dolbyMedia.Close()
+	if dolbyMedia.ActiveAudioID() != "dolby" || dolbyMedia.DefaultAudioID() != "aac-192" {
+		t.Fatalf("dolby media active=%q default=%q", dolbyMedia.ActiveAudioID(), dolbyMedia.DefaultAudioID())
+	}
+	dolbyMaster := readFixture(t, dolbyMedia.URL, "")
+	if !strings.Contains(dolbyMaster, `NAME="Dolby Atmos",DEFAULT=YES,AUTOSELECT=YES`) ||
+		!strings.Contains(dolbyMaster, `CODECS="hvc1.1.6.L150.90,ec-3"`) ||
+		strings.Contains(dolbyMaster, `AAC 192k`) {
+		t.Fatalf("dolby master playlist should isolate ec-3 codec group cleanly:\n%s", dolbyMaster)
+	}
+}

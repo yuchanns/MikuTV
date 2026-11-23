@@ -107,7 +107,23 @@
     "LiveChatRateLimited": "\u53d1\u9001\u592a\u9891\u7e41\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5\u3002",
     "Interactive": "\u4e92\u52a8\u89c6\u9891",
     "BranchQuestion": "\u63a5\u4e0b\u6765\uff0c\u505a\u51fa\u4f60\u7684\u9009\u62e9",
-    "BranchButton": "\u4e92\u52a8\u5206\u652f"
+    "BranchButton": "\u4e92\u52a8\u5206\u652f",
+    "AudioTrack": "\u97f3\u8f68",
+    "AudioDefault": "\u9ed8\u8ba4"
+  },
+  "PlaybackPrefs": {
+    "Title": "\u64ad\u653e",
+    "Intro": "\u753b\u8d28\u3001\u5b57\u5e55\u4e0e\u8fde\u7eed\u64ad\u653e\u3002",
+    "Quality": "\u9996\u9009\u753b\u8d28",
+    "QualityNote": "\u6309\u7247\u6e90\u3001\u8bbe\u5907\u4e0e\u8d26\u53f7\u6743\u76ca\u9009\u62e9\u53ef\u7528\u753b\u8d28\u3002",
+    "QualityAuto": "\u81ea\u52a8 \u00b7 \u6700\u4f73\u53ef\u7528",
+    "Speed": "\u9ed8\u8ba4\u500d\u901f",
+    "Subtitles": "\u9ed8\u8ba4\u5b57\u5e55",
+    "SubtitlesOff": "\u5173\u95ed",
+    "SubtitlesChinese": "\u4e2d\u6587",
+    "SubtitlesEnglish": "English",
+    "Autoplay": "\u81ea\u52a8\u8fde\u64ad",
+    "AutoplayNote": "\u89c6\u9891\u7ed3\u675f\u540e\uff0c\u7ee7\u7eed\u64ad\u653e\u4e0b\u4e00\u6761\u3002"
   },
   "Danmaku": {
     "Title": "\u5f39\u5e55",

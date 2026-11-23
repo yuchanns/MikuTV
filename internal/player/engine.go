@@ -4,6 +4,7 @@ type Engine struct {
 	Open         func(url string, position float64) bool
 	Seek         func(seconds float64)
 	SetRate      func(rate float64)
+	SelectAudio  func(name string) bool
 	Stop         func()
 	Snapshot     func() Status
 	Fullscreen   func(bool)

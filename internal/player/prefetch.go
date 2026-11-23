@@ -828,6 +828,9 @@ func (m *Media) Warmup(ctx context.Context) error {
 	}()
 
 	for _, track := range m.tracks {
+		if !track.isVideo && m.activeAudioName != "" && track.name != m.activeAudioName {
+			continue
+		}
 		if warmCtx.Err() != nil {
 			return warmCtx.Err()
 		}

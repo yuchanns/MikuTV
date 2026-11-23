@@ -21,12 +21,13 @@ type PlaybackTarget struct {
 
 type PlaybackRequest struct {
 	PlaybackTarget
-	Quality     string `json:"quality,omitempty"`
-	Line        string `json:"line,omitempty"`
-	BranchID    string `json:"branchID,omitempty"`
-	BranchState string `json:"branchState,omitempty"`
-	HDR         bool   `json:"hdr,omitempty"`
-	HEVC        bool   `json:"hevc,omitempty"`
+	Quality          string `json:"quality,omitempty"`
+	PreferredQuality string `json:"preferredQuality,omitempty"`
+	Line             string `json:"line,omitempty"`
+	BranchID         string `json:"branchID,omitempty"`
+	BranchState      string `json:"branchState,omitempty"`
+	HDR              bool   `json:"hdr,omitempty"`
+	HEVC             bool   `json:"hevc,omitempty"`
 }
 
 type PlaybackTransport interface {
@@ -143,6 +144,8 @@ type PlaybackResource struct {
 type PlaybackTrack struct {
 	ID          string           `json:"id,omitempty"`
 	Label       string           `json:"label,omitempty"`
+	Language    string           `json:"language,omitempty"`
+	Default     bool             `json:"default,omitempty"`
 	Resource    PlaybackResource `json:"resource"`
 	Codec       string           `json:"codec,omitempty"`
 	ContentType string           `json:"contentType,omitempty"`

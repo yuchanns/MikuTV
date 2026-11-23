@@ -337,7 +337,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		Leave: func(v *View) { v.favorites.dialog = favoriteDialog{} },
 	})
 	settings := map[string]Component{
-		"playback": settingsEmptyPage{}, "danmaku": danmakuSettingsPage{}, "appearance": settingsEmptyPage{},
+		"playback": playbackSettingsPage{}, "danmaku": danmakuSettingsPage{}, "appearance": settingsEmptyPage{},
 		"privacy": privacySettingsPage{}, "plugins": settingsEmptyPage{}, "about": aboutPage{},
 	}
 	for _, section := range assets.Text.Sections {
@@ -361,6 +361,14 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		registrations = append(registrations, reg)
 	}
 	registrations = append(registrations,
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.PlaybackSettingPicker, Section: "playback"},
+				Parent: app.Route{Page: app.Settings, Section: "playback"},
+				Modal:  true, Initial: focus(playbackPickerOptionID(0)),
+			},
+			Component: playbackSettingPickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 560,
+		},
 		Registration{
 			Policy: app.RouteSpec{
 				Route: app.Route{Page: app.DanmakuSettingPicker, Section: "danmaku"},

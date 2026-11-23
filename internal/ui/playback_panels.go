@@ -55,6 +55,15 @@ func (s *playbackView) openPanel(v *View, panel app.FocusID) {
 		v.State.Focus = playbackOptionID(panel, playbackRateLabel(v.Playback.Rate()))
 	case playerSubtitles:
 		v.State.Focus = playbackOptionID(panel, s.content.subtitle)
+	case playerAudio:
+		key := state.ActiveAudio
+		if key == "" {
+			key = state.DefaultAudio
+		}
+		if key == "" && len(state.AudioTracks) > 0 {
+			key = state.AudioTracks[0].ID
+		}
+		v.State.Focus = playbackOptionID(panel, key)
 	case playerQuality:
 		key := state.Resolution.Plan.Quality
 		if !liveMode && state.Selected == "" {
@@ -255,6 +264,8 @@ func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item
 		title = text.Danmaku
 	case playerSubtitles:
 		title = text.Subtitles
+	case playerAudio:
+		title, current = text.AudioTrack, playbackAudioLabel(state)
 	case playerSpeed:
 		title, current = text.Speed, playbackRateLabel(p.host.Playback.Rate())
 	case playerQuality:
@@ -390,10 +401,35 @@ func (p *PageContext) playbackOptions(c *ui.Context, state app.PlaybackState) {
 			})
 		}
 	case playerSubtitles:
-		option("", text.Off, "", s.content.subtitle == "", func() { s.content.setSubtitle(v, provider.PlaybackTrack{}); s.closePanel(v) })
+		option("", text.Off, "", s.content.subtitle == "", func() {
+			s.content.subtitleChosen = true
+			s.content.setSubtitle(v, provider.PlaybackTrack{})
+			s.closePanel(v)
+		})
 		for _, track := range plan.Subtitles {
 			option(track.ID, track.Label, "", s.content.subtitle == track.ID, func() {
+				s.content.subtitleChosen = true
 				s.content.setSubtitle(v, track)
+				s.closePanel(v)
+			})
+		}
+	case playerAudio:
+		active := state.ActiveAudio
+		if active == "" {
+			active = state.DefaultAudio
+		}
+		for _, track := range state.AudioTracks {
+			trackID := track.ID
+			trackLabel := track.Label
+			note := ""
+			if trackID == state.DefaultAudio {
+				note = text.AudioDefault
+			}
+			selected := trackID == active
+			option(trackID, trackLabel, note, selected, func() {
+				if v.Playback.ChooseAudioTrack(trackID) {
+					s.content.notice(text.AudioTrack + " \u00b7 " + trackLabel)
+				}
 				s.closePanel(v)
 			})
 		}

@@ -37,8 +37,17 @@ type labels struct {
 	Creator                                                               creatorLabels
 	Detail                                                                detailLabels
 	Playback                                                              playbackLabels
+	PlaybackPrefs                                                         playbackSettingsLabels
 	Danmaku                                                               danmakuSettingsLabels
 	Modal                                                                 modalLabels
+}
+
+type playbackSettingsLabels struct {
+	Title, Intro                                          string
+	Quality, QualityNote, QualityAuto                     string
+	Speed                                                 string
+	Subtitles, SubtitlesOff, SubtitlesChinese, SubtitlesEnglish string
+	Autoplay, AutoplayNote                                string
 }
 
 type danmakuSettingsLabels struct {
@@ -128,6 +137,7 @@ type playbackLabels struct {
 	LiveChatConnecting, LiveChatReconnecting, LiveChatDisconnected, LiveChatEmpty, LiveChatGuest          string
 	LiveChatSendFailed, LiveChatRateLimited                                                               string
 	Interactive, BranchQuestion, BranchButton                                                             string
+	AudioTrack, AudioDefault                                                                              string
 }
 
 type playbackAccessLabels struct {

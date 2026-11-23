@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -164,15 +165,25 @@ type Media struct {
 	hlsPrefetchUntil time.Time
 	hlsLive          bool
 	cache            *segmentCache
-	tracks       []*dashTrack
-	bandwidthBps float64
-	primaryURLs  []string
-	lastURL      atomic.Pointer[string]
-	failure      atomic.Pointer[provider.ErrorCode]
-	speed        speedMeter
+	tracks           []*dashTrack
+	audioTracks      []provider.PlaybackTrack
+	audioOptionNames map[string]string
+	audioCodecs      map[string]string
+	defaultAudioID   string
+	activeAudioID    string
+	activeAudioName  string
+	bandwidthBps     float64
+	primaryURLs      []string
+	lastURL          atomic.Pointer[string]
+	failure          atomic.Pointer[provider.ErrorCode]
+	speed            speedMeter
 }
 
 func OpenMedia(ctx context.Context, playback provider.Playback) (*Media, error) {
+	return OpenMediaWithAudio(ctx, playback, "")
+}
+
+func OpenMediaWithAudio(ctx context.Context, playback provider.Playback, selectedAudioID string) (*Media, error) {
 	if playback.Transport == nil {
 		return nil, &provider.Error{Code: provider.Unsupported}
 	}
@@ -194,7 +205,7 @@ func OpenMedia(ctx context.Context, playback provider.Playback) (*Media, error) 
 		if len(playback.Plan.Streams) > 1 && stream.Format == provider.PlaybackHLS {
 			streamCtx, streamStop = context.WithTimeout(ctx, 4*time.Second)
 		}
-		name, err := m.prepareStream(streamCtx, stream)
+		name, err := m.prepareStream(streamCtx, stream, selectedAudioID)
 		if streamStop != nil {
 			streamStop()
 		}
@@ -315,7 +326,71 @@ func (m *Media) HasHealthyBackup() bool {
 	return reporter.HasHealthyAlternative(m.primaryURLs, current)
 }
 
-func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStream) (string, error) {
+func (m *Media) AudioTracks() []provider.PlaybackTrack {
+	if m == nil || len(m.audioTracks) == 0 {
+		return nil
+	}
+	return slices.Clone(m.audioTracks)
+}
+
+func (m *Media) DefaultAudioID() string {
+	if m == nil {
+		return ""
+	}
+	return m.defaultAudioID
+}
+
+func (m *Media) ActiveAudioID() string {
+	if m == nil {
+		return ""
+	}
+	return m.activeAudioID
+}
+
+func (m *Media) AudioOptionName(trackID string) (string, bool) {
+	if m == nil || len(m.audioOptionNames) == 0 {
+		return "", false
+	}
+	name, ok := m.audioOptionNames[trackID]
+	return name, ok
+}
+
+func (m *Media) CanSwitchAudioInPlace(fromID, toID string) bool {
+	if m == nil || fromID == "" || toID == "" {
+		return false
+	}
+	if _, ok := m.audioOptionNames[fromID]; !ok {
+		return false
+	}
+	if _, ok := m.audioOptionNames[toID]; !ok {
+		return false
+	}
+	return m.audioCodecs[fromID] != "" && m.audioCodecs[fromID] == m.audioCodecs[toID]
+}
+
+func supportedAudioCodec(codec string) bool {
+	c := strings.ToLower(strings.TrimSpace(codec))
+	if c == "" {
+		return true
+	}
+	return strings.HasPrefix(c, "mp4a.") || c == "ec-3" || c == "ac-3"
+}
+
+func audioCodecFamily(codec string) string {
+	c := strings.ToLower(strings.TrimSpace(codec))
+	switch {
+	case strings.HasPrefix(c, "mp4a."):
+		return "mp4a"
+	case c == "ec-3":
+		return "ec-3"
+	case c == "ac-3":
+		return "ac-3"
+	default:
+		return c
+	}
+}
+
+func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStream, selectedAudioID string) (string, error) {
 	switch stream.Format {
 	case provider.PlaybackDirect:
 		m.primaryURLs = stream.Video.Resource.URLs
@@ -341,23 +416,92 @@ func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStrea
 		if err != nil {
 			return "", err
 		}
-		audioTracks := stream.AudioTracks
-		if len(audioTracks) == 0 && stream.Audio != nil {
-			audioTracks = []provider.PlaybackTrack{*stream.Audio}
+		rawAudio := stream.AudioTracks
+		if len(rawAudio) == 0 && stream.Audio != nil {
+			rawAudio = []provider.PlaybackTrack{*stream.Audio}
 		}
-		audioFragments := make([][]fragment, len(audioTracks))
-		for i, track := range audioTracks {
-			fragments, _, _, _, err := m.readTrack(ctx, track, false)
-			if err != nil {
-				return "", err
+		candidates := make([]provider.PlaybackTrack, 0, len(rawAudio))
+		seenIDs := make(map[string]bool, len(rawAudio))
+		for i, track := range rawAudio {
+			if !supportedAudioCodec(track.Codec) {
+				continue
 			}
-			audioFragments[i] = fragments
+			track.ID = strings.TrimSpace(track.ID)
+			if track.ID == "" {
+				track.ID = fmt.Sprintf("audio-%d", i)
+			}
+			if seenIDs[track.ID] {
+				continue
+			}
+			seenIDs[track.ID] = true
+			track.Label = strings.TrimSpace(track.Label)
+			if track.Label == "" {
+				if len(candidates) == 0 {
+					track.Label = "Audio"
+				} else {
+					track.Label = fmt.Sprintf("Audio %d", len(candidates)+1)
+				}
+			}
+			candidates = append(candidates, track)
 		}
+		desiredIdx := 0
+		if selectedAudioID != "" {
+			if idx := slices.IndexFunc(candidates, func(t provider.PlaybackTrack) bool { return t.ID == selectedAudioID }); idx >= 0 {
+				desiredIdx = idx
+			}
+		} else if idx := slices.IndexFunc(candidates, func(t provider.PlaybackTrack) bool { return t.Default }); idx >= 0 {
+			desiredIdx = idx
+		}
+
+		type audioReadResult struct {
+			fragments []fragment
+			err       error
+		}
+		results := make([]audioReadResult, len(candidates))
+		if len(candidates) == 1 {
+			frags, _, _, _, rerr := m.readTrack(ctx, candidates[0], false)
+			results[0] = audioReadResult{fragments: frags, err: rerr}
+		} else if len(candidates) > 1 {
+			var wg sync.WaitGroup
+			for i, track := range candidates {
+				wg.Add(1)
+				go func(idx int, tr provider.PlaybackTrack) {
+					defer wg.Done()
+					frags, _, _, _, rerr := m.readTrack(ctx, tr, false)
+					results[idx] = audioReadResult{fragments: frags, err: rerr}
+				}(i, track)
+			}
+			wg.Wait()
+		}
+
+		audioTracks := make([]provider.PlaybackTrack, 0, len(candidates))
+		audioFragments := make([][]fragment, 0, len(candidates))
+		activeIdx := -1
+		for i, track := range candidates {
+			if results[i].err != nil {
+				if i == desiredIdx {
+					return "", results[i].err
+				}
+				continue
+			}
+			if i == desiredIdx {
+				activeIdx = len(audioTracks)
+			}
+			audioTracks = append(audioTracks, track)
+			audioFragments = append(audioFragments, results[i].fragments)
+		}
+		if len(candidates) > 0 && len(audioTracks) == 0 {
+			return "", results[desiredIdx].err
+		}
+		if activeIdx < 0 && len(audioTracks) > 0 {
+			activeIdx = 0
+		}
+
 		m.VideoRange = dynamicRange
 		m.primaryURLs = stream.Video.Resource.URLs
 		totalBandwidth := stream.Video.Bandwidth
-		if len(audioTracks) > 0 {
-			totalBandwidth += audioTracks[0].Bandwidth
+		if activeIdx >= 0 {
+			totalBandwidth += audioTracks[activeIdx].Bandwidth
 		}
 		m.bandwidthBps = float64(max(totalBandwidth, 0)) / 8.0
 		m.cache = newSegmentCache(dynamicRange == "PQ" || dynamicRange == "HLG")
@@ -367,13 +511,35 @@ func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStrea
 		videoTrack := newDashTrack(m.ctx, "video.mp4", stream.Video.Resource, "video/mp4", stream.Video.Bandwidth, true, *stream.Video.Init, video)
 		m.cache.seedInit(videoTrack, *stream.Video.Init, initData, initCR)
 		m.registerDashTrack(videoTrack)
+
+		activeFamily := ""
+		if activeIdx >= 0 {
+			activeFamily = audioCodecFamily(audioTracks[activeIdx].Codec)
+		}
+		m.audioTracks = audioTracks
+		m.audioCodecs = make(map[string]string, len(audioTracks))
 		for i, track := range audioTracks {
+			m.audioCodecs[track.ID] = audioCodecFamily(track.Codec)
+			if i == 0 || track.Default {
+				if m.defaultAudioID == "" || track.Default {
+					m.defaultAudioID = track.ID
+				}
+			}
+			if activeFamily != "" && audioCodecFamily(track.Codec) != activeFamily {
+				continue
+			}
 			playlistName, mediaName := audioNames(i)
+			if i == activeIdx {
+				m.activeAudioID = track.ID
+				m.activeAudioName = mediaName
+			}
 			m.registerPlaylist(playlistName, mediaPlaylist(mediaName, *track.Init, audioFragments[i], stream.Live))
 			audioTrack := newDashTrack(m.ctx, mediaName, track.Resource, "audio/mp4", track.Bandwidth, false, *track.Init, audioFragments[i])
 			m.registerDashTrack(audioTrack)
 		}
-		m.registerPlaylist("stream.m3u8", masterPlaylist(stream, audioTracks, dynamicRange))
+		playlistBody, optionNames := buildMasterPlaylist(stream, audioTracks, activeIdx, dynamicRange)
+		m.audioOptionNames = optionNames
+		m.registerPlaylist("stream.m3u8", playlistBody)
 		return "stream.m3u8", nil
 	}
 	return "", &provider.Error{Code: provider.Unsupported}
@@ -457,9 +623,14 @@ func mediaPlaylist(name string, init provider.PlaybackRange, fragments []fragmen
 	return text.String()
 }
 
-var codecName = regexp.MustCompile("^[A-Za-z0-9.]+$")
+var codecName = regexp.MustCompile("^[A-Za-z0-9.-]+$")
 
 func masterPlaylist(stream provider.PlaybackStream, audioTracks []provider.PlaybackTrack, dynamicRange string) string {
+	body, _ := buildMasterPlaylist(stream, audioTracks, 0, dynamicRange)
+	return body
+}
+
+func buildMasterPlaylist(stream provider.PlaybackStream, audioTracks []provider.PlaybackTrack, activeIdx int, dynamicRange string) (string, map[string]string) {
 	var text strings.Builder
 	text.WriteString("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n")
 	codecs := stream.Video.Codec
@@ -467,9 +638,21 @@ func masterPlaylist(stream provider.PlaybackStream, audioTracks []provider.Playb
 	if !codecName.MatchString(codecs) {
 		codecs = ""
 	}
+	if activeIdx < 0 || activeIdx >= len(audioTracks) {
+		activeIdx = 0
+	}
+	activeFamily := ""
+	if len(audioTracks) > 0 {
+		activeFamily = audioCodecFamily(audioTracks[activeIdx].Codec)
+	}
 	maxAudioBandwidth := 0
 	seenNames := make(map[string]int, len(audioTracks))
+	optionNames := make(map[string]string, len(audioTracks))
+	emittedAudio := 0
 	for i, sound := range audioTracks {
+		if activeFamily != "" && audioCodecFamily(sound.Codec) != activeFamily {
+			continue
+		}
 		playlistName, _ := audioNames(i)
 		name := strings.TrimSpace(sound.Label)
 		if name == "" {
@@ -483,8 +666,11 @@ func masterPlaylist(stream provider.PlaybackStream, audioTracks []provider.Playb
 		if seenNames[name] > 1 {
 			name = fmt.Sprintf("%s (%d)", name, seenNames[name])
 		}
+		if sound.ID != "" {
+			optionNames[sound.ID] = name
+		}
 		def := "NO"
-		if i == 0 {
+		if i == activeIdx {
 			def = "YES"
 			if codecName.MatchString(sound.Codec) {
 				if codecs != "" {
@@ -498,6 +684,7 @@ func masterPlaylist(stream provider.PlaybackStream, audioTracks []provider.Playb
 		}
 		fmt.Fprintf(&text, "#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=%q,DEFAULT=%s,AUTOSELECT=%s,URI=%q\n",
 			name, def, def, playlistName)
+		emittedAudio++
 	}
 	bandwidth += maxAudioBandwidth
 	fmt.Fprintf(&text, "#EXT-X-STREAM-INF:BANDWIDTH=%d,RESOLUTION=%dx%d,CODECS=%q,VIDEO-RANGE=%s",
@@ -505,11 +692,11 @@ func masterPlaylist(stream provider.PlaybackStream, audioTracks []provider.Playb
 	if stream.Video.FrameRate > 0 {
 		fmt.Fprintf(&text, ",FRAME-RATE=%.3f", stream.Video.FrameRate)
 	}
-	if len(audioTracks) > 0 {
+	if emittedAudio > 0 {
 		text.WriteString(",AUDIO=\"audio\"")
 	}
 	text.WriteString("\nvideo.m3u8\n")
-	return text.String()
+	return text.String(), optionNames
 }
 
 func (m *Media) registerPlaylist(name, body string) {

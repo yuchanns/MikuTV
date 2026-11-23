@@ -41,6 +41,7 @@ type danmakuNodeKey struct {
 
 type playbackContent struct {
 	subtitle               string
+	subtitleChosen         bool
 	subtitleQuery          context.CancelFunc
 	cues                   []provider.SubtitleCue
 	danmakuQuery           context.CancelFunc
@@ -106,7 +107,7 @@ func (s *playbackContent) clearTracks() {
 	if s.danmakuQuery != nil {
 		s.danmakuQuery()
 	}
-	s.subtitle, s.cues, s.subtitleQuery = "", nil, nil
+	s.subtitle, s.subtitleChosen, s.cues, s.subtitleQuery = "", false, nil, nil
 	s.danmakuQuery, s.danmaku, s.danmakuSegment = nil, nil, 0
 	s.danmakuGen++
 	s.danmakuSchedule = nil

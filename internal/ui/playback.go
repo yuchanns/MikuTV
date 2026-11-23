@@ -26,6 +26,7 @@ const (
 	playerFavorite     app.FocusID = "player/favorite"
 	playerDanmaku      app.FocusID = "player/danmaku"
 	playerSubtitles    app.FocusID = "player/subtitles"
+	playerAudio        app.FocusID = "player/audio"
 	playerQuality      app.FocusID = "player/quality"
 	playerLine         app.FocusID = "player/line"
 	playerLiveFollow   app.FocusID = "player/live-follow"
@@ -249,6 +250,9 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 	if setting, ok := v.Preferences.(app.HistorySyncStore); ok && owner != "" {
 		syncSource = setting.HistorySync(item.Ref.EntryID, owner)
 	}
+	if v.PlaybackSettings != nil {
+		v.Playback.SetPreferences(v.PlaybackSettings)
+	}
 	v.Playback.Start(provider.PlaybackTarget{Ref: item.Ref, PartID: part}, owner, syncSource, start)
 	if v.LiveChat != nil {
 		if item.Ref.Kind == provider.Live {
@@ -397,7 +401,8 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 	v.Playback.Tick(now)
 	state := v.Playback.State()
 	liveMode := isLivePlayback(state, s.current())
-	if !liveMode && state.Clock.Ended && state.Resolution.Plan.Access != provider.VideoAccessPreview &&
+	autoplay := v.playbackPreferences().Autoplay
+	if autoplay && !liveMode && state.Clock.Ended && state.Resolution.Plan.Access != provider.VideoAccessPreview &&
 		state.Failure == "" && !playbackHasAccessDialog(state) && !playbackHasBranchChoices(state) && !playbackAutoAdvancingBranch(state) &&
 		s.index+1 < len(s.items) && p.active && !s.content.overlay() {
 		s.panel, s.controlFocus = "", ""
@@ -406,7 +411,7 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 		v.State.Focus, v.reveal = playerToggle, true
 		state = v.Playback.State()
 	}
-	if !liveMode && state.Playing && state.Clock.HasFrame && !state.Loading && !state.Switching &&
+	if autoplay && !liveMode && state.Playing && state.Clock.HasFrame && !state.Loading && !state.Switching &&
 		!state.Clock.Buffering && !state.Clock.Ended && state.Failure == "" &&
 		state.Resolution.Plan.Access != provider.VideoAccessPreview &&
 		s.index+1 < len(s.items) && state.Duration >= 30 &&
@@ -626,11 +631,25 @@ func (s *playbackView) updatePlan(v *View, state app.PlaybackState) {
 			v.Playback.ChooseQuality(s.content.requestQuality)
 		}
 	}
+	plan := state.Resolution.Plan
+	if !isLivePlayback(state, s.current()) && !s.content.subtitleChosen && len(plan.Subtitles) > 0 {
+		if entry, ok := v.State.Current(); ok && entry.Capabilities.Has(provider.ReadSubtitles) {
+			s.content.subtitleChosen = true
+			if matched, found := app.MatchPreferredSubtitle(v.playbackPreferences().Subtitle, plan.Subtitles); found {
+				s.content.setSubtitle(v, matched)
+			}
+		}
+	}
+	if s.panel == playerAudio && len(state.AudioTracks) <= 1 {
+		s.panel = ""
+		if v.State.Focus == playerAudio || strings.HasPrefix(string(v.State.Focus), string(playerAudio)+"/") {
+			v.State.Focus, v.reveal = playerToggle, true
+		}
+	}
 	if s.keepQueue || state.Target.PartID == "" {
 		return
 	}
 	current := s.current()
-	plan := state.Resolution.Plan
 	if len(plan.Episodes) > 0 {
 		s.items, s.index = playbackEpisodes(current.item, plan.Episodes, state.Target.PartID, s.index)
 	} else if len(s.items) > 0 {
@@ -831,6 +850,9 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 				}
 				if entry.Capabilities.Has(provider.ReadSubtitles) && (len(state.Resolution.Plan.Subtitles) > 0 || s.content.subtitle != "") {
 					controls.playerButton(c, playerSubtitles, "captions", text.Subtitles, "", false, func() { s.openPanel(v, playerSubtitles) })
+				}
+				if len(state.AudioTracks) > 1 {
+					controls.playerButton(c, playerAudio, "", text.AudioTrack, text.AudioTrack, false, func() { s.openPanel(v, playerAudio) })
 				}
 				if len(state.Resolution.Plan.Qualities) > 0 || playbackQualityLabel(state) != "" {
 					controls.playerButton(c, playerQuality, "", text.Quality, playbackQualityLabel(state), false, func() { s.openPanel(v, playerQuality) })
@@ -1040,6 +1062,22 @@ func playbackQualityLabel(state app.PlaybackState) string {
 		if quality.ID == state.Resolution.Plan.Quality {
 			return quality.Label
 		}
+	}
+	return ""
+}
+
+func playbackAudioLabel(state app.PlaybackState) string {
+	active := state.ActiveAudio
+	if active == "" {
+		active = state.DefaultAudio
+	}
+	for _, track := range state.AudioTracks {
+		if track.ID == active {
+			return track.Label
+		}
+	}
+	if len(state.AudioTracks) > 0 {
+		return state.AudioTracks[0].Label
 	}
 	return ""
 }

@@ -37,6 +37,8 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		{Page: app.SeriesIndexFilter},
 		{Page: app.SearchFilters},
 		{Page: app.AccountPicker},
+		{Page: app.PlaybackSettingPicker, Section: "playback"},
+		{Page: app.DanmakuSettingPicker, Section: "danmaku"},
 		{Page: app.Licenses, Section: "about"},
 	}
 	for _, route := range drawerRoutes {
@@ -73,6 +75,7 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 	framelessRoutes := []app.Route{
 		{Page: app.VideoConfirm},
 		{Page: app.VideoCommentCompose},
+		{Page: app.DanmakuRuleEditor, Section: "danmaku"},
 		{Page: app.SignInQR},
 		{Page: app.SignOut},
 		{Page: app.AccountDetails},
