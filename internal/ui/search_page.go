@@ -198,7 +198,7 @@ func (searchPage) Render(c *ui.Context, p *PageContext) {
 
 	text, colors := p.Assets.Text.Search, p.Theme.Colors
 	ui.Column(c.Key("search-page")).FillWidth().Padding(0, 0, screenBottomInset, 0).
-		Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		ui.Box(c).Height(homeHeaderHeight)
 		ui.Column(c.Key("search-title")).FillWidth().Padding(48, searchRightPadding, 8, searchLeftPadding).Children(func() {
 			ui.Row(c).Height(22).Gap(15).AlignItems(ui.Center).Children(func() {

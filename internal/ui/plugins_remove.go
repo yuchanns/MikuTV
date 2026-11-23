@@ -43,7 +43,15 @@ func (v *View) enablePlugin(item app.InstalledPlugin) {
 		v.showSettingsFeedback(fmt.Sprintf(v.Assets.Text.Appearance.ThemeAppliedToast, item.Name))
 		return
 	}
-	v.showSettingsFeedback(fmt.Sprintf(l.EnabledToast, item.Name))
+	if item.Kind == plugin.LocaleKind {
+		name := item.NativeName
+		if name == "" {
+			name = item.Name
+		}
+		v.showSettingsFeedback(fmt.Sprintf(v.Assets.Text.Appearance.LanguageAppliedToast, name))
+		return
+	}
+	v.showSettingsFeedback(fmt.Sprintf(v.Assets.Text.Plugins.EnabledToast, item.Name))
 }
 
 func (v *View) confirmDisablePlugin() {
@@ -66,7 +74,7 @@ func (v *View) confirmDisablePlugin() {
 		return
 	}
 	v.State.Focus, v.reveal = pluginsDetailToggle, true
-	v.showSettingsFeedback(fmt.Sprintf(l.DisabledToast, item.Name))
+	v.showSettingsFeedback(fmt.Sprintf(v.Assets.Text.Plugins.DisabledToast, item.Name))
 }
 
 func (v *View) confirmRemovePlugin() {
@@ -95,7 +103,7 @@ func (v *View) confirmRemovePlugin() {
 	} else {
 		v.State.Focus, v.reveal = pluginsDiscoverBtn, true
 	}
-	v.showSettingsFeedback(fmt.Sprintf(l.RemovedToast, item.Name))
+	v.showSettingsFeedback(fmt.Sprintf(v.Assets.Text.Plugins.RemovedToast, item.Name))
 }
 
 type pluginDisableDialogPage struct{}
@@ -116,11 +124,14 @@ func (pluginDisableDialogPage) Render(c *ui.Context, p *PageContext) {
 	if item.Kind == plugin.ThemeKind {
 		body = l.ThemeDisableActiveBody
 		icon = "palette"
+	} else if item.Kind == plugin.LocaleKind {
+		body = l.LocaleDisableActiveBody
+		icon = "globe"
 	} else if p.State != nil && strings.EqualFold(p.State.CurrentEntry, item.ID) {
 		body += "\n" + l.DisableCurrentNote
 	}
 
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "PLUGINS \u00b7 DISABLE", icon, l.DisableDialogTitle, ctxLine)
 		ui.Text(c, body).FillWidth().Margin(22, 0, 0, 0).
 			FontSize(20).LineHeight(1.75).TextColor(paint(colors.Text.Secondary))
@@ -155,11 +166,17 @@ func (pluginRemoveDialogPage) Render(c *ui.Context, p *PageContext) {
 		} else {
 			body = l.ThemeRemoveInactiveBody
 		}
+	} else if item.Kind == plugin.LocaleKind {
+		if item.Enabled {
+			body = l.LocaleRemoveActiveBody
+		} else {
+			body = l.LocaleRemoveInactiveBody
+		}
 	} else if p.State != nil && strings.EqualFold(p.State.CurrentEntry, item.ID) {
 		body += "\n" + l.DisableCurrentNote
 	}
 
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "PLUGINS \u00b7 REMOVE", "trash", l.RemoveDialogTitle, ctxLine)
 		ui.Text(c, body).FillWidth().Margin(22, 0, 0, 0).
 			FontSize(20).LineHeight(1.75).TextColor(paint(colors.Text.Secondary))

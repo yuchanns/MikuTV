@@ -110,7 +110,7 @@ func (accountMessagesPage) Render(c *ui.Context, p *PageContext) {
 	p.region(noticeFiltersArea, filterEdges)
 	p.region(noticeRows, focusEdges{app.Up: {Focus: activeFilter}, app.Down: {Region: noticeFooter}})
 	p.region(noticeFooter, focusEdges{app.Up: {Focus: activeFilter}})
-	ui.Column(c.Key("messages")).FillWidth().Padding(0, 83, 60, 103).Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+	ui.Column(c.Key("messages")).FillWidth().Padding(0, 83, 60, 103).Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		ui.Box(c).FillWidth().Height(303).Children(func() {
 			p.messagesHeaderTabs(c, hasNotifications, hasPrivate, showingPrivate)
 			ui.Text(c, text.Messages).Absolute().Top(144).Left(0).FontSize(51).FontWeight(550).LetterSpacing(1)
@@ -406,7 +406,7 @@ func (accountNoticeDialog) Render(c *ui.Context, p *PageContext) {
 	entry, _ := p.State.Current()
 	canJumpCreator := !canJumpItem && row.Notice != nil && row.Notice.ActorID != "" && row.Notice.Actor != "" &&
 		entry.Capabilities.Has(provider.ReadCreator)
-	ui.Column(c).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "NOTIFICATION", "info", row.Title, meta)
 		ui.Scroll(c.Key("notice-content")).FillWidth().MaxHeight(360).Children(func() {
 			ui.Text(c, row.Subtitle).FontSize(22).LineHeight(1.85).TextColor(paint(colors.Text.Secondary))

@@ -250,7 +250,7 @@ func (videoCommentComposePage) Render(c *ui.Context, p *PageContext) {
 	text, colors := p.Assets.Text.Detail, p.Theme.Colors
 	account := p.videoCommentAccount()
 	p.region(region, nil)
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "DISCUSSION \u00b7 COMPOSE", "comment", draft.title, "")
 		ui.Row(c).Gap(15).AlignItems(ui.Center).Margin(0, 0, 24, 0).Children(func() {
 			p.videoCommentAvatar(c, account.Name, "", 40, p.host.avatarImage, true)

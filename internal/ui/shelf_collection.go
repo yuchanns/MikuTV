@@ -117,7 +117,7 @@ func (p *PageContext) renderShelfCollection(c *ui.Context, spec shelfCollectionS
 
 	ui.Column(c.Key("shelf-collection/"+spec.key)).FillWidth().
 		Padding(shelfCollectionHeaderHeight, 0, screenBottomInset, 0).
-		Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.shelfCollectionHeading(c, spec.backFocus, headerRegion, spec.title, countLabel)
 		ui.Box(c).Height(shelfCollectionGridGapTop)
 

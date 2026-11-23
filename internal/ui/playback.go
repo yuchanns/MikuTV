@@ -529,7 +529,7 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 	if access || contentModal || liveRoomOverlay {
 		backdropBlur = 28
 	}
-	player := ui.Box(c.Key("player")).Absolute().Top(0).Left(0).Fill().Clip().Lang("zh-CN").Font(videoDetailFont)
+	player := ui.Box(c.Key("player")).Absolute().Top(0).Left(0).Fill().Clip().Lang(p.langTag()).Font(p.uiFont())
 	// The player can decode the preview before the viewer chooses to watch it.
 	useOrigin := state.PreviewPending || !state.Clock.HasFrame &&
 		(state.Limit == provider.PlaybackRegion || playbackHasWorkRestriction(state))

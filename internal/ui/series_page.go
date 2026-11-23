@@ -138,7 +138,7 @@ func (seriesPage) Render(c *ui.Context, p *PageContext) {
 	p.prepareSeriesHubArtwork(snap, featured)
 	p.seriesHubRegions(snap, featured != nil)
 
-	ui.Box(c.Key("series-page")).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Box(c.Key("series-page")).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		if featured != nil && p.scroll().Y < seriesArtHeight {
 			p.seriesBackdrop(c, *featured)
 		}

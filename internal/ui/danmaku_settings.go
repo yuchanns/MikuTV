@@ -602,7 +602,7 @@ func (danmakuSettingPickerPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
 	title, choices := v.danmakuChoices(v.danmakuUI.pickerKind)
 	p.region("modal", nil)
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.drawerHeader(c, "DANMAKU \u00b7 PREFERENCES", title, "", "")
 		ui.Column(c).FillWidth().Grow(1).Children(func() {
 			for i, choice := range choices {
@@ -646,7 +646,7 @@ func (danmakuRuleEditorPage) Render(c *ui.Context, p *PageContext) {
 	p.region("modal-actions", focusEdges{
 		app.Up: {Focus: danmakuEditorField},
 	})
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "DANMAKU \u00b7 BLOCK RULE", "lock", l.AddRuleTitle, "")
 
 		// Kind tabs: 关键词 / 用户

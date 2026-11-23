@@ -17,8 +17,6 @@ import (
 type accountPage struct{}
 
 const (
-	accountLanguage   = "zh-CN"
-	accountFontFamily = "system-ui, PingFang SC"
 	accountTextStroke = 0.018
 	accountHeader     = "account-header"
 	accountProfile    = "account-profile"
@@ -49,7 +47,7 @@ func (accountPage) Render(c *ui.Context, p *PageContext) {
 	if subtitle == "" {
 		subtitle = entry.Name
 	}
-	ui.Box(c).FillWidth().Height(139).Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+	ui.Box(c).FillWidth().Height(139).Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		ui.Column(c).Padding(1, 0, 0, 0).Gap(20).Children(func() {
 			accountText(c, labels.AccountTitle, 54, paint(colors.Text.Primary)).Height(75).FontWeight(550).LetterSpacing(2)
 			accountText(c, subtitle, 22, paint(colors.Text.Muted)).LineHeight(1.7)
@@ -74,7 +72,7 @@ func (p *PageContext) guestAccount(c *ui.Context, entry app.Entry, snapshot app.
 	if title == "" {
 		title = p.Assets.Text.Nav[app.Account]
 	}
-	ui.Box(c.Key("account-guest")).FillWidth().Height(cardHeight).Lang(accountLanguage).Font(accountFontFamily).Radius(24).Clip().
+	ui.Box(c.Key("account-guest")).FillWidth().Height(cardHeight).Lang(p.langTag()).Font(p.uiFont()).Radius(24).Clip().
 		Border(1, paint(colors.Border.Subtle)).Background(base).Children(func() {
 		if artwork := p.Assets.AccountArtwork(entry.ID); artwork != nil {
 			artworkWidth := (p.Width - 186) * 0.63
@@ -118,7 +116,7 @@ func (p *PageContext) guestAccount(c *ui.Context, entry app.Entry, snapshot app.
 
 func (p *PageContext) connectedAccount(c *ui.Context, account provider.Account, snapshot app.AccountsSnapshot) {
 	p.accountFocusRegions()
-	ui.Column(c).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		ui.Row(c.Key("connected-account")).FillWidth().Gap(35).Children(func() {
 			p.accountProfile(c, account)
 			if account.Card.Title != "" {
@@ -434,7 +432,7 @@ func (accountDetails) Render(c *ui.Context, p *PageContext) {
 			p.State.Focus = app.CloseModal
 			p.host.reveal = true
 		}
-		ui.Column(c.Key("account-rights-basic")).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+		ui.Column(c.Key("account-rights-basic")).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 			p.framelessHeader(c, "ACCOUNT \u00b7 BENEFITS", "sparkles", card.Title, card.Status)
 			ui.Box(c).Height(18)
 			p.accountBenefits(c, card)
@@ -447,7 +445,7 @@ func (accountDetails) Render(c *ui.Context, p *PageContext) {
 	}
 
 	p.region(rightsActions, nil)
-	ui.Column(c.Key("account-rights-body")).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+	ui.Column(c.Key("account-rights-body")).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, details.Kicker, "sparkles", details.Title, details.Body)
 		if p.host.accountDetailsPhone {
 			ui.Box(c).Height(24)

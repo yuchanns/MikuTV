@@ -391,6 +391,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 				case app.PluginRepoInput, app.PluginInstallDialog, app.PluginUpdateDialog, app.PluginDisableDialog, app.PluginRemoveDialog:
 				default:
 					v.pluginsUI.returnToThemePicker = false
+					v.pluginsUI.returnToLanguagePicker = false
 				}
 			}
 		}
@@ -426,6 +427,14 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Leave: func(v *View) {
 				v.danmakuUI.draft.editing = false
 			},
+		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.LanguagePicker, Section: "appearance"},
+				Parent: app.Route{Page: app.Settings, Section: "appearance"},
+				Modal:  true, Initial: focus(languagePickerOptionID(app.LocaleModeSystem)),
+			},
+			Component: languagePickerPage{}, ModalPresentation: modalDrawer, ModalWidth: 620,
 		},
 		Registration{
 			Policy: app.RouteSpec{
@@ -562,6 +571,43 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 	var err error
 	p.Routes, err = app.NewRoutes(app.Route{Page: app.Home}, app.Route{Page: app.Entries}, policies)
 	return p, err
+}
+
+func (p *Pages) RefreshLabels(assets *Assets) {
+	if p == nil || assets == nil {
+		return
+	}
+	sectionNames := make(map[string]string, len(assets.Text.Sections))
+	for _, s := range assets.Text.Sections {
+		sectionNames[s.ID] = s.Name
+	}
+	for i := range p.ordered {
+		reg := p.ordered[i]
+		route := reg.Policy.Route
+		switch {
+		case route.Page == app.Settings && route.Section != "":
+			if name, ok := sectionNames[route.Section]; ok && name != "" {
+				reg.Title = name
+			}
+		case route.Page == app.Licenses:
+			if assets.Text.Licenses != "" {
+				reg.Title = assets.Text.Licenses
+			}
+		default:
+			if navTitle, ok := assets.Text.Nav[route.Page]; ok && navTitle != "" {
+				if reg.Title != "" {
+					reg.Title = navTitle
+				}
+				if reg.Navigation != nil {
+					navCopy := *reg.Navigation
+					navCopy.Title = navTitle
+					reg.Navigation = &navCopy
+				}
+			}
+		}
+		p.ordered[i] = reg
+		p.components[route] = reg
+	}
 }
 
 func (p *Pages) navigation(state *app.State, placement navPlacement) []Registration {

@@ -70,7 +70,13 @@ MikuTV 通过 GitHub Topic **`mikutv-plugin`**（或用户直接输入的 `owner
     "methods": ["qrCode"],
     "presentation": {
       "guestTitle": "扫码登录",
-      "guestSubtitle": "请使用手机客户端扫描二维码。"
+      "guestDescription": "请使用手机客户端扫描二维码。"
+    }
+  },
+  "locales": {
+    "en": {
+      "name": "Example Source",
+      "description": "Video catalog adapter."
     }
   },
   "capabilities": [
@@ -94,6 +100,7 @@ MikuTV 通过 GitHub Topic **`mikutv-plugin`**（或用户直接输入的 `owner
 在 `moejs` 运行时中，插件可使用标准 ES 模块语法、受域名白名单约束的 `fetch`，以及宿主提供的 `host` 全局对象（定义见 `internal/plugin/host.go`）：
 
 - `host.storage.get(key)` / `host.storage.set(key, value)` / `host.storage.delete(key)` — 插件专属持久化键值存储（**单插件总额 8 KiB**）。
+- `host.locale.current()` — 返回当前生效的规范化 BCP-47 语言标签（如 `"zh-Hans"`、`"en"`、`"ja"`），方便内容源插件按语言动态返回分区名、标题和接口参数。
 - `host.crypto.sha256(input)` — 返回小写十六进制 SHA-256 摘要。
 - `host.crypto.encryptRSAOAEP(base64SPKIDer, plaintext)` — 返回十六进制 RSA-OAEP-SHA256 密文。
 - `host.compress.inflateZlib(bytes)` — Zlib 解压（输出上限 4 MiB）。
@@ -169,21 +176,54 @@ MikuTV 通过 GitHub Topic **`mikutv-plugin`**（或用户直接输入的 `owner
 
 ---
 
-## 4. 给 AI 助手的开发与验收清单（Agent Workflow）
+## 4. 开发语言包插件（`kind: "locale"`）
+
+MikuTV 内置简体中文（`zh-Hans`）与英文（`en`）界面，并默认跟随 tvOS 系统语言。社区及官方语言包是纯声明式 JSON（`locale.json`，上限 256 KiB），由 Go 宿主直接热加载，不启动任何 JavaScript 运行时。
+
+### 语言包 `plugin.json` 示例
+
+```json
+{
+  "id": "mikutv-locale-ja",
+  "name": "Japanese (日本語)",
+  "description": "MikuTV 日语界面本地化语言包。",
+  "kind": "locale",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "minAppVersion": "0.1.0",
+  "license": "Apache-2.0",
+  "language": "ja",
+  "nativeName": "日本語",
+  "locale": "locale.json"
+}
+```
+
+### `locale.json` 规范（`internal/plugin/locale.go`）
+
+- `language`（位于 `plugin.json`）：规范 BCP-47 语言标签（如 `"ja"`、`"ko"`、`"zh-Hant"`、`"fr"`、`"es"`）。
+- `nativeName`（位于 `plugin.json`）：在 **设置 → 外观与动态 → 界面语言** 中展示的本语种名称（如 `"日本語"`、`"한국어"`、`"繁體中文"`）。
+- `locale.json`：直接对照 [`internal/ui/assets/labels.en.json`](../internal/ui/assets/labels.en.json) 的完整或稀疏 JSON 对象；未翻译的键自动回退至内置英文，设置侧栏的分组顺序与图标由宿主自动保留。
+- **零重启热切换与跟随系统**：安装后即可在设置中即时切换，在 **跟随系统** 模式下若 tvOS `NSLocale.preferredLanguages` 命中该 `language` 标签会自动生效。
+- 参考实现：[`yuchanns/mikutv-locale-ja`](https://github.com/yuchanns/mikutv-locale-ja)。
+
+---
+
+## 5. 给 AI 助手的开发与验收清单（Agent Workflow）
 
 当 AI 编程助手为用户开发 MikuTV 插件时，建议按以下闭环执行：
 
 1. **先读真实 Go 契约源码**：
-   - 清单与包结构校验：`internal/plugin/manifest.go`、`internal/plugin/package.go`、`internal/plugin/theme.go`
+   - 清单与包结构校验：`internal/plugin/manifest.go`、`internal/plugin/package.go`、`internal/plugin/theme.go`、`internal/plugin/locale.go`
    - Provider 数据结构：`internal/provider/*.go`
    - 主题令牌与对比度规则：`internal/theme/theme.go`、`internal/theme/parse.go`
+   - 界面文案基线键表：`internal/ui/assets/labels.en.json`
 2. **搭建独立插件仓库**：`plugin.json` 与 `LICENSE` 置于根目录；内容源插件仅使用纯 JS、受控 `fetch` 与 `host.*`（不依赖 Node.js 专属 API）。
 3. **从仓库根目录确定性打包 `plugin.zip`**（无外层目录、无软链接、无 `.git/`）：
    ```bash
    zip -r -X plugin.zip plugin.json LICENSE index.js  # 按实际文件列出
    ```
 4. **使用 MikuTV 的 Go 加载器实测校验**：
-   - 调用 `github.com/yuchanns/MikuTV/internal/plugin` 的 `InspectPackage`、`Open`（内容源）或 `OpenTheme`（主题），确认清单字段、域名白名单、对比度与导出函数全部通过。
+   - 调用 `github.com/yuchanns/MikuTV/internal/plugin` 的 `InspectPackage`、`Open`（内容源）、`OpenTheme`（主题）或 `OpenLocale`（语言包），确认清单字段、域名白名单、对比度、文案结构与导出函数全部通过。
    - 编写基于 Mock HTTP 夹具的自动化测试覆盖核心导出函数。
 5. **发布到 GitHub**：
    - 为仓库添加 Topic `mikutv-plugin`；

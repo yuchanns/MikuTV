@@ -75,3 +75,17 @@ func (p *PageContext) paintFocus() app.FocusID {
 }
 
 func (p *PageContext) scroll() *ui.ScrollState { return p.host.scrollFor(p.Location, p.active) }
+
+func (p *PageContext) langTag() string {
+	if p != nil && p.Assets != nil {
+		return p.Assets.LangTag()
+	}
+	return "zh-CN"
+}
+
+func (p *PageContext) uiFont() string {
+	if p != nil && p.Assets != nil {
+		return p.Assets.FontFamily()
+	}
+	return "system-ui, PingFang SC, Hiragino Sans"
+}

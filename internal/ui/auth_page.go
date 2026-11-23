@@ -215,7 +215,7 @@ func (accountPicker) Render(c *ui.Context, p *PageContext) {
 		}
 	}
 	listHeight := min(float32(max(count, 1))*96+8, 560)
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.drawerHeader(c, "PROFILE \u00b7 SWITCH", labels.Accounts, entryName, labels.AccountsNote)
 		ui.List(c.Key("saved-accounts"), list, count).FillWidth().Height(listHeight).
 			Padding(0, 0, 8, 0).Rows(func(item ui.ListRow) {
@@ -300,7 +300,7 @@ type signOutDialog struct{}
 func (signOutDialog) Render(c *ui.Context, p *PageContext) {
 	labels := p.Assets.Text.Auth
 	p.region("sign-out", nil)
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "ACCOUNT \u00b7 SIGN OUT", "user", labels.SignOutTitle, labels.SignOutNote)
 		ui.Row(c).Margin(40, 0, 0, 0).Gap(16).Children(func() {
 			p.styledButton(c, labels.SignOut, "", app.ConfirmExit, "sign-out", func() {

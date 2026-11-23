@@ -138,6 +138,8 @@ type Inspection struct {
 	NetworkPermissions []string
 	Capabilities       provider.Capabilities
 	Swatches           [6]theme.Color
+	Language           string
+	NativeName         string
 	Compatibility      Compatibility
 	Digest             [sha256.Size]byte
 }
@@ -165,6 +167,8 @@ type CatalogItem struct {
 	Manifest        Manifest        `json:"manifest"`
 	Permissions     []string        `json:"permissions,omitempty"`
 	Swatches        [6]theme.Color  `json:"swatches,omitempty"`
+	Language        string          `json:"language,omitempty"`
+	NativeName      string          `json:"nativeName,omitempty"`
 	Compatibility   Compatibility   `json:"compatibility"`
 }
 
@@ -267,6 +271,24 @@ func InspectPackage(data []byte, appVersion string) (Inspection, error) {
 			return result, nil
 		}
 		result.Swatches = pkg.Theme().Swatches()
+		result.Compatibility = Compatibility{Compatible: true, Code: CompatibleOK}
+		return result, nil
+	case LocaleKind:
+		pkg, err := OpenLocale(data, appVersion)
+		if err != nil {
+			code := IncompatibleManifest
+			if errors.Is(err, ErrIncompatible) {
+				code = IncompatibleProtocol
+			}
+			result.Compatibility = Compatibility{
+				Compatible: false,
+				Code:       code,
+				Detail:     err.Error(),
+			}
+			return result, nil
+		}
+		result.Language = pkg.Language()
+		result.NativeName = pkg.NativeName()
 		result.Compatibility = Compatibility{Compatible: true, Code: CompatibleOK}
 		return result, nil
 	default:
@@ -610,6 +632,8 @@ func (c *CatalogClient) inspectRepository(ctx context.Context, repo githubRepoEn
 		Manifest:        inspected.Manifest,
 		Permissions:     inspected.NetworkPermissions,
 		Swatches:        inspected.Swatches,
+		Language:        inspected.Language,
+		NativeName:      inspected.NativeName,
 		Compatibility:   inspected.Compatibility,
 	}
 	if cacheKey != "" {
@@ -733,6 +757,8 @@ func (c *CatalogClient) ResolveRepository(ctx context.Context, rawRepo string) (
 		Manifest:        inspected.Manifest,
 		Permissions:     inspected.NetworkPermissions,
 		Swatches:        inspected.Swatches,
+		Language:        inspected.Language,
+		NativeName:      inspected.NativeName,
 		Compatibility:   inspected.Compatibility,
 	}
 	if key := inspectCacheKey(item.Repository, asset.ReleaseID, asset.AssetID); key != "" {

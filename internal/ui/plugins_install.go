@@ -27,6 +27,7 @@ const (
 	pluginInstallRetryBtn          app.FocusID = "plugins/install/retry"
 	pluginInstallOpenEntryBtn      app.FocusID = "plugins/install/open-entry"
 	pluginInstallOpenAppearanceBtn app.FocusID = "plugins/install/open-appearance"
+	pluginInstallOpenLanguageBtn   app.FocusID = "plugins/install/open-language"
 
 	pluginRepoMaxLength = 120
 )
@@ -114,14 +115,22 @@ func (v *View) startPluginInstall() {
 			v.returnToAppearanceThemePicker(out.Receipt.ID)
 			return
 		}
+		if out.Receipt.Kind == plugin.LocaleKind && v.pluginsUI.returnToLanguagePicker {
+			v.State.Back()
+			v.returnToAppearanceLanguagePicker(out.Receipt.ID)
+			return
+		}
 		// Prepare the underlying settings page on Installed focused at the new plugin.
 		v.pluginsUI.view = pluginsViewInstalled
 		v.pluginsUI.selectedInstalledID = ""
 		v.pluginsUI.selectedCatalogRepo = ""
 		v.pluginsUI.returnFocus = pluginsInstalledFocus(out.Receipt.ID)
-		if out.Receipt.Kind == plugin.ThemeKind {
+		switch out.Receipt.Kind {
+		case plugin.ThemeKind:
 			v.State.Focus, v.reveal = pluginInstallOpenAppearanceBtn, true
-		} else {
+		case plugin.LocaleKind:
+			v.State.Focus, v.reveal = pluginInstallOpenLanguageBtn, true
+		default:
 			v.State.Focus, v.reveal = pluginInstallOpenEntryBtn, true
 		}
 	})
@@ -222,7 +231,7 @@ func (pluginRepoInputPage) Render(c *ui.Context, p *PageContext) {
 		app.Up: {Focus: pluginRepoField},
 	})
 
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "PLUGINS \u00b7 REPOSITORY", "repository", l.RepoDialogTitle, l.RepoFieldLabel)
 
 		if draft.editing {
@@ -334,7 +343,7 @@ func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 		ctxLine += " \u00b7 " + p.pluginKindLabel(st.item.Manifest.Kind) + " \u00b7 " + st.item.Manifest.Version
 	}
 
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		switch st.phase {
 		case pluginInstallConfirm:
 			body := ctxLine
@@ -347,6 +356,10 @@ func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 			if st.item.Manifest.Kind == plugin.ThemeKind {
 				p.framelessHeader(c, "PLUGINS \u00b7 INSTALL", "palette", l.InstallConfirmTitle, body)
 				ui.Text(c, l.ThemeInstallConfirmBody).FillWidth().Margin(24, 0, 0, 0).
+					FontSize(20).LineHeight(1.7).TextColor(paint(colors.Text.Secondary))
+			} else if st.item.Manifest.Kind == plugin.LocaleKind {
+				p.framelessHeader(c, "PLUGINS \u00b7 INSTALL", "globe", l.InstallConfirmTitle, body)
+				ui.Text(c, l.LocaleInstallConfirmBody).FillWidth().Margin(24, 0, 0, 0).
 					FontSize(20).LineHeight(1.7).TextColor(paint(colors.Text.Secondary))
 			} else {
 				p.framelessHeader(c, "PLUGINS \u00b7 INSTALL", "plus", l.InstallConfirmTitle, body)
@@ -417,9 +430,12 @@ func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 				name = st.item.Manifest.Name
 			}
 			isTheme := st.receipt.Kind == plugin.ThemeKind || st.item.Manifest.Kind == plugin.ThemeKind
+			isLocale := st.receipt.Kind == plugin.LocaleKind || st.item.Manifest.Kind == plugin.LocaleKind
 			body := name + "\n" + l.InstallSuccessBody
 			if isTheme {
 				body = name + "\n" + l.ThemeInstallSuccessBody
+			} else if isLocale {
+				body = name + "\n" + l.LocaleInstallSuccessBody
 			}
 			p.framelessHeader(c, "PLUGINS \u00b7 READY", "check", l.InstallSuccessTitle, body)
 			ui.Row(c.Key("plugin-install-actions")).Margin(36, 0, 0, 0).Gap(16).Children(func() {
@@ -428,6 +444,12 @@ func (pluginInstallDialogPage) Render(c *ui.Context, p *PageContext) {
 						newID := st.receipt.ID
 						p.State.Back()
 						v.returnToAppearanceThemePicker(newID)
+					}, p.framelessButtonAppearance())
+				} else if isLocale {
+					p.styledButton(c, l.ThemeOpenAppearance, "globe", pluginInstallOpenLanguageBtn, "plugin-install-actions", func() {
+						newID := st.receipt.ID
+						p.State.Back()
+						v.returnToAppearanceLanguagePicker(newID)
 					}, p.framelessButtonAppearance())
 				} else {
 					p.styledButton(c, l.InstallOpenEntries, "switch", pluginInstallOpenEntryBtn, "plugin-install-actions", func() {

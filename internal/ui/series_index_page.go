@@ -90,7 +90,7 @@ func (seriesIndexPage) Render(c *ui.Context, p *PageContext) {
 	p.prepareSeriesIndexArtwork(snap, scrollY)
 
 	ui.Column(c.Key("series-index-page")).FillWidth().Padding(seriesHeaderHeight, 0, screenBottomInset, 0).
-		Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.seriesSubpageHeading(c, seriesIndexBackFocus, seriesIndexHeaderRegion, text.Series.Index, text.Series.IndexNote)
 		p.seriesIndexFilterBar(c, snap)
 		ui.Row(c).FillWidth().Padding(42, 83, 25, 103).Gap(20).AlignItems(ui.Center).Children(func() {
@@ -417,7 +417,7 @@ func (seriesIndexFilterPage) Render(c *ui.Context, p *PageContext) {
 		eyebrow = "FILTER \u00b7 " + key
 	}
 	meta := fmt.Sprintf(modalText.CurrentPrefix, seriesActiveFilterLabel(group, curVal))
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.drawerHeader(c, eyebrow, group.Label, meta, p.Assets.Text.Series.IndexNote)
 		list := &p.host.series.filterList
 		list.Key = func(index int) any { return group.Options[index].Value }

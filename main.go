@@ -190,6 +190,7 @@ func main() {
 		}
 
 		var loadedThemes []*plugin.ThemePackage
+		var loadedLocales []*plugin.LocalePackage
 		buildThemeMetadata := func(pkg *plugin.ThemePackage, receipt plugin.InstalledReceipt) (app.AboutPlugin, app.InstalledPlugin) {
 			info := pkg.Manifest()
 			aboutPl := app.AboutPlugin{
@@ -221,6 +222,38 @@ func main() {
 			}
 			return aboutPl, installedPl
 		}
+		buildLocaleMetadata := func(pkg *plugin.LocalePackage, receipt plugin.InstalledReceipt) (app.AboutPlugin, app.InstalledPlugin) {
+			info := pkg.Manifest()
+			aboutPl := app.AboutPlugin{
+				ID:          info.ID,
+				Name:        info.Name,
+				Kind:        string(info.Kind),
+				Version:     info.Version,
+				Bundled:     false,
+				License:     info.License,
+				LicenseText: pkg.LicenseText(),
+			}
+			installedPl := app.InstalledPlugin{
+				ID:          info.ID,
+				Name:        info.Name,
+				Description: info.Description,
+				Kind:        info.Kind,
+				Version:     info.Version,
+				Repository:  receipt.Repository,
+				ReleaseID:   receipt.ReleaseID,
+				TagName:     receipt.TagName,
+				AssetID:     receipt.AssetID,
+				SHA256:      receipt.SHA256,
+				Bundled:     false,
+				Enabled:     false,
+				InstalledAt: receipt.InstalledAt,
+				UpdatedAt:   receipt.UpdatedAt,
+				License:     info.License,
+				Language:    pkg.Language(),
+				NativeName:  pkg.NativeName(),
+			}
+			return aboutPl, installedPl
+		}
 
 		externalPackages, missingReceipts, cachePurged, externalFailures := packageStore.LoadAllWithMissing(context.Background(), appVersion)
 		if cachePurged {
@@ -239,6 +272,14 @@ func main() {
 				aboutPl, installedPl := buildThemeMetadata(pkg.Theme, receipt)
 				mountedIDs[strings.ToLower(receipt.ID)] = true
 				loadedThemes = append(loadedThemes, pkg.Theme)
+				aboutPlugins = append(aboutPlugins, aboutPl)
+				installedPlugins = append(installedPlugins, installedPl)
+				continue
+			}
+			if pkg.Locale != nil {
+				aboutPl, installedPl := buildLocaleMetadata(pkg.Locale, receipt)
+				mountedIDs[strings.ToLower(receipt.ID)] = true
+				loadedLocales = append(loadedLocales, pkg.Locale)
 				aboutPlugins = append(aboutPlugins, aboutPl)
 				installedPlugins = append(installedPlugins, installedPl)
 				continue
@@ -294,6 +335,60 @@ func main() {
 		}
 		var view *tvui.View
 		var pluginCatalog *app.PluginCatalog
+		refreshEntryLocalizations := func(tag string) {
+			current := state.Entries()
+			if len(current) == 0 {
+				return
+			}
+			next := make([]app.Entry, len(current))
+			sourcesMu.RLock()
+			for i, entry := range current {
+				if src := sourcesByID[entry.SourceID]; src != nil {
+					name, desc, authPres, srcPres := src.LocalizedMetadata(tag)
+					entry.Name = name
+					entry.Description = desc
+					entry.Auth = authPres
+					entry.Presentation = srcPres
+				}
+				next[i] = entry
+			}
+			sourcesMu.RUnlock()
+			state.UpdateEntries(next)
+		}
+		systemLanguages := platform.PreferredLanguages()
+		localeSettings := app.NewLocaleSettings(
+			packageStore,
+			loadedLocales,
+			systemLanguages,
+			func(tag string, overrideJSON []byte) {
+				if view != nil {
+					if err := view.SetLocale(tag, overrideJSON); err != nil {
+						log.Printf("locale: apply %s failed: %v", tag, err)
+					}
+				} else {
+					if err := assets.ApplyLocale(tag, overrideJSON); err != nil {
+						log.Printf("locale: apply %s failed: %v", tag, err)
+					}
+					pages.RefreshLabels(assets)
+				}
+				refreshEntryLocalizations(tag)
+				catalog.Reload()
+			},
+			func(activeLocaleID string) {
+				if pluginCatalog != nil {
+					pluginCatalog.SyncActiveLocale(activeLocaleID)
+				}
+			},
+			invalidate,
+		)
+		plugin.SetHostLocaleProvider(localeSettings.ActiveTag)
+		initialLocaleTag, initialLocaleJSON := localeSettings.ActivePayload()
+		log.Printf("locale: preferred=%v active=%s", systemLanguages, initialLocaleTag)
+		if err := assets.ApplyLocale(initialLocaleTag, initialLocaleJSON); err != nil {
+			log.Printf("locale: initial apply %s failed: %v", initialLocaleTag, err)
+		}
+		pages.RefreshLabels(assets)
+		refreshEntryLocalizations(initialLocaleTag)
 		appearance := app.NewAppearanceSettings(
 			packageStore,
 			loadedThemes,
@@ -327,9 +422,13 @@ func main() {
 			})
 		}
 		activeThemeID := appearance.ActiveThemeID()
+		activeLocaleID := localeSettings.ActiveID()
 		for i := range installedPlugins {
-			if installedPlugins[i].Kind == plugin.ThemeKind {
+			switch installedPlugins[i].Kind {
+			case plugin.ThemeKind:
 				installedPlugins[i].Enabled = !theme.IsBuiltin(activeThemeID) && strings.EqualFold(installedPlugins[i].ID, activeThemeID)
+			case plugin.LocaleKind:
+				installedPlugins[i].Enabled = strings.EqualFold(installedPlugins[i].ID, activeLocaleID)
 			}
 		}
 		pluginCatalog = app.NewPluginCatalog(
@@ -369,6 +468,11 @@ func main() {
 			if err != nil {
 				return err
 			}
+			name, desc, authPres, srcPres := source.LocalizedMetadata(localeSettings.ActiveTag())
+			entry.Name = name
+			entry.Description = desc
+			entry.Auth = authPres
+			entry.Presentation = srcPres
 			if receipt.Enabled {
 				current := state.Entries()
 				next := make([]app.Entry, 0, len(current)+1)
@@ -396,6 +500,12 @@ func main() {
 			if pkg.Theme != nil {
 				aboutPl, _ := buildThemeMetadata(pkg.Theme, pkg.Receipt)
 				appearance.RegisterTheme(pkg.Theme)
+				upsertAboutPlugin(aboutPl)
+				return nil
+			}
+			if pkg.Locale != nil {
+				aboutPl, _ := buildLocaleMetadata(pkg.Locale, pkg.Receipt)
+				localeSettings.RegisterLocale(pkg.Locale)
 				upsertAboutPlugin(aboutPl)
 				return nil
 			}
@@ -453,6 +563,14 @@ func main() {
 					return err
 				}
 				aboutPl, _ := buildThemeMetadata(themePkg, receipt)
+				upsertAboutPlugin(aboutPl)
+				return nil
+			},
+			ApplyLocaleUpdate: func(localePkg *plugin.LocalePackage, receipt plugin.InstalledReceipt) error {
+				if err := localeSettings.UpdateLocale(localePkg); err != nil {
+					return err
+				}
+				aboutPl, _ := buildLocaleMetadata(localePkg, receipt)
 				upsertAboutPlugin(aboutPl)
 				return nil
 			},
@@ -527,6 +645,16 @@ func main() {
 				appearance.RemoveTheme(pluginID)
 				removeAboutPlugin(pluginID)
 			},
+			EnableLocale: func(pluginID string) error {
+				return localeSettings.Select(pluginID)
+			},
+			DisableLocale: func(pluginID string) {
+				localeSettings.DisableLocale(pluginID)
+			},
+			RemoveLocale: func(pluginID string) {
+				localeSettings.RemoveLocale(pluginID)
+				removeAboutPlugin(pluginID)
+			},
 		})
 		auth = app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
 			catalog.Reload()
@@ -537,7 +665,7 @@ func main() {
 			}
 		}, func() { view.PromptSignIn() })
 		auth.SetCleaner(preferences)
-		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, PrivateMessages: privateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, Appearance: appearance, PluginCatalog: pluginCatalog, Pages: pages, Assets: assets,
+		view = tvui.NewView(tvui.Options{State: state, Catalog: catalog, Search: search, Following: following, Series: series, Live: live, LiveChat: liveChat, Auth: auth, Activity: activity, PrivateMessages: privateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, Appearance: appearance, Locale: localeSettings, PluginCatalog: pluginCatalog, Pages: pages, Assets: assets,
 			Preferences: preferences, Theme: appearance.ActiveTheme(), Version: appVersion,
 			About: app.AboutInfo{Version: appVersion, Build: appBuild, Commit: appCommit, Plugins: aboutPlugins, Dependencies: aboutDeps},
 			TopShelf: topShelfStore})
@@ -586,6 +714,13 @@ func main() {
 					upsertAboutPlugin(aboutPl)
 					return nil
 				}
+				if pkg.Locale != nil {
+					aboutPl, _ := buildLocaleMetadata(pkg.Locale, pkg.Receipt)
+					localeSettings.RegisterLocale(pkg.Locale)
+					localeSettings.ReapplyStoredLocale()
+					upsertAboutPlugin(aboutPl)
+					return nil
+				}
 				if pkg.Source != nil {
 					if err := upsertRuntimeSource(pkg.Source, pkg.Receipt, false); err != nil {
 						return err
@@ -597,6 +732,7 @@ func main() {
 			}, func(restored, failed int) {
 				log.Printf("plugin recovery: finished restored=%d failed=%d", restored, failed)
 				appearance.ReapplyStoredThemes()
+				localeSettings.ReapplyStoredLocale()
 				view.SyncEntry()
 			})
 		}

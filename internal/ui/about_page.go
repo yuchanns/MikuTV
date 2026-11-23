@@ -141,7 +141,7 @@ func (aboutProjectPage) Render(c *ui.Context, p *PageContext) {
 	info := p.resolvedAboutInfo()
 	about, colors := p.Assets.Text.About, p.Theme.Colors
 	p.region("about-project", nil)
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "ABOUT \u00b7 PROJECT", "info", about.ProjectHome, about.ProjectBody)
 		ui.Row(c).Margin(32, 0, 0, 0).Gap(34).AlignItems(ui.Center).Children(func() {
 			if qr := p.host.projectQRCode(info.ProjectURL); qr != nil {

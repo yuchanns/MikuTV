@@ -29,6 +29,7 @@ const (
 	pluginsFilterAll       app.FocusID = "settings/plugins/filter/all"
 	pluginsFilterSource    app.FocusID = "settings/plugins/filter/source"
 	pluginsFilterTheme     app.FocusID = "settings/plugins/filter/theme"
+	pluginsFilterLocale    app.FocusID = "settings/plugins/filter/locale"
 	pluginsRetryBtn        app.FocusID = "settings/plugins/retry"
 	pluginsEmptyAddRepoBtn app.FocusID = "settings/plugins/empty-add-repo"
 	pluginsEmptyExitBtn    app.FocusID = "settings/plugins/empty-exit"
@@ -63,9 +64,10 @@ type pluginsSettingsUI struct {
 	editing              bool
 	listScroll           float32
 	pendingRestoreScroll bool
-	returnFocus          app.FocusID
-	returnToThemePicker  bool
-	repo                 pluginRepoDraft
+	returnFocus            app.FocusID
+	returnToThemePicker    bool
+	returnToLanguagePicker bool
+	repo                   pluginRepoDraft
 	install              pluginInstallState
 	update               pluginUpdateState
 	pendingAction        app.InstalledPlugin
@@ -92,6 +94,10 @@ func (v *View) backFromPluginsSettings() bool {
 	if s.view == pluginsViewDiscover {
 		if s.returnToThemePicker {
 			v.returnToAppearanceThemePicker("")
+			return true
+		}
+		if s.returnToLanguagePicker {
+			v.returnToAppearanceLanguagePicker("")
 			return true
 		}
 		s.view = pluginsViewInstalled
@@ -216,6 +222,7 @@ func (p *PageContext) renderPluginsInstalled(c *ui.Context) {
 			p.styledButton(c, l.DiscoverButton, "search", pluginsDiscoverBtn, "plugins-toolbar", func() {
 				v.pluginsUI.view = pluginsViewDiscover
 				v.pluginsUI.returnToThemePicker = false
+				v.pluginsUI.returnToLanguagePicker = false
 				v.pluginsUI.selectedInstalledID = ""
 				v.pluginsUI.selectedCatalogRepo = ""
 				if v.PluginCatalog != nil {
@@ -328,12 +335,18 @@ func (p *PageContext) renderPluginsDiscover(c *ui.Context) {
 	backLabel := l.BackInstalled
 	if s.returnToThemePicker {
 		backLabel = l.BackThemePicker
+	} else if s.returnToLanguagePicker {
+		backLabel = l.BackLanguagePicker
 	}
 	ui.Row(c.Key("plugins-discover-top")).FillWidth().AlignItems(ui.Center).Justify(ui.SpaceBetween).Margin(0, 0, 22, 0).Children(func() {
 		p.pluginBackButton(c, backLabel, "plugins-top", func() {
 			s.editing = false
 			if s.returnToThemePicker {
 				v.returnToAppearanceThemePicker("")
+				return
+			}
+			if s.returnToLanguagePicker {
+				v.returnToAppearanceLanguagePicker("")
 				return
 			}
 			s.view = pluginsViewInstalled
@@ -578,6 +591,7 @@ func (p *PageContext) renderPluginKindTabs(c *ui.Context) {
 		{"", pluginsFilterAll, l.FilterAll},
 		{plugin.SourceKind, pluginsFilterSource, l.FilterSource},
 		{plugin.ThemeKind, pluginsFilterTheme, l.FilterTheme},
+		{plugin.LocaleKind, pluginsFilterLocale, l.FilterLocale},
 	}
 
 	ui.Row(c.Key("plugins-kind-tabs")).Gap(24).Margin(0, 0, 24, 0).AlignItems(ui.Center).Children(func() {
@@ -642,17 +656,27 @@ func (p *PageContext) renderInstalledPluginDetail(c *ui.Context, item app.Instal
 
 	toggleIcon := "plug"
 	toggleNote := l.EnableReadyNote
-	if item.Kind == plugin.ThemeKind {
+	switch item.Kind {
+	case plugin.ThemeKind:
 		toggleIcon = "palette"
 		if item.Enabled {
 			toggleNote = l.ThemeEnableActiveNote
 		} else {
 			toggleNote = l.ThemeEnableReadyNote
 		}
-	} else if !item.Enabled {
-		toggleNote = l.EnableDisabledNote
-	} else if p.State != nil && p.State.CurrentEntry == item.ID {
-		toggleNote = l.EnableCurrentNote
+	case plugin.LocaleKind:
+		toggleIcon = "globe"
+		if item.Enabled {
+			toggleNote = l.LocaleEnableActiveNote
+		} else {
+			toggleNote = l.LocaleEnableReadyNote
+		}
+	default:
+		if !item.Enabled {
+			toggleNote = l.EnableDisabledNote
+		} else if p.State != nil && p.State.CurrentEntry == item.ID {
+			toggleNote = l.EnableCurrentNote
+		}
 	}
 	instItem := item
 	p.danmakuToggleRow(c, pluginsDetailToggle, toggleIcon, l.EnableLabel, toggleNote, item.Enabled, func() {
@@ -692,8 +716,11 @@ func (p *PageContext) renderInstalledPluginDetail(c *ui.Context, item app.Instal
 
 	if !item.Bundled {
 		removeNote := l.RemoveNote
-		if item.Kind == plugin.ThemeKind {
+		switch item.Kind {
+		case plugin.ThemeKind:
 			removeNote = l.ThemeRemoveNote
+		case plugin.LocaleKind:
+			removeNote = l.LocaleRemoveNote
 		}
 		p.pluginRow(c, pluginsDetailRemove, "content", "trash", l.RemoveLabel, removeNote, "", func() {
 			v.openPluginRemoveDialog(instItem)
@@ -754,8 +781,11 @@ func (p *PageContext) renderCatalogPluginDetail(c *ui.Context, item plugin.Catal
 
 	if item.Compatibility.Compatible {
 		installNote := l.InstallNote
-		if item.Manifest.Kind == plugin.ThemeKind {
+		switch item.Manifest.Kind {
+		case plugin.ThemeKind:
 			installNote = l.ThemeInstallNote
+		case plugin.LocaleKind:
+			installNote = l.LocaleInstallNote
 		}
 		p.pluginRow(c, pluginsDetailInstall, "content", "plus", l.InstallLabel, installNote, "", func() {
 			v.openPluginInstallConfirm(item)
@@ -891,6 +921,8 @@ func (p *PageContext) pluginFilterFocus(kind plugin.Kind) app.FocusID {
 		return pluginsFilterSource
 	case plugin.ThemeKind:
 		return pluginsFilterTheme
+	case plugin.LocaleKind:
+		return pluginsFilterLocale
 	default:
 		return pluginsFilterAll
 	}
@@ -900,6 +932,8 @@ func (p *PageContext) pluginKindIcon(kind plugin.Kind) string {
 	switch kind {
 	case plugin.ThemeKind:
 		return "palette"
+	case plugin.LocaleKind:
+		return "globe"
 	case plugin.SourceKind:
 		return "tv"
 	default:
@@ -914,6 +948,8 @@ func (p *PageContext) pluginKindLabel(kind plugin.Kind) string {
 		return l.KindSource
 	case plugin.ThemeKind:
 		return l.KindTheme
+	case plugin.LocaleKind:
+		return l.KindLocale
 	default:
 		return l.KindUnknown
 	}
@@ -941,6 +977,12 @@ func (p *PageContext) installedPluginStatus(item app.InstalledPlugin) string {
 	if item.Kind == plugin.ThemeKind {
 		if item.Enabled {
 			return l.StatusCurrentTheme
+		}
+		return l.StatusInstalled
+	}
+	if item.Kind == plugin.LocaleKind {
+		if item.Enabled {
+			return l.StatusCurrentLocale
 		}
 		return l.StatusInstalled
 	}

@@ -94,6 +94,31 @@ func (s *Storage) delete(key string) error {
 	return err
 }
 
+var (
+	hostLocaleMu sync.RWMutex
+	hostLocaleFn func() string
+)
+
+// SetHostLocaleProvider registers a callback returning the host's currently
+// active BCP-47 language tag (e.g. "zh-Hans", "en", "ja") for host.locale.current().
+func SetHostLocaleProvider(fn func() string) {
+	hostLocaleMu.Lock()
+	hostLocaleFn = fn
+	hostLocaleMu.Unlock()
+}
+
+func currentHostLocale() string {
+	hostLocaleMu.RLock()
+	fn := hostLocaleFn
+	hostLocaleMu.RUnlock()
+	if fn != nil {
+		if tag := NormalizeLocaleTag(fn()); tag != "" {
+			return tag
+		}
+	}
+	return "zh-Hans"
+}
+
 func installHost(ctx context.Context, rt *moejs.Runtime, store *Storage, extra ...map[string]any) error {
 	var extras map[string]any
 	if len(extra) > 0 {
@@ -174,10 +199,17 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, ext
 		}
 		return rt.FromGo(out)
 	})
+	currentLocale := rt.Function("current", 0, func(_ *moejs.Realm, _ moejs.Value, _ []moejs.Value) (moejs.Value, error) {
+		if err := ctx.Err(); err != nil {
+			return moejs.Undefined(), err
+		}
+		return rt.FromGo(currentHostLocale())
+	})
 	hostObj := map[string]any{
 		"storage":  map[string]any{"get": get, "set": set, "delete": remove},
 		"crypto":   map[string]any{"sha256": digest, "encryptRSAOAEP": encrypt},
 		"compress": map[string]any{"inflateZlib": inflateZlib},
+		"locale":   map[string]any{"current": currentLocale},
 	}
 	for k, v := range extra {
 		hostObj[k] = v

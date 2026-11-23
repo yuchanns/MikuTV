@@ -5,9 +5,11 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/plugin"
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
@@ -55,11 +57,12 @@ type pluginLabels struct {
 	DiscoverTitle, DiscoverNote                     string
 	OfflineCachedNote, RateLimitedCachedNote        string
 	SearchPlaceholder                               string
-	FilterAll, FilterSource, FilterTheme            string
-	KindSource, KindTheme, KindUnknown              string
-	BuiltinTag, BuiltinRepo, BuiltinUpdateNote      string
-	StatusCurrentEntry, StatusEnabled, StatusOff    string
-	StatusCurrentTheme, StatusInstalled             string
+	FilterAll, FilterSource, FilterTheme, FilterLocale string
+	KindSource, KindTheme, KindLocale, KindUnknown     string
+	BuiltinTag, BuiltinRepo, BuiltinUpdateNote         string
+	StatusCurrentEntry, StatusEnabled, StatusOff       string
+	StatusCurrentTheme, StatusCurrentLocale            string
+	StatusInstalled                                    string
 	StatusUninstalled, StatusNeedAppUpdate          string
 	StatusThemeUnavailable, StatusIncompatible      string
 	EnableLabel, EnableCurrentNote, EnableReadyNote string
@@ -114,12 +117,25 @@ type pluginLabels struct {
 	ThemeUpdateConfirmBody, ThemeRemoveNote         string
 	ThemeRemoveActiveBody, ThemeRemoveInactiveBody  string
 	ThemeDisableActiveBody                          string
+	LocaleEnableActiveNote, LocaleEnableReadyNote   string
+	LocaleInstallNote, LocaleInstallConfirmBody     string
+	LocaleInstallSuccessBody, LocaleUpdateConfirmBody string
+	LocaleRemoveNote, LocaleRemoveActiveBody        string
+	LocaleRemoveInactiveBody, LocaleDisableActiveBody string
+	BackLanguagePicker                              string
 	RecoveryBannerStarting, RecoveryBannerRunning   string
 	RecoveryBannerDone, RecoveryBannerPartial       string
 }
 
 type appearanceSettingsLabels struct {
 	Title, Intro                                    string
+	LanguageLabel                                   string
+	LanguageSystem, LanguageSystemNote              string
+	LanguageCustomNote                              string
+	LanguagePickerTitle, LanguagePickerSubtitle     string
+	LanguageBuiltinNote, LanguagePluginNote         string
+	LanguageBuiltinOnlyHint, DiscoverMoreLanguages  string
+	LanguageAppliedToast                            string
 	ModeLabel                                       string
 	ModeSystem, ModeLight, ModeDark                 string
 	ModeSystemNote, ModeLightNote, ModeDarkNote     string
@@ -150,7 +166,7 @@ type topShelfLabels struct {
 
 type aboutLabels struct {
 	Plugins, NoPlugins, PluginsMore, Bundled, External string
-	KindSource, KindTheme                              string
+	KindSource, KindTheme, KindLocale                  string
 	ProjectHome, ProjectBody                           string
 	LicenseSummary                                     string
 	LicenseBuildHeader, LicensePluginsHeader           string
@@ -342,22 +358,37 @@ type authLabels struct {
 
 type Assets struct {
 	Text         labels
+	LocaleTag    string
 	Brand        ui.ImageSource
 	AboutArtwork ui.ImageSource
 	License      string
+	baseZH       []byte
+	baseEN       []byte
+	baseSections []section
 	icons        map[string]*ui.SVG
 	images       map[string]ui.ImageSource
 }
 
 func LoadAssets() (*Assets, error) {
-	a := &Assets{icons: make(map[string]*ui.SVG), images: make(map[string]ui.ImageSource)}
+	a := &Assets{
+		LocaleTag: app.LocaleBuiltinZH,
+		icons:     make(map[string]*ui.SVG),
+		images:    make(map[string]ui.ImageSource),
+	}
 	text, err := files.ReadFile("assets/labels.json")
 	if err != nil {
 		return nil, err
 	}
+	enText, err := files.ReadFile("assets/labels.en.json")
+	if err != nil {
+		return nil, err
+	}
+	a.baseZH = text
+	a.baseEN = enText
 	if err := json.Unmarshal(text, &a.Text); err != nil {
 		return nil, fmt.Errorf("decode labels: %w", err)
 	}
+	a.baseSections = append([]section(nil), a.Text.Sections...)
 	icons, err := files.ReadDir("assets/icons")
 	if err != nil {
 		return nil, err
@@ -450,4 +481,119 @@ func (a *Assets) Icon(name string) *ui.SVG {
 
 func (a *Assets) Artwork(path string) ui.ImageSource {
 	return a.images[path]
+}
+
+// LangTag returns the BCP-47 shaping tag for UI text rendering.
+func (a *Assets) LangTag() string {
+	if a == nil || a.LocaleTag == "" || strings.EqualFold(a.LocaleTag, app.LocaleBuiltinZH) {
+		return "zh-CN"
+	}
+	return a.LocaleTag
+}
+
+// FontFamily selects the system UI font stack with script-appropriate CJK priority.
+func (a *Assets) FontFamily() string {
+	if a != nil && strings.HasPrefix(strings.ToLower(a.LocaleTag), "ja") {
+		return "system-ui, Hiragino Sans, PingFang SC"
+	}
+	return "system-ui, PingFang SC, Hiragino Sans"
+}
+
+// ApplyLocale hot-swaps UI strings to a built-in language ("zh-Hans" / "en")
+// or overlays a declarative kind:"locale" plugin JSON payload on top of English.
+func (a *Assets) ApplyLocale(tag string, overrideJSON []byte) error {
+	if a == nil {
+		return nil
+	}
+	normalized := plugin.NormalizeLocaleTag(tag)
+	if normalized == "" {
+		normalized = app.LocaleBuiltinZH
+	}
+	var next labels
+	if len(bytes.TrimSpace(overrideJSON)) > 0 {
+		merged, err := mergeLocaleJSON(a.baseEN, overrideJSON)
+		if err != nil {
+			return fmt.Errorf("merge locale %s: %w", normalized, err)
+		}
+		if err := json.Unmarshal(merged, &next); err != nil {
+			return fmt.Errorf("decode merged locale %s: %w", normalized, err)
+		}
+	} else if strings.HasPrefix(strings.ToLower(normalized), "en") {
+		if err := json.Unmarshal(a.baseEN, &next); err != nil {
+			return fmt.Errorf("decode en labels: %w", err)
+		}
+	} else {
+		if err := json.Unmarshal(a.baseZH, &next); err != nil {
+			return fmt.Errorf("decode zh labels: %w", err)
+		}
+	}
+	next.Sections = normalizeLocaleSections(a.baseSections, next.Sections)
+	a.Text = next
+	a.LocaleTag = normalized
+	return nil
+}
+
+func mergeLocaleJSON(baseJSON, overrideJSON []byte) ([]byte, error) {
+	var baseObj map[string]any
+	if err := json.Unmarshal(baseJSON, &baseObj); err != nil {
+		return nil, err
+	}
+	var overObj map[string]any
+	if err := json.Unmarshal(overrideJSON, &overObj); err != nil {
+		return nil, err
+	}
+	deepMergeLocaleMap(baseObj, overObj)
+	return json.Marshal(baseObj)
+}
+
+func deepMergeLocaleMap(dst, src map[string]any) {
+	for k, v := range src {
+		if v == nil {
+			continue
+		}
+		if s, ok := v.(string); ok {
+			if strings.TrimSpace(s) == "" {
+				continue
+			}
+			dst[k] = s
+			continue
+		}
+		if srcMap, ok := v.(map[string]any); ok {
+			if dstMap, exists := dst[k].(map[string]any); exists {
+				deepMergeLocaleMap(dstMap, srcMap)
+				continue
+			}
+			dst[k] = srcMap
+			continue
+		}
+		if srcSlice, ok := v.([]any); ok {
+			if len(srcSlice) > 0 {
+				dst[k] = srcSlice
+			}
+			continue
+		}
+		dst[k] = v
+	}
+}
+
+func normalizeLocaleSections(canonical, translated []section) []section {
+	if len(canonical) == 0 {
+		return translated
+	}
+	byID := make(map[string]string, len(translated))
+	for _, s := range translated {
+		id := strings.ToLower(strings.TrimSpace(s.ID))
+		name := strings.TrimSpace(s.Name)
+		if id != "" && name != "" {
+			byID[id] = name
+		}
+	}
+	out := make([]section, len(canonical))
+	for i, base := range canonical {
+		out[i] = base
+		if name, ok := byID[strings.ToLower(strings.TrimSpace(base.ID))]; ok {
+			out[i].Name = name
+		}
+	}
+	return out
 }

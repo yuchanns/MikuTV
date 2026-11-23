@@ -198,7 +198,7 @@ func (pluginUpdateDialogPage) Render(c *ui.Context, p *PageContext) {
 		versionLine += " \u00b7 " + st.installed.Version + " \u2192 " + st.offer.Item.Manifest.Version
 	}
 
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		switch st.phase {
 		case pluginUpdateConfirm:
 			body := versionLine
@@ -220,6 +220,10 @@ func (pluginUpdateDialogPage) Render(c *ui.Context, p *PageContext) {
 			if st.installed.Kind == plugin.ThemeKind {
 				expanded = false
 				ui.Text(c, l.ThemeUpdateConfirmBody).FillWidth().Margin(24, 0, 0, 0).
+					FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))
+			} else if st.installed.Kind == plugin.LocaleKind {
+				expanded = false
+				ui.Text(c, l.LocaleUpdateConfirmBody).FillWidth().Margin(24, 0, 0, 0).
 					FontSize(19).LineHeight(1.6).TextColor(paint(colors.Text.Secondary))
 			} else if expanded && len(domains) > 0 {
 				ui.Text(c, l.InstallPermissionsIntro).FillWidth().Margin(24, 0, 14, 0).

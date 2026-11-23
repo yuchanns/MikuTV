@@ -624,7 +624,7 @@ func (creatorPage) Render(c *ui.Context, p *PageContext) {
 	p.region(creatorTabsRegion, focusEdges{app.Up: {Focus: headerFocus}})
 	p.region(creatorContentRegion, focusEdges{app.Up: {Focus: creatorTabFocus(state.tab)}})
 
-	ui.Box(c.Key("creator-page")).FillWidth().Lang("zh-CN").Font(videoDetailFont).Children(func() {
+	ui.Box(c.Key("creator-page")).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.creatorArtwork(c, state)
 		ui.Column(c).FillWidth().ZIndex(1).Children(func() {
 			p.creatorOverview(c, state, canFollow, canPrivate)

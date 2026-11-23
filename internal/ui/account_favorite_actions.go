@@ -356,7 +356,7 @@ func (favoriteDialogPage) Render(c *ui.Context, p *PageContext) {
 		if dialog.mode == favoriteConfirmRemove {
 			note = fmt.Sprintf(text.Activity.RemoveFavoritesNote, len(dialog.resources))
 		}
-		ui.Column(c).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+		ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 			p.framelessHeader(c, "COLLECTION \u00b7 CONFIRM", "trash", title, note)
 			if dialog.errorText != "" {
 				ui.Text(c, dialog.errorText).FillWidth().Margin(18, 0, 0, 0).
@@ -367,7 +367,7 @@ func (favoriteDialogPage) Render(c *ui.Context, p *PageContext) {
 		})
 		return
 	}
-	ui.Column(c).Fill().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.drawerHeader(c, "COLLECTION", title, "", "")
 		p.favoriteDialogContent(c, dialog, folder)
 		ui.Box(c).Height(28)

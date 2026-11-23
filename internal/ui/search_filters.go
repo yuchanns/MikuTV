@@ -110,7 +110,7 @@ func (searchFiltersPage) Render(c *ui.Context, p *PageContext) {
 	})
 
 	modalText := p.Assets.Text.Modal
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.drawerHeader(c, "SEARCH \u00b7 REFINE", text.FiltersTitle, "", "")
 		ui.Row(c).FillWidth().Margin(0, 0, 16, 0).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, text.SortLabel).FontSize(16).LetterSpacing(1.5).TextColor(paint(colors.Text.Muted))

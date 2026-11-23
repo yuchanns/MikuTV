@@ -71,7 +71,7 @@ func (seriesCalendarPage) Render(c *ui.Context, p *PageContext) {
 
 	text, colors := p.Assets.Text, p.Theme.Colors
 	ui.Column(c.Key("series-calendar-page")).FillWidth().Padding(seriesHeaderHeight, 0, screenBottomInset, 0).
-		Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.seriesSubpageHeading(c, seriesCalendarBackFocus, seriesCalendarHeaderRegion, text.Series.Calendar, text.Series.CalendarNote)
 		switch {
 		case snap.Phase == app.CatalogIdle || (snap.Phase == app.CatalogLoading && !snap.Loaded):

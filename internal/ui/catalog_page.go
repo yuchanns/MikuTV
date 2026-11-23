@@ -188,7 +188,7 @@ func (catalogPage) Render(c *ui.Context, p *PageContext) {
 	emptyFeed := home.tab == "" && len(home.layout.sections) == 0
 	p.catalogRegions(shelves, emptyFeed)
 
-	ui.Box(c.Key("home-feed")).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Box(c.Key("home-feed")).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		if home.tab == "" && len(home.featured) != 0 && scroll < homeArtHeight {
 			p.catalogBackdrop(c, home.featured[home.selected])
 		}

@@ -132,7 +132,7 @@ func (privacyConfirmPage) Render(c *ui.Context, p *PageContext) {
 		title, body = priv.ClearHistoryTitle, priv.ClearHistoryBody
 	}
 	p.region("privacy-confirm", nil)
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "PRIVACY \u00b7 CONFIRM", "trash", title, body)
 		if v.privacyUI.confirmError != "" {
 			ui.Text(c, v.privacyUI.confirmError).FillWidth().Margin(18, 0, 0, 0).
@@ -181,7 +181,7 @@ func (privacyDetailsPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
 	priv := p.Assets.Text.Privacy
 	p.region("privacy-details", nil)
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "PRIVACY \u00b7 DATA", "lock", priv.DetailsTitle, priv.DetailsBody)
 		ui.Row(c).Margin(40, 0, 0, 0).Gap(16).Children(func() {
 			p.styledButton(c, priv.ManageAction, "", privacyManageAction, "privacy-details", func() {

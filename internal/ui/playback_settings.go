@@ -153,7 +153,7 @@ func (playbackSettingPickerPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
 	title, choices := v.playbackChoices(v.playbackUI.pickerKind)
 	p.region("modal", nil)
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.drawerHeader(c, "PLAYBACK \u00b7 PREFERENCES", title, "", "")
 		ui.Column(c).FillWidth().Grow(1).Children(func() {
 			for i, choice := range choices {

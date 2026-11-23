@@ -11,15 +11,21 @@ import (
 )
 
 const (
+	appearanceLanguageRow     app.FocusID = "settings/appearance/language"
 	appearanceModeRow         app.FocusID = "settings/appearance/mode"
 	appearanceLightThemeRow   app.FocusID = "settings/appearance/light-theme"
 	appearanceDarkThemeRow    app.FocusID = "settings/appearance/dark-theme"
 	appearanceHoverPreviewRow app.FocusID = "settings/appearance/hover-preview"
 	appearanceReduceMotionRow app.FocusID = "settings/appearance/reduce-motion"
 
-	themePickerDiscoverBtn app.FocusID = "appearance/theme-picker/discover"
-	themeErrorReselectBtn  app.FocusID = "appearance/theme-error/reselect"
+	languagePickerDiscoverBtn app.FocusID = "appearance/language-picker/discover"
+	themePickerDiscoverBtn    app.FocusID = "appearance/theme-picker/discover"
+	themeErrorReselectBtn     app.FocusID = "appearance/theme-error/reselect"
 )
+
+func languagePickerOptionID(id string) app.FocusID {
+	return app.FocusID("appearance/language/" + strings.ToLower(strings.TrimSpace(id)))
+}
 
 func appearanceModeOptionID(mode app.AppearanceMode) app.FocusID {
 	return app.FocusID("appearance/mode/" + string(mode))
@@ -32,6 +38,7 @@ func themePickerOptionID(id string) app.FocusID {
 type appearanceSettingsUI struct {
 	pickerSlot      app.ThemeSlot
 	pickerScroll    ui.ScrollState
+	languageScroll  ui.ScrollState
 	failedThemeID   string
 	failedThemeName string
 }
@@ -124,6 +131,96 @@ func (p *PageContext) appearanceModeNote(mode app.AppearanceMode) string {
 	default:
 		return l.ModeDarkNote
 	}
+}
+
+func (v *View) localeSnapshot() app.LocaleSnapshot {
+	if v.Locale != nil {
+		return v.Locale.Snapshot()
+	}
+	activeID, activeName := app.LocaleBuiltinZH, "简体中文"
+	if v.Assets != nil && strings.HasPrefix(strings.ToLower(v.Assets.LocaleTag), "en") {
+		activeID, activeName = app.LocaleBuiltinEN, "English"
+	}
+	return app.LocaleSnapshot{
+		Selection:  app.LocaleModeSystem,
+		ActiveID:   activeID,
+		ActiveTag:  activeID,
+		ActiveName: activeName,
+		Options: []app.LocaleOption{
+			{ID: app.LocaleBuiltinZH, Name: "简体中文", Language: app.LocaleBuiltinZH, Bundled: true, Active: activeID == app.LocaleBuiltinZH},
+			{ID: app.LocaleBuiltinEN, Name: "English", Language: app.LocaleBuiltinEN, Bundled: true, Active: activeID == app.LocaleBuiltinEN},
+		},
+	}
+}
+
+func (v *View) openLanguagePicker(focusID string) {
+	snap := v.localeSnapshot()
+	v.appearanceUI.languageScroll = ui.ScrollState{}
+	target := strings.TrimSpace(focusID)
+	if target == "" {
+		target = snap.Selection
+	}
+	if target == "" {
+		target = app.LocaleModeSystem
+	}
+	v.State.Push(app.Route{Page: app.LanguagePicker, Section: "appearance"})
+	v.State.Focus, v.reveal = languagePickerOptionID(target), true
+}
+
+func (v *View) openDiscoverLanguagesFromPicker() {
+	if v.State.Page == app.LanguagePicker {
+		v.State.Back()
+	}
+	s := &v.pluginsUI
+	s.view = pluginsViewDiscover
+	s.filter = plugin.LocaleKind
+	s.query = ""
+	s.input = ""
+	s.editing = false
+	s.selectedInstalledID = ""
+	s.selectedCatalogRepo = ""
+	s.returnToThemePicker = false
+	s.returnToLanguagePicker = true
+	if v.PluginCatalog != nil {
+		v.PluginCatalog.EnsureLoaded()
+	}
+	v.State.Navigate(app.Route{Page: app.Settings, Section: "plugins"})
+	v.State.Focus, v.reveal = pluginsFilterLocale, true
+}
+
+func (v *View) returnToAppearanceLanguagePicker(focusID string) {
+	v.pluginsUI.returnToLanguagePicker = false
+	v.pluginsUI.selectedInstalledID = ""
+	v.pluginsUI.selectedCatalogRepo = ""
+	v.pluginsUI.editing = false
+	v.State.Navigate(app.Route{Page: app.Settings, Section: "appearance"})
+	v.State.Focus = appearanceLanguageRow
+	v.openLanguagePicker(focusID)
+}
+
+func (v *View) selectLanguageOption(id, displayName string) {
+	if v.Locale != nil {
+		if err := v.Locale.Select(id); err != nil {
+			v.showSettingsFeedback(v.Assets.Text.SaveFailed)
+			v.State.Back()
+			return
+		}
+	} else if v.Assets != nil {
+		targetTag := id
+		if targetTag == app.LocaleModeSystem {
+			targetTag = app.LocaleBuiltinZH
+		}
+		_ = v.SetLocale(targetTag, nil)
+	}
+	v.State.Back()
+	v.State.Focus, v.reveal = appearanceLanguageRow, true
+	l := v.Assets.Text.Appearance
+	toastName := displayName
+	if strings.EqualFold(id, app.LocaleModeSystem) {
+		snap := v.localeSnapshot()
+		toastName = l.LanguageSystem + " \u00b7 " + snap.ActiveName
+	}
+	v.showSettingsFeedback(fmt.Sprintf(l.LanguageAppliedToast, toastName))
 }
 
 func (v *View) openAppearanceModePicker() {
@@ -260,7 +357,19 @@ func (appearanceSettingsPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
 	l, colors, d := p.Assets.Text.Appearance, p.Theme.Colors, p.uiColors()
 	snap := v.appearanceSnapshot()
+	localeSnap := v.localeSnapshot()
 	p.region("content", nil)
+
+	langNote := l.LanguageCustomNote
+	langValue := localeSnap.ActiveName
+	if strings.EqualFold(localeSnap.Selection, app.LocaleModeSystem) || localeSnap.Selection == "" {
+		langNote = l.LanguageSystemNote
+		if localeSnap.ActiveName != "" {
+			langValue = l.LanguageSystem + " \u00b7 " + localeSnap.ActiveName
+		} else {
+			langValue = l.LanguageSystem
+		}
+	}
 
 	lightName := snap.LightName
 	if lightName == "" {
@@ -283,6 +392,9 @@ func (appearanceSettingsPage) Render(c *ui.Context, p *PageContext) {
 	ui.Text(c, l.Intro).Height(32).FontSize(19).LineHeight(1.7).TextColor(paint(colors.Text.Muted)).Margin(0, 0, 27, 0)
 	ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
 
+	p.danmakuValueRow(c, appearanceLanguageRow, "globe", l.LanguageLabel, langNote, langValue, func() {
+		v.openLanguagePicker("")
+	})
 	p.danmakuValueRow(c, appearanceModeRow, "sparkles", l.ModeLabel, p.appearanceModeNote(snap.Mode), p.appearanceModeLabel(snap.Mode), func() {
 		v.openAppearanceModePicker()
 	})
@@ -308,6 +420,65 @@ func (appearanceSettingsPage) Render(c *ui.Context, p *PageContext) {
 	})
 }
 
+type languagePickerPage struct{}
+
+func (languagePickerPage) Render(c *ui.Context, p *PageContext) {
+	v := p.host
+	l, colors, d := p.Assets.Text.Appearance, p.Theme.Colors, p.uiColors()
+	snap := v.localeSnapshot()
+	p.region("modal", nil)
+
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
+		p.drawerHeader(c, "APPEARANCE \u00b7 LANGUAGE", l.LanguagePickerTitle, "", l.LanguagePickerSubtitle)
+
+		ui.Scroll(c.Key("language-picker-scroll")).FillWidth().Grow(1).MinHeight(0).
+			TrackScroll(&v.appearanceUI.languageScroll).Padding(4, 6, 12, 6).Children(func() {
+			ui.Column(c).FillWidth().Children(func() {
+				systemSelected := strings.EqualFold(snap.Selection, app.LocaleModeSystem) || snap.Selection == ""
+				systemMeta := ""
+				if snap.ActiveName != "" && systemSelected {
+					systemMeta = snap.ActiveName
+				}
+				p.drawerOptionRow(c, languagePickerOptionID(app.LocaleModeSystem), "modal", l.LanguageSystem, systemMeta, systemSelected, func() {
+					v.selectLanguageOption(app.LocaleModeSystem, l.LanguageSystem)
+				})
+
+				for _, option := range snap.Options {
+					opt := option
+					id := languagePickerOptionID(opt.ID)
+					selected := !systemSelected && strings.EqualFold(snap.Selection, opt.ID)
+					meta := l.LanguageBuiltinNote
+					if !opt.Bundled {
+						meta = l.LanguagePluginNote
+						if opt.Language != "" {
+							meta = opt.Language + " \u00b7 " + l.LanguagePluginNote
+						}
+					}
+					p.drawerOptionRow(c, id, "modal", opt.Name, meta, selected, func() {
+						v.selectLanguageOption(opt.ID, opt.Name)
+					})
+				}
+
+				if len(snap.Options) <= 2 {
+					ui.Text(c, l.LanguageBuiltinOnlyHint).FillWidth().Margin(14, 4, 6, 4).
+						FontSize(17).LineHeight(1.6).TextColor(paint(colors.Text.Muted))
+				}
+
+				ui.Box(c).Height(18)
+				p.styledButton(c, l.DiscoverMoreLanguages, "search", languagePickerDiscoverBtn, "modal", func() {
+					v.openDiscoverLanguagesFromPicker()
+				}, buttonAppearance{
+					height: 54, padding: 24, radius: 13, fontSize: 19, fontWeight: 500, iconSize: 20, iconGap: 10,
+					focusShadow: true,
+					background:  d.secondaryFill, foreground: paint(colors.Text.Primary), border: d.secondaryBorder,
+				})
+			})
+		})
+
+		p.drawerFooter(c, p.Assets.Text.Modal.HintSelect, p.Assets.Text.Modal.HintApply)
+	})
+}
+
 type appearanceModePickerPage struct{}
 
 func (appearanceModePickerPage) Render(c *ui.Context, p *PageContext) {
@@ -326,7 +497,7 @@ func (appearanceModePickerPage) Render(c *ui.Context, p *PageContext) {
 		{app.AppearanceModeDark, l.ModeDark, l.ModeDarkNote},
 	}
 
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.drawerHeader(c, "APPEARANCE \u00b7 MODE", l.ModePickerTitle, "", l.ModePickerSubtitle)
 		ui.Column(c).FillWidth().Grow(1).Children(func() {
 			for _, choice := range choices {
@@ -365,7 +536,7 @@ func (themePickerPage) Render(c *ui.Context, p *PageContext) {
 
 	p.region("modal", nil)
 
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.drawerHeader(c, eyebrow, title, "", subtitle)
 
 		ui.Scroll(c.Key("theme-picker-scroll")).FillWidth().Grow(1).MinHeight(0).
@@ -483,7 +654,7 @@ func (themeErrorPage) Render(c *ui.Context, p *PageContext) {
 
 	p.region("theme-error-actions", nil)
 
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "APPEARANCE \u00b7 ERROR", "palette", l.ErrorTitle, l.ErrorBody)
 		ui.Row(c.Key("theme-error-actions")).Margin(36, 0, 0, 0).Gap(16).Children(func() {
 			p.styledButton(c, l.ErrorReselect, "", themeErrorReselectBtn, "theme-error-actions", func() {

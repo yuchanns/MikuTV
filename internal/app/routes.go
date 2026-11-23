@@ -34,6 +34,7 @@ const (
 	DanmakuSettingPicker  Page = "danmakuSettingPicker"
 	DanmakuRuleEditor     Page = "danmakuRuleEditor"
 	AppearanceModePicker  Page = "appearanceModePicker"
+	LanguagePicker        Page = "languagePicker"
 	ThemePicker           Page = "themePicker"
 	ThemeError            Page = "themeError"
 	PrivacyConfirm        Page = "privacyConfirm"

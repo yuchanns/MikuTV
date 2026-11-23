@@ -71,6 +71,7 @@ type videoDetailState struct {
 	synopsisReady bool
 	synopsisBody  string
 	synopsisWidth float32
+	synopsisLang  string
 	synopsis      videoDetailSynopsis
 }
 
@@ -342,9 +343,9 @@ func (videoDetailPage) Render(c *ui.Context, p *PageContext) {
 	}
 	synopsis := videoDetailSynopsis{full: item.Subtitle}
 	if detail.tab == videoDetailOverview && !detail.loading && detail.failure == "" && !detail.expanded {
-		synopsis = detail.cachedSynopsis(item.Subtitle, videoSynopsisWidth(p.Width))
+		synopsis = detail.cachedSynopsisLocalized(item.Subtitle, videoSynopsisWidth(p.Width), p.langTag(), p.uiFont())
 	}
-	ui.Box(c.Key("video-detail")).FillWidth().Lang("zh-CN").Font(videoDetailFont).Children(func() {
+	ui.Box(c.Key("video-detail")).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.videoDetailArtwork(c, item)
 		ui.Column(c).FillWidth().Padding(0, videoDetailInset, 0, videoDetailInset).ZIndex(1).Children(func() {
 			p.videoDetailSummary(c, detail)
@@ -396,7 +397,7 @@ func (p *PageContext) videoDetailSummary(c *ui.Context, detail *videoDetailState
 	item := detail.item
 	firstParagraph, _, _ := strings.Cut(item.Title, "\n")
 	_, firstLineHeight := c.MeasureText(0, ui.Span{
-		Text: firstParagraph, Font: videoDetailFont, Size: titleFontSize, Weight: titleWeight, Lang: "zh-CN",
+		Text: firstParagraph, Font: p.uiFont(), Size: titleFontSize, Weight: titleWeight, Lang: p.langTag(),
 	})
 	// Native fallback fonts can exceed the designed height of a single line.
 	titleGap := max(0, videoDetailMetadataTop-titleTop-max(titleHeight, firstLineHeight))

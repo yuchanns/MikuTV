@@ -86,7 +86,7 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 	case managing:
 		headingHeight, metaTop = 282, 201
 	}
-	ui.Column(c.Key("library")).FillWidth().Padding(0, 0, 64, 0).Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c.Key("library")).FillWidth().Padding(0, 0, 64, 0).Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.renderLibraryTabs(c, query.Section)
 		ui.Column(c.Key("library-body/" + string(query.Section) + "/" + query.Folder)).FillWidth().Children(func() {
 			if guest {

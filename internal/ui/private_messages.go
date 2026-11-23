@@ -661,7 +661,7 @@ func (privateComposePage) Render(c *ui.Context, p *PageContext) {
 	text, detailText, colors := p.Assets.Text.Activity, p.Assets.Text.Detail, p.Theme.Colors
 	sending := p.host.PrivateMessages != nil && p.host.PrivateMessages.Sending()
 	p.region(region, nil)
-	ui.Column(c).FillWidth().Lang(accountLanguage).Font(accountFontFamily).Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "PRIVATE MESSAGE", "comment", text.WritePrivateMessage, "")
 		ui.Row(c).Gap(15).AlignItems(ui.Center).Margin(0, 0, 24, 0).Children(func() {
 			p.privatePeerAvatar(c, draft.peer, 40, 17)

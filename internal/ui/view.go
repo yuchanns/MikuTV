@@ -59,6 +59,7 @@ type Options struct {
 	DanmakuRules     *app.DanmakuRules
 	PlaybackSettings *app.PlaybackSettings
 	Appearance       *app.AppearanceSettings
+	Locale           *app.LocaleSettings
 	PluginCatalog    *app.PluginCatalog
 	Pages            *Pages
 	Assets           *Assets
@@ -83,6 +84,7 @@ type View struct {
 	DanmakuRules     *app.DanmakuRules
 	PlaybackSettings *app.PlaybackSettings
 	Appearance       *app.AppearanceSettings
+	Locale           *app.LocaleSettings
 	PluginCatalog    *app.PluginCatalog
 	Playback         *app.Playback
 	Pages           *Pages
@@ -155,7 +157,7 @@ func NewView(options Options) *View {
 		playbackSettings = app.NewPlaybackSettings(options.Preferences, nil)
 	}
 	v := &View{
-		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, Appearance: options.Appearance, PluginCatalog: options.PluginCatalog,
+		State: options.State, Catalog: options.Catalog, Search: options.Search, Following: options.Following, Series: options.Series, Live: options.Live, LiveChat: options.LiveChat, Auth: options.Auth, Activity: options.Activity, PrivateMessages: options.PrivateMessages, DanmakuRules: danmakuRules, PlaybackSettings: playbackSettings, Appearance: options.Appearance, Locale: options.Locale, PluginCatalog: options.PluginCatalog,
 		Pages: options.Pages, Assets: options.Assets, Preferences: options.Preferences,
 		Version: options.Version, About: options.About.Normalized(options.Version), TopShelf: options.TopShelf, scrolls: make(map[scrollKey]*ui.ScrollState),
 	}
@@ -186,6 +188,21 @@ func (v *View) SetTheme(next theme.Theme) {
 	v.cardGlow = accountGlow(withAlpha(next.Colors.Accent.Primary, 0x29), 1, 0.75)
 }
 
+// SetLocale atomically hot-swaps UI strings, sidebar navigation labels, and
+// script-appropriate font preferences without resetting routes or playback.
+func (v *View) SetLocale(tag string, overrideJSON []byte) error {
+	if v == nil || v.Assets == nil {
+		return nil
+	}
+	if err := v.Assets.ApplyLocale(tag, overrideJSON); err != nil {
+		return err
+	}
+	if v.Pages != nil {
+		v.Pages.RefreshLabels(v.Assets)
+	}
+	return nil
+}
+
 func (v *View) Render(c *ui.Context) {
 	v.syncAccountAvatar()
 	c.SetTheme(&v.native)
@@ -208,6 +225,9 @@ func (v *View) Render(c *ui.Context) {
 		c.Root().Background(ui.Transparent)
 	}
 	screen := ui.Box(c).Fill().Clip().Background(background)
+	if v.Assets != nil {
+		screen.Lang(v.Assets.LangTag()).Font(v.Assets.FontFamily())
+	}
 	if !v.Theme.Dark && !rootReg.TransparentCanvas && !homePreviewHole {
 		screen.Gradient(paint(v.Theme.Colors.Surface.Raised), paint(v.Theme.Colors.Surface.Canvas), 145)
 	}

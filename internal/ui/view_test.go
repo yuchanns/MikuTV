@@ -867,8 +867,8 @@ func TestRailLibraryAndSettingsHoverSwitchImmediately(t *testing.T) {
 		t.Fatalf("Up in settings sidebar did not return to appearance: %+v", state.Location)
 	}
 	tester.Key(0, ui.KeyRight)
-	if state.Focus != appearanceModeRow {
-		t.Fatalf("Right from appearance sidebar focused %q, want %q", state.Focus, appearanceModeRow)
+	if state.Focus != appearanceLanguageRow {
+		t.Fatalf("Right from appearance sidebar focused %q, want %q", state.Focus, appearanceLanguageRow)
 	}
 
 	// 3. Return to rail, hover Up to Library, enter Library tabs, and verify Left/Right switch tabs immediately without Enter.

@@ -22,6 +22,7 @@ type Kind string
 const (
 	SourceKind      Kind = "source"
 	ThemeKind       Kind = "theme"
+	LocaleKind      Kind = "locale"
 	protocolVersion      = 1
 )
 
@@ -41,6 +42,13 @@ type Manifest struct {
 	} `json:"artwork,omitempty"`
 }
 
+type LocalizedSource struct {
+	Name         string                    `json:"name,omitempty"`
+	Description  string                    `json:"description,omitempty"`
+	Auth         provider.AuthPresentation `json:"authentication,omitzero"`
+	Presentation provider.SourcePresentation `json:"presentation,omitzero"`
+}
+
 type sourceManifest struct {
 	Manifest
 	Main           string `json:"main"`
@@ -51,8 +59,9 @@ type sourceManifest struct {
 	Permissions struct {
 		Network []string `json:"network,omitempty"`
 	} `json:"permissions,omitempty"`
-	Presentation provider.SourcePresentation `json:"presentation,omitzero"`
-	Capabilities provider.Capabilities       `json:"capabilities,omitempty"`
+	Presentation provider.SourcePresentation  `json:"presentation,omitzero"`
+	Capabilities provider.Capabilities        `json:"capabilities,omitempty"`
+	Locales      map[string]LocalizedSource   `json:"locales,omitempty"`
 }
 
 var (

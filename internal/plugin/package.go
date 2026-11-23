@@ -92,6 +92,61 @@ func (s *Source) Presentation() provider.SourcePresentation {
 	return s.manifest.Presentation
 }
 
+// LocalizedMetadata resolves optional plugin.json "locales" overrides for tag,
+// falling back to default manifest fields when no localized override matches.
+func (s *Source) LocalizedMetadata(tag string) (name, description string, auth provider.AuthPresentation, pres provider.SourcePresentation) {
+	name = s.manifest.Name
+	description = s.manifest.Description
+	auth = s.manifest.Authentication.Presentation
+	pres = s.manifest.Presentation
+	if len(s.manifest.Locales) == 0 {
+		return
+	}
+	avail := make([]string, 0, len(s.manifest.Locales))
+	for k := range s.manifest.Locales {
+		avail = append(avail, k)
+	}
+	matched := MatchLocaleTag([]string{tag}, avail)
+	if matched == "" {
+		return
+	}
+	ov := s.manifest.Locales[matched]
+	if strings.TrimSpace(ov.Name) != "" {
+		name = ov.Name
+	}
+	if strings.TrimSpace(ov.Description) != "" {
+		description = ov.Description
+	}
+	if strings.TrimSpace(ov.Auth.AccountSubtitle) != "" {
+		auth.AccountSubtitle = ov.Auth.AccountSubtitle
+	}
+	if strings.TrimSpace(ov.Auth.GuestTitle) != "" {
+		auth.GuestTitle = ov.Auth.GuestTitle
+	}
+	if strings.TrimSpace(ov.Auth.GuestDescription) != "" {
+		auth.GuestDescription = ov.Auth.GuestDescription
+	}
+	if strings.TrimSpace(ov.Auth.QRTitle) != "" {
+		auth.QRTitle = ov.Auth.QRTitle
+	}
+	if strings.TrimSpace(ov.Auth.QRDescription) != "" {
+		auth.QRDescription = ov.Auth.QRDescription
+	}
+	if strings.TrimSpace(ov.Presentation.CreatorMark) != "" {
+		pres.CreatorMark = ov.Presentation.CreatorMark
+	}
+	if strings.TrimSpace(ov.Presentation.CreatorGroupTitle) != "" {
+		pres.CreatorGroupTitle = ov.Presentation.CreatorGroupTitle
+	}
+	if strings.TrimSpace(ov.Presentation.Membership) != "" {
+		pres.Membership = ov.Presentation.Membership
+	}
+	if strings.TrimSpace(ov.Presentation.MobileApp) != "" {
+		pres.MobileApp = ov.Presentation.MobileApp
+	}
+	return
+}
+
 // Open validates and compiles a package without executing its code.
 func Open(ctx context.Context, data []byte, appVersion string) (*Source, error) {
 	return openPackage(ctx, bytes.NewReader(data), int64(len(data)), sha256.Sum256(data), appVersion)

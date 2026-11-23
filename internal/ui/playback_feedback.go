@@ -136,7 +136,7 @@ func (p *PageContext) playbackFeedbackScreen(c *ui.Context, kind playbackFeedbac
 	v.Playback.SetViewport(1)
 	hasFrame := v.Playback.SetBackdropBlur(16)
 	colors, d := p.Theme.Colors, p.uiColors()
-	root := ui.Box(c.Key("player-feedback")).Absolute().Top(0).Left(0).Fill().Clip().Lang("zh-CN").Font(videoDetailFont)
+	root := ui.Box(c.Key("player-feedback")).Absolute().Top(0).Left(0).Fill().Clip().Lang(p.langTag()).Font(p.uiFont())
 	if kind == playbackFeedbackBuffering {
 		p.region(playerPanelGroup, focusEdges{})
 		p.bind(root.Focusable().Label(p.Assets.Text.Playback.Buffering), playerBuffer, playerPanelGroup)

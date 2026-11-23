@@ -299,7 +299,7 @@ func (videoConfirmPage) Render(c *ui.Context, p *PageContext) {
 	}
 	selected := *action
 	p.region(region, nil)
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "ACTION \u00b7 CONFIRM", icon, heading, note)
 		ui.Row(c).Gap(16).Margin(40, 0, 0, 0).Children(func() {
 			p.styledButton(c, acceptLabel, icon, videoConfirmAccept, region, func() {

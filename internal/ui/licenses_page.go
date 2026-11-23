@@ -55,8 +55,11 @@ func buildLicenseDocument(info app.AboutInfo, baseLicense string, about aboutLab
 				origin = about.Bundled
 			}
 			kind := about.KindSource
-			if pl.Kind == "theme" {
+			switch pl.Kind {
+			case "theme":
 				kind = about.KindTheme
+			case "locale":
+				kind = about.KindLocale
 			}
 			license := strings.TrimSpace(pl.License)
 			if license == "" {
@@ -168,7 +171,7 @@ func (licensesPage) Render(c *ui.Context, p *PageContext) {
 	about := p.Assets.Text.About
 	subtitle := fmt.Sprintf(about.LicenseSummary, info.DisplayVersion(), len(info.Plugins), len(info.Dependencies))
 	document := buildLicenseDocument(info, p.Assets.License, about)
-	ui.Column(c).Fill().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).Fill().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.drawerHeader(c, "LEGAL \u00b7 OPEN SOURCE", p.Title, info.License, subtitle)
 		e := ui.Scroll(c.Key(string(app.LicenseText))).FillWidth().Grow(1).TrackScroll(scroll).
 			Label(p.Title).Padding(20, 22).Radius(14).Background(d.subtleFill)

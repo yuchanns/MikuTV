@@ -18,20 +18,30 @@ func videoSynopsisWidth(pageWidth float32) float32 {
 }
 
 func (d *videoDetailState) cachedSynopsis(body string, width float32) videoDetailSynopsis {
-	if d.synopsisReady && d.synopsisBody == body && d.synopsisWidth == width {
+	return d.cachedSynopsisLocalized(body, width, "zh-CN", videoDetailFont)
+}
+
+func (d *videoDetailState) cachedSynopsisLocalized(body string, width float32, lang, fontFamily string) videoDetailSynopsis {
+	if d.synopsisReady && d.synopsisBody == body && d.synopsisWidth == width && d.synopsisLang == lang {
 		return d.synopsis
 	}
-	d.synopsis = prepareVideoSynopsis(body, width)
-	d.synopsisBody, d.synopsisWidth, d.synopsisReady = body, width, true
+	d.synopsis = prepareVideoSynopsis(body, width, lang, fontFamily)
+	d.synopsisBody, d.synopsisWidth, d.synopsisLang, d.synopsisReady = body, width, lang, true
 	return d.synopsis
 }
 
-func prepareVideoSynopsis(body string, width float32) videoDetailSynopsis {
+func prepareVideoSynopsis(body string, width float32, lang, fontFamily string) videoDetailSynopsis {
 	synopsis := videoDetailSynopsis{full: body}
 	if body == "" {
 		return synopsis
 	}
-	font := ui.Font{Family: videoDetailFont, Size: 24, Weight: 400, Lang: "zh-CN", LineHeight: 1.8}
+	if lang == "" {
+		lang = "zh-CN"
+	}
+	if fontFamily == "" {
+		fontFamily = videoDetailFont
+	}
+	font := ui.Font{Family: fontFamily, Size: 24, Weight: 400, Lang: lang, LineHeight: 1.8}
 	lines := ui.ShapeText(body, font, width).Lines()
 	if len(lines) <= 2 {
 		return synopsis

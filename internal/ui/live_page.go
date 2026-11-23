@@ -125,7 +125,7 @@ func (livePage) Render(c *ui.Context, p *PageContext) {
 	p.prepareLiveArtwork(snap, featured)
 	p.liveRegions(snap)
 
-	ui.Box(c.Key("live-page")).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Box(c.Key("live-page")).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		if featured != nil && p.scroll().Y < liveArtHeight {
 			p.liveBackdrop(c, *featured)
 		}

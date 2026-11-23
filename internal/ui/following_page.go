@@ -172,7 +172,7 @@ func (followingPage) Render(c *ui.Context, p *PageContext) {
 	p.followingRegions(snapshot, signedIn, activeTab, supportsLive)
 
 	ui.Column(c.Key("following-page")).FillWidth().Padding(0, 0, screenBottomInset, 0).
-		Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+		Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.followingHeader(c, activeTab, supportsLive)
 		if !signedIn {
 			p.followingGuestState(c)

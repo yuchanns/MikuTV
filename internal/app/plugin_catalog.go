@@ -63,6 +63,8 @@ type InstalledPlugin struct {
 	SourceCommit    string
 	Permissions     []string
 	Swatches        [6]theme.Color
+	Language        string
+	NativeName      string
 	Capabilities    provider.Capabilities
 	AvailableUpdate *PluginUpdateOffer
 }
@@ -87,11 +89,12 @@ type PluginUpdateHooks struct {
 	BeforeSourceUpdate func(pluginID string)
 	ApplySourceUpdate  func(src *plugin.Source, receipt plugin.InstalledReceipt) error
 	ApplyThemeUpdate   func(pkg *plugin.ThemePackage, receipt plugin.InstalledReceipt) error
+	ApplyLocaleUpdate  func(pkg *plugin.LocalePackage, receipt plugin.InstalledReceipt) error
 }
 
 // PluginLifecycleHooks dispatches disable, enable, and uninstall callbacks by
-// plugin kind so theme removal/disable never clears content-source sessions or
-// account data.
+// plugin kind so theme/locale removal or disable never clears content-source
+// sessions or account data.
 type PluginLifecycleHooks struct {
 	DisableSource func(pluginID string)
 	EnableSource  func(pluginID string) error
@@ -99,6 +102,9 @@ type PluginLifecycleHooks struct {
 	EnableTheme   func(pluginID string) error
 	DisableTheme  func(pluginID string)
 	RemoveTheme   func(pluginID string)
+	EnableLocale  func(pluginID string) error
+	DisableLocale func(pluginID string)
+	RemoveLocale  func(pluginID string)
 }
 
 type PluginCatalogCacheData struct {
@@ -222,6 +228,19 @@ func (c *PluginCatalog) SyncActiveTheme(activeThemeID string) {
 	for i := range c.installed {
 		if c.installed[i].Kind == plugin.ThemeKind {
 			c.installed[i].Enabled = activeThemeID != "" && strings.EqualFold(c.installed[i].ID, activeThemeID)
+		}
+	}
+	c.mu.Unlock()
+	c.notify()
+}
+
+// SyncActiveLocale keeps all installed locale plugins' Enabled flag synchronized
+// with the currently active language selection.
+func (c *PluginCatalog) SyncActiveLocale(activeLocaleID string) {
+	c.mu.Lock()
+	for i := range c.installed {
+		if c.installed[i].Kind == plugin.LocaleKind {
+			c.installed[i].Enabled = activeLocaleID != "" && strings.EqualFold(c.installed[i].ID, activeLocaleID)
 		}
 	}
 	c.mu.Unlock()
@@ -471,6 +490,8 @@ func installedPluginFromPackage(pkg plugin.InstalledPackage) InstalledPlugin {
 		License:     receipt.License,
 		Permissions: append([]string(nil), receipt.Permissions...),
 		Swatches:    receipt.Swatches,
+		Language:    receipt.Language,
+		NativeName:  receipt.NativeName,
 	}
 	if pkg.Source != nil {
 		m := pkg.Source.Manifest()
@@ -484,6 +505,13 @@ func installedPluginFromPackage(pkg plugin.InstalledPackage) InstalledPlugin {
 		inst.Description = m.Description
 		inst.License = m.License
 		inst.Swatches = pkg.Theme.Theme().Swatches()
+	} else if pkg.Locale != nil {
+		m := pkg.Locale.Manifest()
+		inst.Name = m.Name
+		inst.Description = m.Description
+		inst.License = m.License
+		inst.Language = pkg.Locale.Language()
+		inst.NativeName = pkg.Locale.NativeName()
 	}
 	return inst
 }
@@ -752,7 +780,8 @@ func (c *PluginCatalog) Close() {
 }
 
 func (c *PluginCatalog) CheckInstallable(item plugin.CatalogItem) error {
-	if !item.Compatibility.Compatible || (item.Manifest.Kind != plugin.SourceKind && item.Manifest.Kind != plugin.ThemeKind) {
+	if !item.Compatibility.Compatible ||
+		(item.Manifest.Kind != plugin.SourceKind && item.Manifest.Kind != plugin.ThemeKind && item.Manifest.Kind != plugin.LocaleKind) {
 		return plugin.ErrIncompatible
 	}
 	c.mu.Lock()
@@ -1351,6 +1380,11 @@ func dispatchPackageUpdate(hooks PluginUpdateHooks, pkg plugin.InstalledPackage)
 			return hooks.ApplyThemeUpdate(pkg.Theme, pkg.Receipt)
 		}
 		return nil
+	case plugin.LocaleKind:
+		if hooks.ApplyLocaleUpdate != nil {
+			return hooks.ApplyLocaleUpdate(pkg.Locale, pkg.Receipt)
+		}
+		return nil
 	default:
 		return fmt.Errorf("%w: unsupported kind %q", plugin.ErrIncompatible, pkg.Receipt.Kind)
 	}
@@ -1396,7 +1430,8 @@ func (c *PluginCatalog) SetEnabled(pluginID string, enabled bool) error {
 	hooks := c.lifecycleHooks
 	c.mu.Unlock()
 
-	if store != nil && item.Kind != plugin.ThemeKind {
+	singleSelect := item.Kind == plugin.ThemeKind || item.Kind == plugin.LocaleKind
+	if store != nil && !singleSelect {
 		var err error
 		if item.Bundled {
 			err = store.SetBundledEnabled(item.ID, enabled)
@@ -1410,7 +1445,7 @@ func (c *PluginCatalog) SetEnabled(pluginID string, enabled bool) error {
 
 	if err := dispatchPluginToggle(hooks, item.Kind, item.ID, enabled); err != nil {
 		// Roll back persisted toggle state if re-enabling failed.
-		if store != nil && item.Kind != plugin.ThemeKind {
+		if store != nil && !singleSelect {
 			if item.Bundled {
 				_ = store.SetBundledEnabled(item.ID, !enabled)
 			} else {
@@ -1421,9 +1456,9 @@ func (c *PluginCatalog) SetEnabled(pluginID string, enabled bool) error {
 	}
 
 	c.mu.Lock()
-	if item.Kind == plugin.ThemeKind {
+	if singleSelect {
 		for i := range c.installed {
-			if c.installed[i].Kind == plugin.ThemeKind {
+			if c.installed[i].Kind == item.Kind {
 				c.installed[i].Enabled = enabled && strings.EqualFold(c.installed[i].ID, item.ID)
 			}
 		}
@@ -1511,6 +1546,17 @@ func dispatchPluginToggle(hooks PluginLifecycleHooks, kind plugin.Kind, pluginID
 			hooks.DisableTheme(pluginID)
 		}
 		return nil
+	case plugin.LocaleKind:
+		if enabled {
+			if hooks.EnableLocale != nil {
+				return hooks.EnableLocale(pluginID)
+			}
+			return nil
+		}
+		if hooks.DisableLocale != nil {
+			hooks.DisableLocale(pluginID)
+		}
+		return nil
 	default:
 		return fmt.Errorf("%w: unsupported kind %q", plugin.ErrIncompatible, kind)
 	}
@@ -1525,6 +1571,10 @@ func dispatchPluginRemove(hooks PluginLifecycleHooks, kind plugin.Kind, pluginID
 	case plugin.ThemeKind:
 		if hooks.RemoveTheme != nil {
 			hooks.RemoveTheme(pluginID)
+		}
+	case plugin.LocaleKind:
+		if hooks.RemoveLocale != nil {
+			hooks.RemoveLocale(pluginID)
 		}
 	}
 }

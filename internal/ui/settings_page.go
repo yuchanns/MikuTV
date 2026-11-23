@@ -28,7 +28,7 @@ func (settingsLayout) Render(c *ui.Context, p *PageContext) {
 	p.region("sections", focusEdges{app.Right: {Region: "content"}})
 	sections := p.Pages.children(p.Node)
 	colors, d := p.Theme.Colors, p.uiColors()
-	ui.Column(c).FillWidth().Lang("zh-CN").Font("system-ui, PingFang SC").Children(func() {
+	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		ui.Box(c).FillWidth().Height(187).Children(func() {
 			ui.Text(c, text.SettingsTitle).Absolute().Top(2).Left(0).FontSize(54).FontWeight(550).LetterSpacing(2)
 			ui.Text(c, text.SettingsNote).Absolute().Top(94).Left(0).FontSize(22).LineHeight(1.7).
