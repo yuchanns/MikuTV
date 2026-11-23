@@ -131,16 +131,17 @@ func (a *AccountActivity) start(query provider.AccountQuery, cursor string, prev
 				return
 			}
 			cancel()
+			current := read.Page
 			if err != nil {
-				read.AccountSnapshot = AccountSnapshot{Phase: CatalogFailed, Page: previous, Error: provider.CodeOf(err)}
+				read.AccountSnapshot = AccountSnapshot{Phase: CatalogFailed, Page: current, Error: provider.CodeOf(err)}
 			} else {
 				if cursor != "" {
-					page.Rows = mergeAccountRows(previous.Rows, page.Rows)
+					page.Rows = mergeAccountRows(current.Rows, page.Rows)
 					if page.Total == nil {
-						page.Total = previous.Total
+						page.Total = current.Total
 					}
 					if page.Paused == nil {
-						page.Paused = previous.Paused
+						page.Paused = current.Paused
 					}
 				} else {
 					page.Rows = mergeAccountRows(nil, page.Rows)

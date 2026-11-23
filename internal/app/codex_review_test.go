@@ -316,6 +316,98 @@ func TestPrivateMessagesConversationPaginationRetainsConcurrentSend(t *testing.T
 	}
 }
 
+type fakeNotificationPaginationReader struct {
+	read func(context.Context, provider.AccountRequest) (provider.AccountPage, error)
+	ack  func(context.Context, provider.NotificationReadRequest) (provider.NotificationReadResult, error)
+}
+
+func (f *fakeNotificationPaginationReader) ReadAccount(ctx context.Context, req provider.AccountRequest) (provider.AccountPage, error) {
+	return f.read(ctx, req)
+}
+
+func (f *fakeNotificationPaginationReader) MarkNotificationsRead(ctx context.Context, req provider.NotificationReadRequest) (provider.NotificationReadResult, error) {
+	return f.ack(ctx, req)
+}
+
+func TestAccountActivityPaginationRetainsNotificationReadAck(t *testing.T) {
+	page2Ready := make(chan struct{})
+	releasePage2 := make(chan struct{})
+
+	reader := &fakeNotificationPaginationReader{
+		read: func(_ context.Context, req provider.AccountRequest) (provider.AccountPage, error) {
+			if req.Cursor == "" {
+				return provider.AccountPage{
+					Rows: []provider.AccountRow{{
+						ID:     "n1",
+						Time:   20,
+						Notice: &provider.AccountNotice{Unread: true},
+					}},
+					NextCursor: "page-2",
+				}, nil
+			}
+			close(page2Ready)
+			<-releasePage2
+			return provider.AccountPage{
+				Rows: []provider.AccountRow{
+					{ID: "n1", Time: 20, Notice: &provider.AccountNotice{Unread: true}},
+					{ID: "n2", Time: 10, Notice: &provider.AccountNotice{Unread: false}},
+				},
+			}, nil
+		},
+		ack: func(_ context.Context, _ provider.NotificationReadRequest) (provider.NotificationReadResult, error) {
+			zero := 0
+			return provider.NotificationReadResult{Unread: &zero}, nil
+		},
+	}
+
+	queue := make(chan func(), 32)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+
+	act := NewAccountActivity(nil, func(fn func()) { queue <- fn }, func() {})
+	act.Bind(Entry{
+		ID: "src",
+		Capabilities: provider.Capabilities{
+			provider.AccountNotifications.Capability(),
+			provider.EditNotifications,
+		},
+	}, "u1", reader)
+
+	query := provider.AccountQuery{Section: provider.AccountNotifications, Filter: provider.NoticeAll}
+	act.Ensure(query)
+	waitUntil(t, drain, func() bool { return act.Snapshot(query).Phase == CatalogReady && len(act.Snapshot(query).Page.Rows) == 1 })
+
+	act.More(query)
+	<-page2Ready
+
+	acked := false
+	if !act.MarkNotificationsRead(provider.NotificationReadRequest{All: true}, func(err error) {
+		if err != nil {
+			t.Errorf("MarkNotificationsRead error: %v", err)
+		}
+		acked = true
+	}) {
+		t.Fatal("MarkNotificationsRead returned false")
+	}
+	waitUntil(t, drain, func() bool { return acked })
+
+	close(releasePage2)
+	waitUntil(t, drain, func() bool { return act.Snapshot(query).Phase == CatalogReady && len(act.Snapshot(query).Page.Rows) == 2 })
+
+	rows := act.Snapshot(query).Page.Rows
+	if rows[0].ID != "n1" || rows[0].Notice == nil || rows[0].Notice.Unread {
+		t.Fatalf("notification pagination reverted read acknowledgement: %+v", rows[0])
+	}
+}
+
 func TestDanmakuRulesLocalIDNoCollisionAfterReload(t *testing.T) {
 	store := newMemoryDanmakuStore()
 	_ = store.SaveDanmakuRules("src", "", []provider.DanmakuRule{
