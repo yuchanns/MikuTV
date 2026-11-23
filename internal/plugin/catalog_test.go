@@ -259,3 +259,102 @@ func TestCatalogClientPaginationDedupETagRateLimitAndAuthoritativeKind(t *testin
 		t.Fatalf("expected typed RateLimitError with ResetAt, got %v", err)
 	}
 }
+
+func TestParseRepositoryReleaseVersionResolveAndDownloadAsset(t *testing.T) {
+	validCases := map[string]string{
+		"demo/media-source":                         "demo/media-source",
+		"https://github.com/demo/media-source":      "demo/media-source",
+		"https://github.com/demo/media-source.git":  "demo/media-source",
+		"http://www.github.com/demo/media-source/":  "demo/media-source",
+		"github.com/Demo/Media-Source/releases/tag": "Demo/Media-Source",
+	}
+	for raw, want := range validCases {
+		got, ok := ParseRepository(raw)
+		if !ok || got != want {
+			t.Errorf("ParseRepository(%q) = (%q, %v), want (%q, true)", raw, got, ok, want)
+		}
+	}
+	for _, bad := range []string{"", "onlyowner", "https://gitlab.com/a/b", "bad repo/name", "a/b c"} {
+		if got, ok := ParseRepository(bad); ok {
+			t.Errorf("ParseRepository(%q) unexpectedly succeeded: %q", bad, got)
+		}
+	}
+
+	if !ReleaseVersionMatches("v1.2.3", "1.2.3") || !ReleaseVersionMatches("1.2.3", "1.2.3") {
+		t.Fatal("expected matching release tag and manifest version")
+	}
+	if ReleaseVersionMatches("v1.2.4", "1.2.3") || ReleaseVersionMatches("v2.0.0", "1.2.3") {
+		t.Fatal("expected mismatched release tag and manifest version to fail")
+	}
+
+	goodZip := buildTestPluginZip(t, map[string]string{
+		"plugin.json": `{
+			"id": "demo-media",
+			"name": "Demo Media",
+			"description": "Videos",
+			"kind": "source",
+			"version": "1.2.0",
+			"apiVersion": 1,
+			"minAppVersion": "0.1.0",
+			"main": "index.js",
+			"permissions": {"network": ["api.demo.example"]},
+			"capabilities": ["catalog.browse"]
+		}`,
+		"index.js": `export function browse() { return { collections: [] }; }`,
+	})
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/demo/good":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 10, "full_name": "demo/good", "description": "Good repo", "owner": map[string]any{"login": "demo"}})
+		case "/repos/demo/good/releases":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 20, "tag_name": "v2.0.0-rc1", "prerelease": true, "assets": []map[string]any{{"id": 30, "name": "plugin.zip", "size": len(goodZip), "browser_download_url": srv.URL + "/good.zip"}}},
+				{"id": 21, "tag_name": "v1.2.0", "draft": false, "prerelease": false, "assets": []map[string]any{{"id": 31, "name": "plugin.zip", "size": len(goodZip), "browser_download_url": srv.URL + "/good.zip"}}},
+			})
+		case "/repos/demo/mismatch":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 11, "full_name": "demo/mismatch", "owner": map[string]any{"login": "demo"}})
+		case "/repos/demo/mismatch/releases":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 22, "tag_name": "v9.9.9", "draft": false, "prerelease": false, "assets": []map[string]any{{"id": 32, "name": "plugin.zip", "size": len(goodZip), "browser_download_url": srv.URL + "/good.zip"}}},
+			})
+		case "/repos/demo/prerelease-only":
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": 12, "full_name": "demo/prerelease-only", "owner": map[string]any{"login": "demo"}})
+		case "/repos/demo/prerelease-only/releases":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 23, "tag_name": "v1.2.0-beta.1", "prerelease": true, "assets": []map[string]any{{"id": 33, "name": "plugin.zip", "size": len(goodZip), "browser_download_url": srv.URL + "/good.zip"}}},
+			})
+		case "/good.zip":
+			_, _ = w.Write(goodZip)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := NewCatalogClient("0.1.0", srv.URL)
+	item, err := client.ResolveRepository(context.Background(), "https://github.com/demo/good")
+	if err != nil {
+		t.Fatalf("ResolveRepository good: %v", err)
+	}
+	if item.Manifest.ID != "demo-media" || item.Release.TagName != "v1.2.0" || item.Release.SHA256 == "" {
+		t.Fatalf("unexpected resolved item: %+v", item)
+	}
+
+	if _, err := client.ResolveRepository(context.Background(), "demo/mismatch"); !errors.Is(err, ErrVersionTagMismatch) {
+		t.Fatalf("expected ErrVersionTagMismatch, got %v", err)
+	}
+	if _, err := client.ResolveRepository(context.Background(), "demo/prerelease-only"); !errors.Is(err, ErrNoOfficialRelease) {
+		t.Fatalf("expected ErrNoOfficialRelease for prerelease-only, got %v", err)
+	}
+
+	// DownloadAsset checks SHA-256 when provided.
+	if _, _, err := client.DownloadAsset(context.Background(), item.Release); err != nil {
+		t.Fatalf("DownloadAsset valid: %v", err)
+	}
+	badAsset := item.Release
+	badAsset.SHA256 = strings.Repeat("0", 64)
+	if _, _, err := client.DownloadAsset(context.Background(), badAsset); !errors.Is(err, ErrDigestMismatch) {
+		t.Fatalf("expected ErrDigestMismatch, got %v", err)
+	}
+}

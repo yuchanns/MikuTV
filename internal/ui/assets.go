@@ -74,6 +74,21 @@ type pluginLabels struct {
 	LoadMoreAction, LoadingMore                     string
 	UpdatesUpToDate, InstallDeferred                string
 	AddRepoDeferred, ToggleDeferred                 string
+	RepoDialogTitle, RepoFieldLabel                 string
+	RepoPlaceholder, RepoInspectAction              string
+	RepoInspecting, RepoInvalidErr                  string
+	RepoNotFoundErr, RepoVersionMismatchErr         string
+	RepoConflictErr, RepoResolveFailedErr           string
+	InstallConfirmTitle, InstallPermissionsIntro    string
+	InstallNoPermissions, InstallConfirmAction      string
+	InstallPendingTitle, InstallPendingBody         string
+	InstallFailedTitle, InstallFailedDefault        string
+	InstallFailedNotInstalled, InstallRetryAction   string
+	InstallRetryLater, InstallSuccessTitle          string
+	InstallSuccessBody, InstallOpenEntries          string
+	InstallDone, InstallAlreadyInstalled            string
+	InstallErrDigest, InstallErrConflict            string
+	InstallErrIncompatible, InstallErrNetwork       string
 }
 
 type topShelfLabels struct {

@@ -28,6 +28,79 @@ const (
 	inspectConcurrency     = 4
 )
 
+var (
+	ErrInvalidRepository  = errors.New("invalid github repository")
+	ErrNoOfficialRelease  = errors.New("no official release with plugin.zip")
+	ErrVersionTagMismatch = errors.New("release tag does not match manifest version")
+	ErrDigestMismatch     = errors.New("downloaded archive digest mismatch")
+	ErrSourceConflict     = errors.New("plugin id is already bound to another source")
+)
+
+func ParseRepository(raw string) (string, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", false
+	}
+	lower := strings.ToLower(s)
+	hadGitHubHost := false
+	for _, prefix := range []string{
+		"https://www.github.com/",
+		"http://www.github.com/",
+		"https://github.com/",
+		"http://github.com/",
+		"www.github.com/",
+		"github.com/",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			s = s[len(prefix):]
+			hadGitHubHost = true
+			break
+		}
+	}
+	s = strings.Trim(s, "/")
+	parts := strings.Split(s, "/")
+	if hadGitHubHost {
+		if len(parts) < 2 {
+			return "", false
+		}
+		parts = parts[:2]
+	} else if len(parts) != 2 {
+		return "", false
+	}
+	owner := parts[0]
+	repo := strings.TrimSuffix(parts[1], ".git")
+	if !validRepoSegment(owner) || !validRepoSegment(repo) {
+		return "", false
+	}
+	return owner + "/" + repo, true
+}
+
+func validRepoSegment(seg string) bool {
+	if seg == "" || len(seg) > 100 || seg == "." || seg == ".." {
+		return false
+	}
+	for i := range len(seg) {
+		ch := seg[i]
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func ReleaseVersionMatches(tagName, manifestVersion string) bool {
+	tag := strings.TrimSpace(tagName)
+	ver := strings.TrimSpace(manifestVersion)
+	if ver == "" {
+		return false
+	}
+	if tag == "" {
+		return true
+	}
+	tag = strings.TrimPrefix(strings.TrimPrefix(tag, "v"), "V")
+	return tag == ver
+}
+
 type CompatibilityCode string
 
 const (
@@ -490,6 +563,9 @@ func (c *CatalogClient) inspectRepository(ctx context.Context, repo githubRepoEn
 	if err != nil {
 		return CatalogItem{}, false, nil
 	}
+	if !ReleaseVersionMatches(asset.TagName, inspected.Manifest.Version) {
+		return CatalogItem{}, false, nil
+	}
 	asset.SHA256 = fmt.Sprintf("%x", inspected.Digest)
 	item := CatalogItem{
 		Repository:      repo.FullName,
@@ -539,6 +615,116 @@ func selectOfficialPluginAsset(releases []githubReleaseEntry) (ReleaseAsset, boo
 		}
 	}
 	return ReleaseAsset{}, false
+}
+
+func (c *CatalogClient) ResolveRepository(ctx context.Context, rawRepo string) (CatalogItem, error) {
+	canonical, ok := ParseRepository(rawRepo)
+	if !ok {
+		return CatalogItem{}, ErrInvalidRepository
+	}
+	parts := strings.Split(canonical, "/")
+	repoEndpoint := fmt.Sprintf("%s/repos/%s/%s", c.apiBase(), url.PathEscape(parts[0]), url.PathEscape(parts[1]))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, repoEndpoint, nil)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	c.setGitHubHeaders(req)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return CatalogItem{}, ErrNoOfficialRelease
+	}
+	if err := checkGitHubResponse(resp); err != nil {
+		return CatalogItem{}, err
+	}
+	var repo githubRepoEntry
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&repo); err != nil {
+		return CatalogItem{}, fmt.Errorf("decode repository: %w", err)
+	}
+	if repo.FullName == "" {
+		repo.FullName = canonical
+	}
+	if repo.Owner.Login == "" {
+		repo.Owner.Login = parts[0]
+	}
+
+	relEndpoint := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=10",
+		c.apiBase(), url.PathEscape(parts[0]), url.PathEscape(parts[1]))
+	relReq, err := http.NewRequestWithContext(ctx, http.MethodGet, relEndpoint, nil)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	c.setGitHubHeaders(relReq)
+	relResp, err := c.httpClient().Do(relReq)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	defer relResp.Body.Close()
+	if relResp.StatusCode == http.StatusNotFound {
+		return CatalogItem{}, ErrNoOfficialRelease
+	}
+	if err := checkGitHubResponse(relResp); err != nil {
+		return CatalogItem{}, err
+	}
+	var releases []githubReleaseEntry
+	if err := json.NewDecoder(io.LimitReader(relResp.Body, 2<<20)).Decode(&releases); err != nil {
+		return CatalogItem{}, fmt.Errorf("decode releases: %w", err)
+	}
+	asset, ok := selectOfficialPluginAsset(releases)
+	if !ok {
+		return CatalogItem{}, ErrNoOfficialRelease
+	}
+	zipBytes, err := c.downloadArchive(ctx, asset.DownloadURL)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	inspected, err := InspectPackage(zipBytes, c.AppVersion)
+	if err != nil {
+		return CatalogItem{}, err
+	}
+	if !ReleaseVersionMatches(asset.TagName, inspected.Manifest.Version) {
+		return CatalogItem{}, fmt.Errorf("%w: release %q vs manifest %q", ErrVersionTagMismatch, asset.TagName, inspected.Manifest.Version)
+	}
+	asset.SHA256 = fmt.Sprintf("%x", inspected.Digest)
+	item := CatalogItem{
+		Repository:      repo.FullName,
+		RepoID:          repo.ID,
+		Owner:           repo.Owner.Login,
+		HTMLURL:         repo.HTMLURL,
+		RepoDescription: strings.TrimSpace(repo.Description),
+		Stars:           repo.Stars,
+		UpdatedAt:       repo.UpdatedAt,
+		Release:         asset,
+		Manifest:        inspected.Manifest,
+		Permissions:     inspected.NetworkPermissions,
+		Compatibility:   inspected.Compatibility,
+	}
+	if key := inspectCacheKey(item.Repository, asset.ReleaseID, asset.AssetID); key != "" {
+		c.mu.Lock()
+		if c.inspectCache == nil {
+			c.inspectCache = make(map[string]CatalogItem)
+		}
+		c.inspectCache[key] = item
+		c.mu.Unlock()
+	}
+	return item, nil
+}
+
+func (c *CatalogClient) DownloadAsset(ctx context.Context, asset ReleaseAsset) ([]byte, [sha256.Size]byte, error) {
+	data, err := c.downloadArchive(ctx, asset.DownloadURL)
+	if err != nil {
+		return nil, [sha256.Size]byte{}, err
+	}
+	digest := sha256.Sum256(data)
+	if expected := strings.ToLower(strings.TrimSpace(asset.SHA256)); expected != "" {
+		if fmt.Sprintf("%x", digest) != expected {
+			return nil, [sha256.Size]byte{}, fmt.Errorf("%w: expected %s", ErrDigestMismatch, expected)
+		}
+	}
+	return data, digest, nil
 }
 
 func (c *CatalogClient) downloadArchive(ctx context.Context, rawURL string) ([]byte, error) {

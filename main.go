@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -86,10 +88,12 @@ func main() {
 		var entries []app.Entry
 		var aboutPlugins []app.AboutPlugin
 		var installedPlugins []app.InstalledPlugin
+		var sourcesMu sync.RWMutex
 		sourcesByID := make(map[string]*plugin.Source)
 		entrySource := make(map[string]string)
 		stores := make(map[string]*plugin.Storage)
-		for _, source := range sources {
+
+		mountSource := func(source *plugin.Source, receipt *plugin.InstalledReceipt) (app.Entry, app.AboutPlugin, app.InstalledPlugin, error) {
 			info := source.Manifest()
 			entry := app.Entry{ID: info.ID, SourceID: info.ID, Name: info.Name,
 				Description: info.Description, Artwork: info.ID,
@@ -99,13 +103,17 @@ func main() {
 				return preferences.SavePluginStorage(entry.SourceID, entry.ID, data)
 			})
 			if err != nil {
-				log.Fatalf("open plugin %s storage: %v", info.ID, err)
+				return app.Entry{}, app.AboutPlugin{}, app.InstalledPlugin{}, err
 			}
+			sourcesMu.Lock()
 			sourcesByID[entry.SourceID] = source
 			entrySource[entry.ID] = entry.SourceID
 			stores[entry.ID] = store
-			entries = append(entries, entry)
-			aboutPlugins = append(aboutPlugins, app.AboutPlugin{
+			sourcesMu.Unlock()
+			assets.PrepareArtwork(entry.Artwork, source.Cover())
+			assets.PrepareAccountArtwork(entry.ID, source.AuthArtwork())
+
+			aboutPl := app.AboutPlugin{
 				ID:           info.ID,
 				Name:         info.Name,
 				Kind:         string(info.Kind),
@@ -114,8 +122,8 @@ func main() {
 				SourceCommit: source.SourceCommit(),
 				License:      info.License,
 				LicenseText:  source.LicenseText(),
-			})
-			installedPlugins = append(installedPlugins, app.InstalledPlugin{
+			}
+			installedPl := app.InstalledPlugin{
 				ID:           info.ID,
 				Name:         info.Name,
 				Description:  info.Description,
@@ -126,10 +134,61 @@ func main() {
 				License:      info.License,
 				SourceCommit: source.SourceCommit(),
 				Capabilities: source.Capabilities(),
-			})
-			assets.PrepareArtwork(entry.Artwork, source.Cover())
-			assets.PrepareAccountArtwork(entry.ID, source.AuthArtwork())
+			}
+			if receipt != nil {
+				installedPl.Bundled = false
+				installedPl.Repository = receipt.Repository
+				installedPl.ReleaseID = receipt.ReleaseID
+				installedPl.TagName = receipt.TagName
+				installedPl.AssetID = receipt.AssetID
+				installedPl.SHA256 = receipt.SHA256
+				installedPl.Enabled = receipt.Enabled
+				installedPl.Permissions = append([]string(nil), receipt.Permissions...)
+				aboutPl.Bundled = false
+			}
+			return entry, aboutPl, installedPl, nil
 		}
+
+		mountedIDs := make(map[string]bool)
+		for _, source := range sources {
+			entry, aboutPl, installedPl, err := mountSource(source, nil)
+			if err != nil {
+				log.Fatalf("open plugin %s storage: %v", source.Manifest().ID, err)
+			}
+			mountedIDs[strings.ToLower(entry.ID)] = true
+			entries = append(entries, entry)
+			aboutPlugins = append(aboutPlugins, aboutPl)
+			installedPlugins = append(installedPlugins, installedPl)
+		}
+
+		pluginCatalogBase := os.Getenv("MIKUTV_PLUGIN_CATALOG_BASE_URL")
+		packageStore := platform.NewPluginPackageStore()
+		if pluginCatalogBase != "" {
+			packageStore = platform.NewPluginPackageStoreNamed("plugins-override")
+		}
+		externalPackages, externalFailures := packageStore.LoadAll(context.Background(), appVersion)
+		for _, err := range externalFailures {
+			log.Printf("external plugin load: %v", err)
+		}
+		for _, pkg := range externalPackages {
+			if mountedIDs[strings.ToLower(pkg.Receipt.ID)] {
+				log.Printf("skipping external plugin %s: conflicts with bundled plugin", pkg.Receipt.ID)
+				continue
+			}
+			receipt := pkg.Receipt
+			entry, aboutPl, installedPl, err := mountSource(pkg.Source, &receipt)
+			if err != nil {
+				log.Printf("open external plugin %s storage: %v", receipt.ID, err)
+				continue
+			}
+			mountedIDs[strings.ToLower(entry.ID)] = true
+			if receipt.Enabled {
+				entries = append(entries, entry)
+			}
+			aboutPlugins = append(aboutPlugins, aboutPl)
+			installedPlugins = append(installedPlugins, installedPl)
+		}
+
 		state, err := app.NewState(entries, saved.RecentEntry, pages.Routes)
 		if err != nil {
 			log.Fatal(err)
@@ -141,11 +200,14 @@ func main() {
 			}
 		}
 		catalog := app.NewCatalog(func(entryID string) provider.Session {
+			sourcesMu.RLock()
 			src := sourcesByID[entrySource[entryID]]
+			store := stores[entryID]
+			sourcesMu.RUnlock()
 			if src == nil {
 				return nil
 			}
-			return src.NewSession(entryID, stores[entryID])
+			return src.NewSession(entryID, store)
 		}, mygo.RunOnMain, invalidate)
 		activity := app.NewAccountActivity(preferences, mygo.RunOnMain, invalidate)
 		privateMessages := app.NewPrivateMessages(mygo.RunOnMain, invalidate)
@@ -156,7 +218,6 @@ func main() {
 		liveChat := app.NewLiveChat(mygo.RunOnMain, invalidate)
 		danmakuRules := app.NewDanmakuRules(preferences, mygo.RunOnMain, invalidate)
 		playbackSettings := app.NewPlaybackSettings(preferences, invalidate)
-		pluginCatalogBase := os.Getenv("MIKUTV_PLUGIN_CATALOG_BASE_URL")
 		pluginCatalogCache := platform.NewPluginCatalogCache()
 		if pluginCatalogBase != "" {
 			pluginCatalogCache = platform.NewPluginCatalogCacheNamed("plugin-catalog-override-v1.json")
@@ -169,6 +230,43 @@ func main() {
 			invalidate,
 		)
 		var view *tvui.View
+		pluginCatalog.SetInstaller(packageStore, appVersion, func(source *plugin.Source, receipt plugin.InstalledReceipt) error {
+			entry, aboutPl, _, err := mountSource(source, &receipt)
+			if err != nil {
+				return err
+			}
+			if receipt.Enabled {
+				current := state.Entries()
+				next := make([]app.Entry, 0, len(current)+1)
+				replaced := false
+				for _, existing := range current {
+					if strings.EqualFold(existing.ID, entry.ID) {
+						next = append(next, entry)
+						replaced = true
+					} else {
+						next = append(next, existing)
+					}
+				}
+				if !replaced {
+					next = append(next, entry)
+				}
+				state.UpdateEntries(next)
+			}
+			if view != nil {
+				replaced := false
+				for i, existing := range view.About.Plugins {
+					if strings.EqualFold(existing.ID, aboutPl.ID) {
+						view.About.Plugins[i] = aboutPl
+						replaced = true
+						break
+					}
+				}
+				if !replaced {
+					view.About.Plugins = append(view.About.Plugins, aboutPl)
+				}
+			}
+			return nil
+		})
 		auth := app.NewAuth(credentials, mygo.RunOnMain, invalidate, func() {
 			catalog.Reload()
 			activity.Close()

@@ -76,6 +76,8 @@ func TestModalShellPresentationAndRender(t *testing.T) {
 		{Page: app.VideoConfirm},
 		{Page: app.VideoCommentCompose},
 		{Page: app.DanmakuRuleEditor, Section: "danmaku"},
+		{Page: app.PluginRepoInput, Section: "plugins"},
+		{Page: app.PluginInstallDialog, Section: "plugins"},
 		{Page: app.PrivacyConfirm, Section: "privacy"},
 		{Page: app.PrivacyDetails, Section: "about"},
 		{Page: app.AboutProject, Section: "about"},

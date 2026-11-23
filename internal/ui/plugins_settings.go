@@ -51,16 +51,18 @@ func pluginsCatalogFocus(repo string) app.FocusID {
 }
 
 type pluginsSettingsUI struct {
-	view                pluginsViewMode
-	selectedInstalledID string
-	selectedCatalogRepo string
-	filter              plugin.Kind
-	query               string
-	input               string
-	editing             bool
-	listScroll          float32
+	view                 pluginsViewMode
+	selectedInstalledID  string
+	selectedCatalogRepo  string
+	filter               plugin.Kind
+	query                string
+	input                string
+	editing              bool
+	listScroll           float32
 	pendingRestoreScroll bool
-	returnFocus         app.FocusID
+	returnFocus          app.FocusID
+	repo                 pluginRepoDraft
+	install              pluginInstallState
 }
 
 func syncPluginsSettings(v *View) {
@@ -211,7 +213,7 @@ func (p *PageContext) renderPluginsInstalled(c *ui.Context) {
 				p.State.Focus, v.reveal = pluginsFilterAll, true
 			}, btnStyle)
 			p.styledButton(c, l.AddRepoButton, "repository", pluginsAddRepoBtn, "plugins-toolbar", func() {
-				v.showSettingsFeedback(l.AddRepoDeferred)
+				v.openPluginRepoInput()
 			}, btnStyle)
 		})
 	})
@@ -376,7 +378,7 @@ func (p *PageContext) renderPluginsDiscover(c *ui.Context) {
 		})
 	case totalUninstalled == 0 && !hasQuery:
 		p.renderPluginStatusBox(c, "plug", l.EmptyTitle, l.EmptyNote, l.AddRepoButton, "repository", pluginsEmptyAddRepoBtn, func() {
-			v.showSettingsFeedback(l.AddRepoDeferred)
+			v.openPluginRepoInput()
 		})
 	case len(visible) == 0:
 		if hasQuery {
@@ -659,7 +661,7 @@ func (p *PageContext) renderCatalogPluginDetail(c *ui.Context, item plugin.Catal
 
 	if item.Compatibility.Compatible {
 		p.pluginRow(c, pluginsDetailInstall, "content", "plus", l.InstallLabel, l.InstallNote, "", func() {
-			v.showSettingsFeedback(l.InstallDeferred)
+			v.openPluginInstallConfirm(item)
 		})
 	}
 }

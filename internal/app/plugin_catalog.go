@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +12,8 @@ import (
 	"github.com/yuchanns/MikuTV/internal/plugin"
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
+
+var ErrPluginAlreadyInstalled = errors.New("plugin is already installed")
 
 type PluginCatalogStatus uint8
 
@@ -29,12 +33,23 @@ type InstalledPlugin struct {
 	Kind         plugin.Kind
 	Version      string
 	Repository   string
+	ReleaseID    int64
+	TagName      string
+	AssetID      int64
+	SHA256       string
 	Bundled      bool
 	Enabled      bool
 	License      string
 	SourceCommit string
 	Permissions  []string
 	Capabilities provider.Capabilities
+}
+
+type PluginInstallOutcome struct {
+	Receipt   plugin.InstalledReceipt
+	Err       error
+	Canceled  bool
+	Retryable bool
 }
 
 type PluginCatalogCacheData struct {
@@ -54,6 +69,8 @@ type PluginCatalogCache interface {
 type PluginCatalogFetcher interface {
 	FetchPage(ctx context.Context, page int, etag string) (plugin.CatalogPage, error)
 	SeedInspectCache(items []plugin.CatalogItem)
+	ResolveRepository(ctx context.Context, rawRepo string) (plugin.CatalogItem, error)
+	DownloadAsset(ctx context.Context, asset plugin.ReleaseAsset) ([]byte, [sha256.Size]byte, error)
 }
 
 type PluginCatalogSnapshot struct {
@@ -73,6 +90,9 @@ type PluginCatalogSnapshot struct {
 type PluginCatalog struct {
 	fetcher    PluginCatalogFetcher
 	cache      PluginCatalogCache
+	pkgStore   *plugin.PackageStore
+	appVersion string
+	onMounted  func(*plugin.Source, plugin.InstalledReceipt) error
 	post       func(func())
 	invalidate func()
 
@@ -91,6 +111,22 @@ type PluginCatalog struct {
 	lastErr          string
 	gen              uint64
 	cancel           context.CancelFunc
+	resolveGen       uint64
+	resolveCancel    context.CancelFunc
+	installGen       uint64
+	installCancel    context.CancelFunc
+}
+
+func (c *PluginCatalog) SetInstaller(
+	store *plugin.PackageStore,
+	appVersion string,
+	onMounted func(*plugin.Source, plugin.InstalledReceipt) error,
+) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pkgStore = store
+	c.appVersion = appVersion
+	c.onMounted = onMounted
 }
 
 func NewPluginCatalog(
@@ -348,8 +384,14 @@ func (c *PluginCatalog) LoadMore() {
 func (c *PluginCatalog) Close() {
 	c.mu.Lock()
 	cancel := c.cancel
+	resolveCancel := c.resolveCancel
+	installCancel := c.installCancel
 	c.cancel = nil
+	c.resolveCancel = nil
+	c.installCancel = nil
 	c.gen++
+	c.resolveGen++
+	c.installGen++
 	c.loadingMore = false
 	if c.status == PluginCatalogLoading {
 		if len(c.items) > 0 {
@@ -362,6 +404,256 @@ func (c *PluginCatalog) Close() {
 	if cancel != nil {
 		cancel()
 	}
+	if resolveCancel != nil {
+		resolveCancel()
+	}
+	if installCancel != nil {
+		installCancel()
+	}
+}
+
+func (c *PluginCatalog) CheckInstallable(item plugin.CatalogItem) error {
+	if !item.Compatibility.Compatible || item.Manifest.Kind != plugin.SourceKind {
+		return plugin.ErrIncompatible
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, existing := range c.installed {
+		if strings.EqualFold(existing.ID, item.Manifest.ID) {
+			if existing.Bundled || !strings.EqualFold(existing.Repository, item.Repository) {
+				return fmt.Errorf("%w: %s", plugin.ErrSourceConflict, item.Manifest.ID)
+			}
+			return ErrPluginAlreadyInstalled
+		}
+	}
+	return nil
+}
+
+func (c *PluginCatalog) UpsertCatalogItem(item plugin.CatalogItem) {
+	if strings.TrimSpace(item.Repository) == "" || item.Manifest.ID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	replaced := false
+	for i, existing := range c.items {
+		if strings.EqualFold(existing.Repository, item.Repository) {
+			c.items[i] = item
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		c.items = append([]plugin.CatalogItem{item}, c.items...)
+	}
+}
+
+func (c *PluginCatalog) CancelResolve() {
+	c.mu.Lock()
+	cancel := c.resolveCancel
+	c.resolveCancel = nil
+	c.resolveGen++
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (c *PluginCatalog) ResolveRepository(raw string, onDone func(plugin.CatalogItem, error)) {
+	if _, ok := plugin.ParseRepository(raw); !ok {
+		if onDone != nil {
+			onDone(plugin.CatalogItem{}, plugin.ErrInvalidRepository)
+		}
+		return
+	}
+	c.mu.Lock()
+	if c.fetcher == nil {
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(plugin.CatalogItem{}, errors.New("plugin catalog unavailable"))
+		}
+		return
+	}
+	if c.resolveCancel != nil {
+		c.resolveCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	c.resolveCancel = cancel
+	c.resolveGen++
+	gen := c.resolveGen
+	c.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		item, err := c.fetcher.ResolveRepository(ctx, raw)
+		c.post(func() {
+			c.mu.Lock()
+			if c.resolveGen != gen {
+				c.mu.Unlock()
+				return
+			}
+			c.resolveCancel = nil
+			c.mu.Unlock()
+			if err == nil {
+				c.UpsertCatalogItem(item)
+			}
+			if onDone != nil {
+				onDone(item, err)
+			}
+			c.notify()
+		})
+	}()
+}
+
+func (c *PluginCatalog) CancelInstall() {
+	c.mu.Lock()
+	cancel := c.installCancel
+	c.installCancel = nil
+	c.installGen++
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (c *PluginCatalog) Install(item plugin.CatalogItem, onDone func(PluginInstallOutcome)) {
+	if err := c.CheckInstallable(item); err != nil {
+		if onDone != nil {
+			onDone(PluginInstallOutcome{Err: err, Retryable: false})
+		}
+		return
+	}
+	c.mu.Lock()
+	if c.fetcher == nil || c.pkgStore == nil {
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(PluginInstallOutcome{Err: errors.New("plugin installer unavailable"), Retryable: false})
+		}
+		return
+	}
+	if c.installCancel != nil {
+		c.installCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	c.installCancel = cancel
+	c.installGen++
+	gen := c.installGen
+	store := c.pkgStore
+	appVersion := c.appVersion
+	onMounted := c.onMounted
+	bound := make(map[string]string, len(c.installed))
+	for _, existing := range c.installed {
+		normID := strings.ToLower(strings.TrimSpace(existing.ID))
+		if normID == "" {
+			continue
+		}
+		if existing.Bundled {
+			bound[normID] = ""
+		} else {
+			bound[normID] = strings.ToLower(strings.TrimSpace(existing.Repository))
+		}
+	}
+	c.mu.Unlock()
+
+	go func() {
+		defer cancel()
+		data, _, err := c.fetcher.DownloadAsset(ctx, item.Release)
+		if err != nil {
+			canceled := errors.Is(err, context.Canceled) || ctx.Err() != nil
+			c.finishInstall(gen, PluginInstallOutcome{
+				Err:       err,
+				Canceled:  canceled,
+				Retryable: !errors.Is(err, plugin.ErrDigestMismatch) && !canceled,
+			}, onDone)
+			return
+		}
+		src, receipt, err := store.StageAndInstall(ctx, data, item, appVersion, bound)
+		if err != nil {
+			canceled := errors.Is(err, context.Canceled) || ctx.Err() != nil
+			retryable := !errors.Is(err, plugin.ErrIncompatible) &&
+				!errors.Is(err, plugin.ErrSourceConflict) &&
+				!errors.Is(err, plugin.ErrDigestMismatch) &&
+				!errors.Is(err, plugin.ErrVersionTagMismatch) &&
+				!canceled
+			c.finishInstall(gen, PluginInstallOutcome{
+				Err:       err,
+				Canceled:  canceled,
+				Retryable: retryable,
+			}, onDone)
+			return
+		}
+		c.post(func() {
+			c.mu.Lock()
+			if c.installGen != gen {
+				c.mu.Unlock()
+				return
+			}
+			c.installCancel = nil
+			c.mu.Unlock()
+
+			if onMounted != nil {
+				if err := onMounted(src, receipt); err != nil {
+					if onDone != nil {
+						onDone(PluginInstallOutcome{Err: err, Retryable: false})
+					}
+					c.notify()
+					return
+				}
+			}
+
+			c.mu.Lock()
+			installed := InstalledPlugin{
+				ID:           receipt.ID,
+				Name:         receipt.Name,
+				Description:  receipt.Description,
+				Kind:         receipt.Kind,
+				Version:      receipt.Version,
+				Repository:   receipt.Repository,
+				ReleaseID:    receipt.ReleaseID,
+				TagName:      receipt.TagName,
+				AssetID:      receipt.AssetID,
+				SHA256:       receipt.SHA256,
+				Bundled:      false,
+				Enabled:      receipt.Enabled,
+				License:      receipt.License,
+				Permissions:  append([]string(nil), receipt.Permissions...),
+				Capabilities: src.Capabilities(),
+			}
+			replaced := false
+			for i, existing := range c.installed {
+				if strings.EqualFold(existing.ID, installed.ID) {
+					c.installed[i] = installed
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				c.installed = append(c.installed, installed)
+			}
+			c.mu.Unlock()
+
+			if onDone != nil {
+				onDone(PluginInstallOutcome{Receipt: receipt})
+			}
+			c.notify()
+		})
+	}()
+}
+
+func (c *PluginCatalog) finishInstall(gen uint64, outcome PluginInstallOutcome, onDone func(PluginInstallOutcome)) {
+	c.post(func() {
+		c.mu.Lock()
+		if c.installGen != gen {
+			c.mu.Unlock()
+			return
+		}
+		c.installCancel = nil
+		c.mu.Unlock()
+		if onDone != nil {
+			onDone(outcome)
+		}
+		c.notify()
+	})
 }
 
 func (c *PluginCatalog) applyFetchErrorLocked(err error) {

@@ -28,6 +28,12 @@ func (f *stubPluginCatalogFetcher) FetchPage(_ context.Context, page int, etag s
 }
 
 func (f *stubPluginCatalogFetcher) SeedInspectCache([]plugin.CatalogItem) {}
+func (f *stubPluginCatalogFetcher) ResolveRepository(_ context.Context, _ string) (plugin.CatalogItem, error) {
+	return plugin.CatalogItem{}, plugin.ErrNoOfficialRelease
+}
+func (f *stubPluginCatalogFetcher) DownloadAsset(_ context.Context, _ plugin.ReleaseAsset) ([]byte, [32]byte, error) {
+	return nil, [32]byte{}, errors.New("not implemented")
+}
 
 type memoryPluginCatalogCache struct {
 	data PluginCatalogCacheData

@@ -425,6 +425,43 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Policy:    app.RouteSpec{Route: app.Route{Page: app.AboutProject, Section: "about"}, Parent: app.Route{Page: app.Settings, Section: "about"}, Modal: true, Initial: focus(app.CloseModal)},
 			Component: aboutProjectPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
 		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.PluginRepoInput, Section: "plugins"},
+				Parent: app.Route{Page: app.Settings, Section: "plugins"},
+				Modal:  true, Initial: focus(pluginRepoField),
+			},
+			Component: pluginRepoInputPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
+			Back: func(v *View) bool {
+				if v.pluginsUI.repo.editing {
+					v.pluginsUI.repo.editing = false
+					v.pluginsUI.repo.input = v.pluginsUI.repo.text
+					v.State.Focus, v.reveal = pluginRepoField, true
+					return true
+				}
+				return false
+			},
+			Leave: func(v *View) {
+				if v.PluginCatalog != nil {
+					v.PluginCatalog.CancelResolve()
+				}
+				v.pluginsUI.repo.editing = false
+				v.pluginsUI.repo.busy = false
+			},
+		},
+		Registration{
+			Policy: app.RouteSpec{
+				Route:  app.Route{Page: app.PluginInstallDialog, Section: "plugins"},
+				Parent: app.Route{Page: app.Settings, Section: "plugins"},
+				Modal:  true, Initial: focus(pluginInstallConfirmBtn),
+			},
+			Component: pluginInstallDialogPage{}, ModalPresentation: modalFrameless, ModalWidth: 780,
+			Leave: func(v *View) {
+				if v.PluginCatalog != nil {
+					v.PluginCatalog.CancelInstall()
+				}
+			},
+		},
 	)
 	registrations = append(registrations, additional...)
 	p := &Pages{components: make(map[app.Route]Registration)}
