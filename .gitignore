@@ -5,3 +5,7 @@ test-results/
 .build/
 vendor/
 __pycache__/
+website/dist/
+website/.astro/
+website/.wrangler/
+website/worker-configuration.d.ts

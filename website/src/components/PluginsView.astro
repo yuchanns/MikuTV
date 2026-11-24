@@ -1,0 +1,275 @@
+---
+import { THEME_SWATCH_MAP } from '../data/catalog'
+import { COPY, type Lang } from '../data/i18n'
+
+interface Props {
+  lang: Lang
+}
+
+const { lang } = Astro.props
+const t = COPY[lang]
+const p = t.pluginsPage
+
+const clientConfig = {
+  loading: p.loading,
+  live: p.live,
+  error: p.error,
+  empty: p.empty,
+  copied: p.copied,
+  kindLabel: p.kindLabel,
+  themeMap: THEME_SWATCH_MAP,
+}
+---
+
+<section class="page-header">
+  <h1>{p.title}</h1>
+  <p class="page-header__lead">{p.note}</p>
+</section>
+
+<section id="plugin-catalogue">
+  <div class="catalogue-controls">
+    <div class="cat-filters" role="tablist" aria-label="Filter plugins">
+      <button type="button" class="cat-filter is-active" data-cat-kind="all">{p.filters.all}</button>
+      <button type="button" class="cat-filter" data-cat-kind="source">{p.filters.source}</button>
+      <button type="button" class="cat-filter" data-cat-kind="theme">{p.filters.theme}</button>
+      <button type="button" class="cat-filter" data-cat-kind="locale">{p.filters.locale}</button>
+    </div>
+
+    <div class="cat-search-group">
+      <input
+        type="search"
+        id="cat-search"
+        class="cat-search"
+        placeholder={p.searchPlaceholder}
+        autocomplete="off"
+      />
+    </div>
+  </div>
+
+  <div class="cat-status">
+    <span class="mono" id="cat-status-text">{p.loading}</span>
+    <a
+      href="https://github.com/topics/mikutv-plugin"
+      target="_blank"
+      rel="noopener noreferrer"
+      class="mono"
+      style="border-bottom:1px solid var(--leek);color:var(--ink);"
+    >
+      GITHUB.COM/TOPICS/MIKUTV-PLUGIN ↗
+    </a>
+  </div>
+
+  <div class="cat-wrap">
+    <div class="cat-list" id="cat-list" aria-live="polite">
+      <div class="cat-empty mono">{p.loading}</div>
+    </div>
+  </div>
+</section>
+
+<script id="mikutv-cat-config" type="application/json" set:html={JSON.stringify(clientConfig)} />
+
+<script>
+  interface CatalogueItem {
+    fullName: string
+    name: string
+    displayName: string
+    owner: string
+    description: string
+    kind: 'source' | 'theme' | 'locale'
+    topics: string[]
+    stars: number
+    updatedAt: string
+    htmlUrl: string
+    releasesUrl: string
+    swatches?: string[]
+  }
+
+  interface CatConfig {
+    loading: string
+    live: string
+    error: string
+    empty: string
+    copied: string
+    kindLabel: { source: string; theme: string; locale: string }
+    themeMap: Record<string, { swatches: string[]; appearance: 'dark' | 'light'; displayName: string }>
+  }
+
+  function esc(str: string): string {
+    return str
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+  }
+
+  function fmtDate(iso: string): string {
+    if (!iso) return ''
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return ''
+    return d.toISOString().slice(0, 10)
+  }
+
+  function mapDirect(raw: any, themeMap: CatConfig['themeMap']): CatalogueItem {
+    const topics: string[] = Array.isArray(raw.topics) ? raw.topics : []
+    const kind: CatalogueItem['kind'] = topics.includes('mikutv-theme')
+      ? 'theme'
+      : topics.includes('mikutv-locale')
+        ? 'locale'
+        : 'source'
+    const fullName: string = raw.full_name || ''
+    const key = fullName.toLowerCase()
+    const owner: string = raw.owner?.login || fullName.split('/')[0] || ''
+    const tm = themeMap[key]
+    const displayName =
+      tm?.displayName ||
+      (key === 'yuchanns/mikutv-plugin-jellyfin'
+        ? 'Jellyfin'
+        : key === 'yuchanns/mikutv-locale-ja'
+          ? 'Japanese (日本語)'
+          : (raw.name || '')
+              .replace(/^mikutv-(plugin|theme|locale)-/i, '')
+              .split(/[-_]+/)
+              .filter(Boolean)
+              .map((s: string) => s.charAt(0).toUpperCase() + s.slice(1))
+              .join(' '))
+    return {
+      fullName,
+      name: raw.name || '',
+      displayName,
+      owner,
+      description: (raw.description || '').trim(),
+      kind,
+      topics,
+      stars: raw.stargazers_count || 0,
+      updatedAt: raw.pushed_at || raw.updated_at || '',
+      htmlUrl: raw.html_url || `https://github.com/${fullName}`,
+      releasesUrl: `${raw.html_url || `https://github.com/${fullName}`}/releases`,
+      ...(tm ? { swatches: tm.swatches } : {}),
+    }
+  }
+
+  function initCatalogue() {
+    const root = document.getElementById('plugin-catalogue')
+    const cfgEl = document.getElementById('mikutv-cat-config')
+    if (!root || !cfgEl || root.dataset.bound) return
+    root.dataset.bound = '1'
+
+    const cfg: CatConfig = JSON.parse(cfgEl.textContent || '{}')
+    const listEl = document.getElementById('cat-list')
+    const statusEl = document.getElementById('cat-status-text')
+    const searchEl = document.getElementById('cat-search') as HTMLInputElement | null
+    const filters = root.querySelectorAll<HTMLButtonElement>('[data-cat-kind]')
+
+    let items: CatalogueItem[] = []
+    let kind = 'all'
+    let q = ''
+    let failed = false
+
+    const render = () => {
+      if (!listEl) return
+      if (failed) {
+        listEl.innerHTML = `<div class="cat-empty">${esc(cfg.error)}</div>`
+        return
+      }
+      const term = q.trim().toLowerCase()
+      const visible = items
+        .filter((item) => {
+          if (kind !== 'all' && item.kind !== kind) return false
+          if (!term) return true
+          return (
+            item.displayName.toLowerCase().includes(term) ||
+            item.fullName.toLowerCase().includes(term) ||
+            item.owner.toLowerCase().includes(term) ||
+            item.description.toLowerCase().includes(term)
+          )
+        })
+        .sort((a, b) => {
+          const order = { source: 0, locale: 1, theme: 2 }
+          return order[a.kind] - order[b.kind] || (b.updatedAt || '').localeCompare(a.updatedAt || '')
+        })
+
+      if (!visible.length) {
+        listEl.innerHTML = `<div class="cat-empty">${esc(cfg.empty)}</div>`
+        return
+      }
+
+      listEl.innerHTML = visible
+        .map((item) => {
+          const endCell = item.swatches
+            ? `<div class="swatch-strip" aria-hidden="true">${item.swatches
+                .map((hex) => `<span style="background:${esc(hex)}"></span>`)
+                .join('')}</div>`
+            : `<span class="cat-row__kind">${esc(cfg.kindLabel[item.kind])}</span>`
+          return `
+            <a href="${esc(item.htmlUrl)}" target="_blank" rel="noopener noreferrer" class="cat-row">
+              <div>
+                <div class="cat-row__name">${esc(item.displayName)}</div>
+                <span class="cat-row__repo">${esc(item.fullName)}</span>
+              </div>
+              <div class="cat-row__desc">${esc(item.description || item.fullName)}</div>
+              <div class="cat-row__owner">@${esc(item.owner)}</div>
+              <div class="cat-row__date">${esc(fmtDate(item.updatedAt))}</div>
+              <div class="cat-row__end">${endCell}</div>
+            </a>
+          `
+        })
+        .join('')
+    }
+
+    const load = async () => {
+      try {
+        const res = await fetch('/api/plugins', { headers: { accept: 'application/json' } })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        if (data.source === 'github-live' && Array.isArray(data.items)) {
+          items = data.items
+          failed = false
+          if (statusEl) statusEl.textContent = `${cfg.live} · ${items.length}`
+          render()
+          return
+        }
+        throw new Error('non-live')
+      } catch {
+        try {
+          const gh = await fetch(
+            'https://api.github.com/search/repositories?q=topic:mikutv-plugin&sort=updated&order=desc&per_page=100',
+            { headers: { accept: 'application/vnd.github+json' } },
+          )
+          if (gh.ok) {
+            const payload = await gh.json()
+            items = (payload.items || [])
+              .filter((r: any) => !r.archived && !r.disabled)
+              .map((r: any) => mapDirect(r, cfg.themeMap))
+            failed = false
+            if (statusEl) statusEl.textContent = `${cfg.live} · ${items.length}`
+            render()
+            return
+          }
+        } catch {
+          /* fall through to honest error state */
+        }
+        failed = true
+        if (statusEl) statusEl.textContent = 'OFFLINE'
+        render()
+      }
+    }
+
+    filters.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        kind = btn.dataset.catKind || 'all'
+        filters.forEach((b) => b.classList.toggle('is-active', b === btn))
+        render()
+      })
+    })
+
+    searchEl?.addEventListener('input', () => {
+      q = searchEl.value
+      render()
+    })
+
+    load()
+  }
+
+  document.addEventListener('astro:page-load', initCatalogue)
+  if (document.readyState !== 'loading') initCatalogue()
+</script>

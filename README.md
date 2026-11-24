@@ -10,6 +10,7 @@
   <p>
     <strong>English</strong> ·
     <a href="README.zh-CN.md">简体中文</a> ·
+    <a href="https://mikutv.yuchanns.dev">Website</a> ·
     <a href="docs/install.md">Install Guide</a> ·
     <a href="docs/plugin-development.md">Plugin Development</a> ·
     <a href="https://github.com/yuchanns/MikuTV/releases">Releases</a>

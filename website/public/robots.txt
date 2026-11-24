@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://mikutv.yuchanns.dev/sitemap.xml

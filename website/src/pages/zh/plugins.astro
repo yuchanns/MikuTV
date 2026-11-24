@@ -1,0 +1,11 @@
+---
+import PluginsView from '../../components/PluginsView.astro'
+import { COPY } from '../../data/i18n'
+import Layout from '../../layouts/Layout.astro'
+
+const meta = COPY.zh.meta
+---
+
+<Layout lang="zh" page="plugins" title={meta.pluginsTitle} description={meta.pluginsDesc}>
+  <PluginsView lang="zh" />
+</Layout>

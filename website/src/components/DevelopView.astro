@@ -1,0 +1,327 @@
+---
+import { CAPABILITY_ROWS } from '../data/catalog'
+import { COPY, type Lang } from '../data/i18n'
+
+interface Props {
+  lang: Lang
+}
+
+const { lang } = Astro.props
+const t = COPY[lang]
+const d = t.developPage
+const isZh = lang === 'zh'
+const specUrl = isZh
+  ? 'https://github.com/yuchanns/MikuTV/blob/main/docs/plugin-development.zh-CN.md'
+  : 'https://github.com/yuchanns/MikuTV/blob/main/docs/plugin-development.md'
+---
+
+<section class="page-header">
+  <h1>{d.title}</h1>
+  <p class="page-header__lead">{d.note}</p>
+</section>
+
+<section class="manual-layout">
+  <aside class="manual-toc" aria-label="Contents">
+    {d.toc.map((item) => (
+      <a href={`#${item.id}`}>
+        <span class="manual-toc__num">{item.num}</span>
+        <span>{item.label}</span>
+      </a>
+    ))}
+    <a href={specUrl} target="_blank" rel="noopener noreferrer" style="color:var(--ink);">
+      <span class="manual-toc__num">↗</span>
+      <span>{isZh ? '完整 Markdown' : 'Full Markdown'}</span>
+    </a>
+  </aside>
+
+  <article class="manual-body">
+    <!-- 01 -->
+    <section class="manual-sec" id="contract">
+      <div class="mono">01</div>
+      <h2>{d.toc[0].label}</h2>
+      <p>
+        {isZh ? (
+          <>
+            MikuTV 按 GitHub topic <code>mikutv-plugin</code> 发现仓库，只安装正式 Release 里的 <code>plugin.zip</code>。未知字段在解码阶段直接报错。
+          </>
+        ) : (
+          <>
+            MikuTV discovers repositories tagged <code>mikutv-plugin</code> and installs only <code>plugin.zip</code> from non-draft GitHub Releases. Unknown manifest fields fail decoding immediately.
+          </>
+        )}
+      </p>
+      <table class="manual-table">
+        <thead>
+          <tr>
+            <th>{isZh ? '规则' : 'Rule'}</th>
+            <th>{isZh ? '要求' : 'Requirement'}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>topic</code></td>
+            <td>
+              {isZh ? (
+                <><code>mikutv-plugin</code>（主题加 <code>mikutv-theme</code>，语言包加 <code>mikutv-locale</code>）</>
+              ) : (
+                <><code>mikutv-plugin</code> (plus <code>mikutv-theme</code> or <code>mikutv-locale</code>)</>
+              )}
+            </td>
+          </tr>
+          <tr>
+            <td><code>asset</code></td>
+            <td>
+              {isZh ? (
+                <>Release 资产精确命名为 <code>plugin.zip</code>，不超过 8 MiB</>
+              ) : (
+                <>Release asset named <code>plugin.zip</code>, up to 8 MiB</>
+              )}
+            </td>
+          </tr>
+          <tr>
+            <td><code>tag</code></td>
+            <td>
+              {isZh ? (
+                <>必须匹配 <code>v&lt;version&gt;</code>，与 <code>plugin.json</code> 的 <code>version</code> 一致</>
+              ) : (
+                <>Must match <code>v&lt;version&gt;</code> against <code>plugin.json</code> <code>version</code></>
+              )}
+            </td>
+          </tr>
+          <tr>
+            <td><code>root</code></td>
+            <td>
+              {isZh ? (
+                <><code>plugin.json</code> 放在 zip 根目录，不包外层目录，无符号链接</>
+              ) : (
+                <><code>plugin.json</code> at archive root, no wrapping directory, no symlinks</>
+              )}
+            </td>
+          </tr>
+          <tr>
+            <td><code>sha256</code></td>
+            <td>
+              {isZh ? (
+                <>安装时记录摘要并绑定 ID 归属，更新不可变更 <code>kind</code></>
+              ) : (
+                <>Pinned by SHA-256 and repo ownership; updates cannot switch <code>kind</code></>
+              )}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 02 -->
+    <section class="manual-sec" id="source">
+      <div class="mono">02</div>
+      <h2>{d.toc[1].label}</h2>
+      <p>
+        {isZh ? (
+          <>
+            内容源插件声明 <code>kind: &quot;source&quot;</code>，入口为运行在 <code>moejs</code> 中的 ES 模块。所有出站域名必须写入 <code>permissions.network</code>；连接自建服务器时，可声明 <code>credentials</code> 与 <code>serverURL: &quot;required&quot;</code>，登录时仅放行用户输入的单个地址。
+          </>
+        ) : (
+          <>
+            Source plugins declare <code>kind: &quot;source&quot;</code> with an ES module entry executed inside <code>moejs</code>. Every outbound host belongs in <code>permissions.network</code>; self-hosted servers may declare <code>credentials</code> and <code>serverURL: &quot;required&quot;</code> for single-origin LAN access.
+          </>
+        )}
+      </p>
+
+      <div class="code-block">
+        <div class="code-block__head">
+          <span class="mono">plugin.json</span>
+          <a href="https://github.com/yuchanns/mikutv-plugin-jellyfin" target="_blank" rel="noopener noreferrer" class="mono">JELLYFIN EXAMPLE ↗</a>
+        </div>
+        <pre><code><span class="tn-c">{'{'}</span>
+  <span class="tn-k">"id"</span>: <span class="tn-s">"example-source"</span>,
+  <span class="tn-k">"name"</span>: <span class="tn-s">"Example Source"</span>,
+  <span class="tn-k">"kind"</span>: <span class="tn-s">"source"</span>,
+  <span class="tn-k">"version"</span>: <span class="tn-s">"1.0.0"</span>,
+  <span class="tn-k">"apiVersion"</span>: <span class="tn-n">1</span>,
+  <span class="tn-k">"minAppVersion"</span>: <span class="tn-s">"0.1.0"</span>,
+  <span class="tn-k">"license"</span>: <span class="tn-s">"Apache-2.0"</span>,
+  <span class="tn-k">"main"</span>: <span class="tn-s">"index.js"</span>,
+  <span class="tn-k">"permissions"</span>: {'{'} <span class="tn-k">"network"</span>: [<span class="tn-s">"api.example.com"</span>] {'}'},
+  <span class="tn-k">"capabilities"</span>: [<span class="tn-s">"catalog.browse"</span>, <span class="tn-s">"catalog.item"</span>, <span class="tn-s">"playback.resolve"</span>]
+<span class="tn-c">{'}'}</span></code></pre>
+      </div>
+    </section>
+
+    <!-- 03 -->
+    <section class="manual-sec" id="sandbox">
+      <div class="mono">03</div>
+      <h2>{d.toc[2].label}</h2>
+      <p>
+        {isZh ? (
+          <>沙盒内可用标准 ES 语法、受白名单限制的 <code>fetch</code>，以及 <code>globalThis.host</code>：</>
+        ) : (
+          <>Inside <code>moejs</code>, plugins have standard ES syntax, allowlist-enforced <code>fetch</code>, and <code>globalThis.host</code>:</>
+        )}
+      </p>
+      <table class="manual-table">
+        <tbody>
+          <tr>
+            <td><code>host.storage.get / set / delete</code></td>
+            <td>{isZh ? '每插件独立持久化 KV，总配额 8 KiB' : 'Per-plugin persistent KV store, 8 KiB total quota'}</td>
+          </tr>
+          <tr>
+            <td><code>host.locale.current()</code></td>
+            <td>{isZh ? '当前生效的 BCP-47 语言标签（如 zh-Hans、en、ja）' : 'Active normalized BCP-47 language tag (zh-Hans, en, ja)'}</td>
+          </tr>
+          <tr>
+            <td><code>host.crypto.sha256 / encryptRSAOAEP</code></td>
+            <td>{isZh ? '十六进制 SHA-256 与 RSA-OAEP-SHA256 加密' : 'Hex SHA-256 and RSA-OAEP-SHA256 helpers'}</td>
+          </tr>
+          <tr>
+            <td><code>host.compress.inflateZlib(bytes)</code></td>
+            <td>{isZh ? 'Zlib 解压（上限 4 MiB 输出）' : 'Zlib inflate capped at 4 MiB output'}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 04 -->
+    <section class="manual-sec" id="capabilities">
+      <div class="mono">04</div>
+      <h2>{d.toc[3].label}</h2>
+      <p>
+        {isZh ? (
+          <>每声明一项能力，<code>main</code> 就必须导出对应命名函数。缺少导出会在打开包时失败。</>
+        ) : (
+          <>Every declared capability requires its named export(s) in <code>main</code>. Missing exports fail package open.</>
+        )}
+      </p>
+      <input type="search" id="cap-filter" class="cat-search" style="margin:10px 0 6px;width:280px;" placeholder={d.capFilter} />
+      <table class="manual-table" id="cap-table">
+        <thead>
+          <tr>
+            <th>Capability</th>
+            <th>{isZh ? '导出函数' : 'Exports'}</th>
+            <th>{isZh ? '依赖' : 'Requires'}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {CAPABILITY_ROWS.map((r) => (
+            <tr data-cap={`${r.cap} ${r.exports} ${r.dep}`.toLowerCase()}>
+              <td><code>{r.cap}</code></td>
+              <td><code>{r.exports}</code></td>
+              <td>{r.dep}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 05 -->
+    <section class="manual-sec" id="theme">
+      <div class="mono">05</div>
+      <h2>{d.toc[4].label}</h2>
+      <p>
+        {isZh ? (
+          <>
+            主题不启动 JS 运行时，仅由 <code>plugin.json</code> 与 <code>theme.json</code>（≤ 64 KiB）组成，稀疏覆盖 46 项色彩令牌。打开包时自动校验正文与焦点环对比度（4.5:1 / 3.0:1）。
+          </>
+        ) : (
+          <>
+            Themes run no JavaScript — only <code>plugin.json</code> and <code>theme.json</code> (≤ 64 KiB) overriding 46 semantic tokens. Contrast ratios (4.5:1 text, 3.0:1 focus ring) are checked on open.
+          </>
+        )}
+      </p>
+      <div class="code-block">
+        <div class="code-block__head">
+          <span class="mono">theme.json</span>
+        </div>
+        <pre><code><span class="tn-c">{'{'}</span>
+  <span class="tn-k">"schemaVersion"</span>: <span class="tn-n">1</span>,
+  <span class="tn-k">"base"</span>: <span class="tn-s">"mikutv-dark"</span>,
+  <span class="tn-k">"appearance"</span>: <span class="tn-s">"dark"</span>,
+  <span class="tn-k">"colors"</span>: {'{'}
+    <span class="tn-k">"surface"</span>: {'{'}
+      <span class="tn-k">"canvas"</span>: <span class="tn-s">"#16161E"</span>,
+      <span class="tn-k">"sidebar"</span>: <span class="tn-s">"#13131A"</span>,
+      <span class="tn-k">"panel"</span>: <span class="tn-s">"#1A1B26"</span>
+    {'}'},
+    <span class="tn-k">"accent"</span>: {'{'}
+      <span class="tn-k">"primary"</span>: <span class="tn-s">"#7AA2F7"</span>,
+      <span class="tn-k">"soft"</span>: <span class="tn-s">"#89B4FA"</span>
+    {'}'}
+  {'}'}
+<span class="tn-c">{'}'}</span></code></pre>
+      </div>
+    </section>
+
+    <!-- 06 -->
+    <section class="manual-sec" id="locale">
+      <div class="mono">06</div>
+      <h2>{d.toc[5].label}</h2>
+      <p>
+        {isZh ? (
+          <>
+            语言包同样纯 JSON（<code>locale.json</code> ≤ 256 KiB），镜像 <code>internal/ui/assets/labels.en.json</code>，缺省键自动回落英文。参考 <a href="https://github.com/yuchanns/mikutv-locale-ja" target="_blank" rel="noopener noreferrer" style="color:var(--ink);border-bottom:1px solid var(--line-strong);">yuchanns/mikutv-locale-ja</a>。
+          </>
+        ) : (
+          <>
+            Language packs are pure JSON (<code>locale.json</code> ≤ 256 KiB) mirroring <code>internal/ui/assets/labels.en.json</code>; omitted keys fall back to English. Reference: <a href="https://github.com/yuchanns/mikutv-locale-ja" target="_blank" rel="noopener noreferrer" style="color:var(--ink);border-bottom:1px solid var(--line-strong);">yuchanns/mikutv-locale-ja</a>.
+          </>
+        )}
+      </p>
+      <div class="code-block">
+        <div class="code-block__head">
+          <span class="mono">plugin.json</span>
+          <a href="https://github.com/yuchanns/mikutv-locale-ja" target="_blank" rel="noopener noreferrer" class="mono">MIKUTV-LOCALE-JA ↗</a>
+        </div>
+        <pre><code><span class="tn-c">{'{'}</span>
+  <span class="tn-k">"id"</span>: <span class="tn-s">"mikutv-locale-ja"</span>,
+  <span class="tn-k">"name"</span>: <span class="tn-s">"Japanese (日本語)"</span>,
+  <span class="tn-k">"kind"</span>: <span class="tn-s">"locale"</span>,
+  <span class="tn-k">"version"</span>: <span class="tn-s">"1.0.0"</span>,
+  <span class="tn-k">"apiVersion"</span>: <span class="tn-n">1</span>,
+  <span class="tn-k">"minAppVersion"</span>: <span class="tn-s">"0.1.0"</span>,
+  <span class="tn-k">"license"</span>: <span class="tn-s">"Apache-2.0"</span>,
+  <span class="tn-k">"language"</span>: <span class="tn-s">"ja"</span>,
+  <span class="tn-k">"nativeName"</span>: <span class="tn-s">"日本語"</span>,
+  <span class="tn-k">"locale"</span>: <span class="tn-s">"locale.json"</span>
+<span class="tn-c">{'}'}</span></code></pre>
+      </div>
+    </section>
+
+    <!-- 07 -->
+    <section class="manual-sec" id="publish">
+      <div class="mono">07</div>
+      <h2>{d.toc[6].label}</h2>
+      <div class="code-block">
+        <div class="code-block__head">
+          <span class="mono">PACKAGE &amp; VERIFY</span>
+        </div>
+        <pre><code>zip -r -X plugin.zip plugin.json LICENSE index.js
+<span class="tn-c"># Validate via internal/plugin:</span>
+<span class="tn-c">#   InspectPackage / Open / OpenTheme / OpenLocale</span>
+<span class="tn-c"># Tag v1.0.0 -&gt; GitHub Release -&gt; attach plugin.zip</span>
+<span class="tn-c"># Add repository topic: mikutv-plugin</span></code></pre>
+      </div>
+      <figure class="manual-figure">
+        <img src="/images/plugin-discover-themes.jpg" alt="MikuTV plugin discovery screen on Apple TV 4K" />
+        <figcaption class="mono">{d.figureCaption}</figcaption>
+      </figure>
+    </section>
+  </article>
+</section>
+
+<script>
+  function initDevelop() {
+    const input = document.getElementById('cap-filter') as HTMLInputElement | null
+    const rows = document.querySelectorAll<HTMLTableRowElement>('#cap-table tbody tr')
+    if (!input || input.dataset.bound) return
+    input.dataset.bound = '1'
+    input.addEventListener('input', () => {
+      const q = input.value.trim().toLowerCase()
+      rows.forEach((tr) => {
+        const hay = tr.dataset.cap || ''
+        tr.style.display = !q || hay.includes(q) ? '' : 'none'
+      })
+    })
+  }
+  document.addEventListener('astro:page-load', initDevelop)
+  if (document.readyState !== 'loading') initDevelop()
+</script>

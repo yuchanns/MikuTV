@@ -1,0 +1,107 @@
+name: Deploy Website
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'website/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'website/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & Verify Website
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: website/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run types
+      - run: pnpm run check
+      - run: pnpm run build
+
+      - name: Smoke-test Cloudflare Worker & Static Assets
+        shell: bash
+        run: |
+          pnpm run start > worker.log 2>&1 &
+          worker_pid=$!
+          trap 'kill "$worker_pid" || true' EXIT
+          for attempt in {1..45}; do
+            if curl --fail --silent http://127.0.0.1:8789/ > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8789/ | grep -q "MikuTV"
+          curl --fail --silent http://127.0.0.1:8789/plugins/ | grep -q "mikutv-plugin"
+          curl --fail --silent http://127.0.0.1:8789/develop/ | grep -q "plugin.json"
+          curl --fail --silent http://127.0.0.1:8789/api/plugins | grep -q '"topic":"mikutv-plugin"'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mikutv-website-dist
+          path: website/dist
+          include-hidden-files: true
+
+  deploy:
+    name: Deploy to Cloudflare Workers
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    environment:
+      name: production
+      url: https://mikutv.yuchanns.dev/
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: website/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: mikutv-website-dist
+          path: website/dist
+
+      - name: Deploy with Cloudflare Wrangler Action
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          workingDirectory: website
+          packageManager: pnpm

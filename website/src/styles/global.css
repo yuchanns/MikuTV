@@ -1,0 +1,1232 @@
+/* ==========================================================================
+   MikuTV — Black Living Room System
+   The room is dark. The screen is the only light source.
+   Zero rounded cards, zero box-shadows, zero decorative glow, zero backdrop-filter.
+   ========================================================================== */
+
+:root {
+  --dusk: #16130f;
+  --room: #000000;
+  --shelf: #0c0c0d;
+  --line: rgb(255 255 255 / 0.1);
+  --line-strong: rgb(255 255 255 / 0.22);
+  --ink: #edeae4;
+  --ink-2: #8a8782;
+  --leek: #39c5bb;
+
+  --font-display: 'Hanken Grotesk', 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-body: 'Hanken Grotesk', 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --gutter: clamp(20px, 4vw, 56px);
+  --nav-h: 64px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--dusk);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  scroll-behavior: smooth;
+  overflow-x: clip;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* The living room darkens from warm dusk (#16130F) to pure black (#000000) as evening deepens */
+@keyframes darken-room {
+  0% {
+    background-color: var(--dusk);
+  }
+  38% {
+    background-color: #080706;
+  }
+  52%,
+  100% {
+    background-color: var(--room);
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--room);
+  color: var(--ink);
+  overflow-x: clip;
+  line-height: 1.68;
+}
+
+main {
+  overflow-x: clip;
+}
+
+body.page-home {
+  background-color: var(--dusk);
+}
+
+@supports (animation-timeline: scroll()) {
+  body.page-home {
+    animation: darken-room linear both;
+    animation-timeline: scroll(root block);
+  }
+}
+
+html[lang='zh-Hans'] body {
+  line-height: 1.9;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+img,
+video {
+  display: block;
+  max-width: 100%;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+}
+
+/* Monospace label voice — timecodes, spec plates, metadata */
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+/* ==========================================================================
+   Navigation — Sparse Left Wordmark, Right Monospace Index
+   ========================================================================== */
+
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: var(--nav-h);
+  padding: 0 var(--gutter);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  background: rgb(12 10 9 / 0.92);
+  border-bottom: 1px solid var(--line);
+}
+
+body:not(.page-home) .site-nav {
+  background: rgb(0 0 0 / 0.94);
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.brand-mark img {
+  width: 22px;
+  height: 22px;
+}
+
+.nav-rail {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 2.4vw, 30px);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nav-rail a {
+  color: var(--ink-2);
+  padding: 4px 0;
+  border-bottom: 1px solid transparent;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.nav-rail a:hover {
+  color: var(--ink);
+}
+
+.nav-rail a.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--leek);
+}
+
+/* ==========================================================================
+   00 Hero — Right-Bleed Apple TV Screen + Real Frame-Derived Spill Light
+   ========================================================================== */
+
+.hero-stage {
+  position: relative;
+  min-height: calc(100svh - var(--nav-h));
+  padding: clamp(32px, 5vh, 64px) 0 clamp(64px, 10vh, 120px) var(--gutter);
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  align-items: end;
+  overflow: clip;
+}
+
+.hero-screen-col {
+  grid-column: 4 / -1;
+  grid-row: 1;
+  position: relative;
+  align-self: center;
+  margin-right: -4vw;
+}
+
+.hero-media-wrap {
+  position: relative;
+}
+
+.hero-spill {
+  position: absolute;
+  inset: -12% -10%;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.hero-spill img,
+.hero-spill video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(84px) saturate(1.22);
+  opacity: 0.34;
+  transform: scale(1.18);
+}
+
+.hero-spill video {
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.hero-spill video.is-ready {
+  opacity: 0.34;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-spill video {
+    display: none;
+  }
+}
+
+.hero-tv-frame {
+  position: relative;
+  z-index: 1;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  background: #000000;
+  outline: 1px solid var(--line);
+  border-radius: 0;
+  overflow: hidden;
+}
+
+.hero-tv-frame .hero-tv-poster,
+.hero-tv-frame video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hero-tv-frame video {
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+.hero-tv-frame video.is-ready {
+  opacity: 1;
+}
+
+.hero-tv-caption {
+  position: relative;
+  z-index: 2;
+  margin-top: 12px;
+  padding-right: 6vw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sound-toggle {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: 2px;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.sound-toggle:hover,
+.sound-toggle[aria-pressed='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--leek);
+}
+
+.hero-copy-col {
+  grid-column: 1 / 8;
+  grid-row: 1;
+  position: relative;
+  z-index: 3;
+  align-self: end;
+  padding-bottom: 36px;
+  padding-right: 24px;
+}
+
+.display-title {
+  margin: 0 0 26px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(2.6rem, 6.2vw, 6rem);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  color: var(--ink);
+}
+
+html[lang='zh-Hans'] .display-title {
+  font-size: clamp(2.3rem, 5.4vw, 5.2rem);
+  letter-spacing: -0.025em;
+  line-height: 1.12;
+}
+
+.hero-lead {
+  margin: 0 0 34px;
+  max-width: 31em;
+  font-size: 1.0625rem;
+  color: var(--ink);
+  opacity: 0.88;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 28px;
+}
+
+/* Primary focus-invert action (square, 0px radius — pure tvOS focus language) */
+.action-solid {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 24px;
+  border-radius: 0;
+  background: var(--ink);
+  color: #000000;
+  font-size: 0.94rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  border: 1px solid var(--ink);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.action-solid:hover {
+  background: #ffffff;
+  border-color: #ffffff;
+}
+
+.action-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 4px;
+  font-size: 0.94rem;
+  font-weight: 500;
+  color: var(--ink);
+  border-bottom: 1px solid var(--leek);
+  transition: opacity 0.15s ease;
+}
+
+.action-link:hover {
+  opacity: 0.78;
+}
+
+/* ==========================================================================
+   12-Column Left-Anchored Architectural Grid
+   ========================================================================== */
+
+.band {
+  padding: clamp(96px, 16vh, 180px) var(--gutter) 0;
+}
+
+.band-tight {
+  padding: clamp(72px, 11vh, 130px) var(--gutter) 0;
+}
+
+.rule-top {
+  border-top: 1px solid var(--line);
+  padding-top: 28px;
+}
+
+.grid-12 {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: clamp(20px, 2.8vw, 40px);
+  align-items: start;
+}
+
+/* 01 Statement — H2 scale directly as quiet prose */
+.statement-prose {
+  grid-column: 1 / 9;
+}
+
+.statement-prose p {
+  margin: 0 0 1.15em;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(1.65rem, 3.1vw, 2.9rem);
+  line-height: 1.24;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+}
+
+.statement-prose p:last-child {
+  margin-bottom: 0;
+  color: var(--ink-2);
+}
+
+/* ==========================================================================
+   02 One Evening — Four Timecoded Moments
+   ========================================================================== */
+
+.moment {
+  padding: clamp(88px, 15vh, 170px) 0 0 var(--gutter);
+  overflow-x: clip;
+}
+
+.moment__rule {
+  margin-right: var(--gutter);
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+  margin-bottom: clamp(24px, 4vh, 44px);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.moment__grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: clamp(24px, 3vw, 48px);
+  align-items: start;
+}
+
+.moment__text {
+  grid-column: 1 / 5;
+  padding-right: 12px;
+}
+
+.moment__title {
+  margin: 0 0 18px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.85rem, 3.6vw, 3.4rem);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+
+html[lang='zh-Hans'] .moment__title {
+  line-height: 1.16;
+  letter-spacing: -0.02em;
+}
+
+.moment__body {
+  margin: 0;
+  max-width: 34em;
+  font-size: 1.0625rem;
+  color: var(--ink-2);
+}
+
+.moment__body + .moment__body {
+  margin-top: 1.1em;
+}
+
+.moment__screen {
+  grid-column: 5 / -1;
+  position: relative;
+  margin-right: -4vw;
+  outline: 1px solid var(--line);
+  background: #000000;
+  overflow: hidden;
+}
+
+.moment__screen img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* 18:47 Sunset Diagonal Wipe (theme-picker-light -> theme-picker-dark) */
+.sunset-wipe {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  background: #000000;
+  overflow: hidden;
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+.sunset-wipe img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+@keyframes sunset-diagonal {
+  0% {
+    clip-path: polygon(0 0, 118% 0, 82% 100%, 0 100%);
+  }
+  100% {
+    clip-path: polygon(0 0, 22% 0, -14% 100%, 0 100%);
+  }
+}
+
+.sunset-wipe__light {
+  clip-path: polygon(0 0, 62% 0, 38% 100%, 0 100%);
+}
+
+@supports (animation-timeline: view()) {
+  .sunset-wipe:not(.is-scrubbed) .sunset-wipe__light {
+    animation: sunset-diagonal linear both;
+    animation-timeline: view();
+    animation-range: entry 15% exit 75%;
+  }
+}
+
+/* 19:30 Offset Layered Pair (sidebar/home + movie wall) */
+.screen-overlap {
+  grid-column: 5 / -1;
+  position: relative;
+  margin-right: -4vw;
+  padding-bottom: 14%;
+}
+
+.screen-overlap__back {
+  width: 82%;
+  outline: 1px solid var(--line);
+  background: #000000;
+}
+
+.screen-overlap__front {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 68%;
+  outline: 1px solid var(--line-strong);
+  background: #000000;
+}
+
+/* 21:04 Full-bleed 100vw Playback Frame */
+.moment-fullbleed {
+  padding-top: clamp(88px, 15vh, 170px);
+}
+
+.moment-fullbleed__head {
+  padding: 0 var(--gutter);
+  margin-bottom: clamp(28px, 4.5vh, 48px);
+}
+
+.moment-fullbleed__copy {
+  max-width: 34em;
+}
+
+.fullbleed-frame {
+  width: 100%;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: #000000;
+}
+
+.fullbleed-frame img {
+  width: 100%;
+  height: auto;
+  max-height: 82vh;
+  object-fit: cover;
+}
+
+/* ==========================================================================
+   Focus = Hover Interactive Ledger (Pure tvOS Focus Inversion)
+   ========================================================================== */
+
+.ledger {
+  margin-top: 28px;
+  border-top: 1px solid var(--line);
+}
+
+.ledger-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 18px;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--line);
+  align-items: baseline;
+  transition: background-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
+}
+
+.ledger-row__k {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.ledger-row__v {
+  color: var(--ink);
+  font-size: 0.96rem;
+}
+
+.ledger--interactive:has(.ledger-row:hover) .ledger-row:not(:hover) {
+  opacity: 0.42;
+}
+
+.ledger--interactive .ledger-row:hover {
+  background: var(--ink);
+  color: #000000;
+}
+
+.ledger--interactive .ledger-row:hover .ledger-row__k,
+.ledger--interactive .ledger-row:hover .ledger-row__v {
+  color: #000000;
+}
+
+/* 03 Plugins Fill-In Band */
+.fill-left {
+  grid-column: 1 / 6;
+}
+
+.fill-right {
+  grid-column: 6 / -1;
+  margin-right: -4vw;
+  outline: 1px solid var(--line);
+  background: #000000;
+}
+
+/* 04 Hardware Nameplate */
+.spec-plate {
+  grid-column: 1 / 7;
+  background: var(--shelf);
+  border: 1px solid var(--line);
+  padding: 28px 28px 18px;
+}
+
+.spec-plate__list {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.spec-plate__row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.92rem;
+}
+
+.spec-plate__row:last-child {
+  border-bottom: none;
+}
+
+.spec-plate__row dt {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.spec-plate__row dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+.nameplate-pair {
+  grid-column: 8 / 13;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-self: end;
+}
+
+.nameplate-pair figure {
+  margin: 0;
+}
+
+.nameplate-pair img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  outline: 1px solid var(--line);
+}
+
+.nameplate-pair figcaption {
+  margin-top: 8px;
+}
+
+/* 05 Install Honest Ledger */
+.install-left {
+  grid-column: 1 / 6;
+}
+
+.install-right {
+  grid-column: 7 / 13;
+}
+
+.file-ledger {
+  border-top: 1px solid var(--line);
+}
+
+.file-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 14px;
+  border-bottom: 1px solid var(--line);
+  transition: background-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
+}
+
+.file-row__name {
+  font-family: var(--font-mono);
+  font-size: 0.94rem;
+  color: var(--ink);
+}
+
+.file-row__note {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+  text-align: right;
+}
+
+.file-ledger:has(.file-row:hover) .file-row:not(:hover) {
+  opacity: 0.42;
+}
+
+.file-row:hover {
+  background: var(--ink);
+  color: #000000;
+}
+
+.file-row:hover .file-row__name,
+.file-row:hover .file-row__note {
+  color: #000000;
+}
+
+/* 06 Closing */
+.closing {
+  padding: clamp(120px, 22vh, 220px) var(--gutter) clamp(120px, 22vh, 240px);
+}
+
+.closing .display-title {
+  margin: 0;
+}
+
+/* ==========================================================================
+   /plugins/ — Printed Specimen Catalogue (Rows, Never Cards)
+   ========================================================================== */
+
+.page-header {
+  padding: clamp(64px, 10vh, 110px) var(--gutter) 36px;
+}
+
+.page-header h1 {
+  margin: 0 0 14px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(2.4rem, 5.2vw, 4.6rem);
+  line-height: 1.06;
+  letter-spacing: -0.03em;
+}
+
+.page-header__lead {
+  margin: 0;
+  max-width: 52em;
+  font-size: 1rem;
+  color: var(--ink-2);
+}
+
+.catalogue-controls {
+  padding: 0 var(--gutter) 20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.cat-filters {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  font-size: 0.96rem;
+}
+
+.cat-filter {
+  padding: 6px 0;
+  color: var(--ink-2);
+  border-bottom: 1.5px solid transparent;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.cat-filter:hover {
+  color: var(--ink);
+}
+
+.cat-filter.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--leek);
+}
+
+.cat-search-group {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.cat-search {
+  width: 240px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line-strong);
+  padding: 6px 2px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.9rem;
+  outline: none;
+  border-radius: 0;
+}
+
+.cat-search:focus {
+  border-bottom-color: var(--leek);
+}
+
+.cat-search::placeholder {
+  color: var(--ink-2);
+}
+
+.cat-status {
+  padding: 0 var(--gutter) 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cat-wrap {
+  padding: 0 var(--gutter) 120px;
+}
+
+.cat-list {
+  border-top: 1px solid var(--line);
+}
+
+.cat-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.15fr) minmax(220px, 2.2fr) minmax(130px, 0.9fr) 96px 112px;
+  gap: 20px;
+  padding: 18px 14px;
+  border-bottom: 1px solid var(--line);
+  align-items: center;
+  transition: background-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
+}
+
+.cat-list:has(.cat-row:hover) .cat-row:not(:hover) {
+  opacity: 0.42;
+}
+
+.cat-row:hover {
+  background: var(--ink);
+  color: #000000;
+}
+
+.cat-row__name {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.cat-row__repo {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cat-row__desc {
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+
+.cat-row__owner,
+.cat-row__date {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.cat-row__end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* 6 flat 14px square color chips — the ONLY color on /plugins/ */
+.swatch-strip {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.swatch-strip span {
+  width: 14px;
+  height: 14px;
+  border-radius: 0;
+  display: block;
+  outline: 1px solid rgb(255 255 255 / 0.14);
+}
+
+.cat-row__kind {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.cat-row:hover .cat-row__name,
+.cat-row:hover .cat-row__repo,
+.cat-row:hover .cat-row__desc,
+.cat-row:hover .cat-row__owner,
+.cat-row:hover .cat-row__date,
+.cat-row:hover .cat-row__kind {
+  color: #000000;
+}
+
+.cat-row:hover .swatch-strip span {
+  outline-color: rgb(0 0 0 / 0.28);
+}
+
+.cat-empty {
+  padding: 40px 0;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+
+/* ==========================================================================
+   /develop/ — Owner's Technical Manual (Sticky Numbered Index + 68ch Prose)
+   ========================================================================== */
+
+.manual-layout {
+  padding: 16px var(--gutter) 120px;
+  display: grid;
+  grid-template-columns: 200px minmax(0, 68ch);
+  gap: clamp(32px, 6vw, 96px);
+  align-items: start;
+}
+
+.manual-toc {
+  position: sticky;
+  top: calc(var(--nav-h) + 32px);
+  border-top: 1px solid var(--line);
+}
+
+.manual-toc a {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.88rem;
+  color: var(--ink-2);
+  transition: color 0.14s ease;
+}
+
+.manual-toc a:hover {
+  color: var(--ink);
+}
+
+.manual-toc__num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.manual-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 64px;
+}
+
+.manual-sec {
+  scroll-margin-top: calc(var(--nav-h) + 28px);
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+}
+
+.manual-sec h2 {
+  margin: 10px 0 18px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.5rem, 2.6vw, 2.2rem);
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+
+.manual-sec p,
+.manual-sec li {
+  color: var(--ink-2);
+  font-size: 0.98rem;
+}
+
+.manual-sec strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.manual-sec code:not(pre code) {
+  font-size: 0.86em;
+  color: var(--ink);
+  background: var(--shelf);
+  border: 1px solid var(--line);
+  padding: 1px 6px;
+}
+
+/* Tokyo Night Official Palette Syntax Blocks on --shelf */
+.code-block {
+  margin: 20px 0;
+  background: var(--shelf);
+  border: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.code-block__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 18px 18px;
+  overflow-x: auto;
+  font-size: 0.82rem;
+  line-height: 1.68;
+  color: #c0caf5;
+}
+
+.tn-k { color: #7aa2f7; }
+.tn-s { color: #9ece6a; }
+.tn-n { color: #ff9e64; }
+.tn-c { color: #565f89; }
+
+.manual-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 18px 0;
+  font-size: 0.88rem;
+}
+
+.manual-table th {
+  text-align: left;
+  padding: 10px 12px 10px 0;
+  border-bottom: 1px solid var(--line-strong);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.manual-table td {
+  padding: 12px 12px 12px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  vertical-align: top;
+}
+
+.manual-figure {
+  margin: 24px 0 0;
+}
+
+.manual-figure img {
+  width: 100%;
+  outline: 1px solid var(--line);
+}
+
+.manual-figure figcaption {
+  margin-top: 10px;
+}
+
+/* ==========================================================================
+   Footer — Sparse Monospace Line
+   ========================================================================== */
+
+.site-footer {
+  border-top: 1px solid var(--line);
+  padding: 28px var(--gutter) 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.footer-nav a:hover {
+  color: var(--ink);
+}
+
+/* ==========================================================================
+   Responsive Breakpoints
+   ========================================================================== */
+
+@media (max-width: 960px) {
+  .hero-stage {
+    min-height: auto;
+    padding: 36px var(--gutter) 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    align-items: stretch;
+  }
+  .hero-screen-col {
+    order: 2;
+    width: 100%;
+    align-self: stretch;
+    margin-right: 0;
+  }
+  .hero-tv-caption {
+    padding-right: 0;
+  }
+  .hero-copy-col {
+    order: 1;
+    padding: 0;
+  }
+  .statement-prose,
+  .moment__text,
+  .moment__screen,
+  .screen-overlap,
+  .fill-left,
+  .fill-right,
+  .spec-plate,
+  .nameplate-pair,
+  .install-left,
+  .install-right {
+    grid-column: 1 / -1;
+    margin-right: 0;
+  }
+  .moment {
+    padding-right: var(--gutter);
+  }
+  .moment__rule {
+    margin-right: 0;
+  }
+  .cat-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 16px;
+  }
+  .cat-row__desc {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+  .cat-row__owner,
+  .cat-row__date {
+    display: none;
+  }
+  .manual-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .manual-toc {
+    position: static;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 18px;
+  }
+  .manual-toc a {
+    border-bottom: none;
+    padding: 6px 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .nav-rail {
+    gap: 14px;
+    font-size: 11px;
+  }
+  .cat-search {
+    width: 100%;
+  }
+  .cat-search-group {
+    width: 100%;
+  }
+  .nameplate-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

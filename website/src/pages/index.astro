@@ -1,0 +1,11 @@
+---
+import HomeView from '../components/HomeView.astro'
+import { COPY } from '../data/i18n'
+import Layout from '../layouts/Layout.astro'
+
+const meta = COPY.en.meta
+---
+
+<Layout lang="en" page="home" title={meta.homeTitle} description={meta.homeDesc}>
+  <HomeView lang="en" />
+</Layout>

@@ -1,0 +1,111 @@
+---
+import { ClientRouter } from 'astro:transitions'
+import { COPY, type Lang } from '../data/i18n'
+import '../styles/global.css'
+
+interface Props {
+  lang: Lang
+  page: 'home' | 'plugins' | 'develop' | '404'
+  title: string
+  description: string
+}
+
+const { lang, page, title, description } = Astro.props
+const t = COPY[lang]
+const prefix = lang === 'zh' ? '/zh' : ''
+const altPrefix = lang === 'zh' ? '' : '/zh'
+
+const pagePath = page === 'home' ? '/' : page === '404' ? '/404/' : `/${page}/`
+const currentUrl = new URL(`${prefix}${pagePath}`, 'https://mikutv.yuchanns.dev').toString()
+const enUrl = new URL(pagePath, 'https://mikutv.yuchanns.dev').toString()
+const zhUrl = new URL(`/zh${pagePath}`, 'https://mikutv.yuchanns.dev').toString()
+const altHref = `${altPrefix}${pagePath}` || '/'
+
+const homeHref = prefix ? `${prefix}/` : '/'
+const pluginsHref = `${prefix}/plugins/`
+const developHref = `${prefix}/develop/`
+
+const softwareLd =
+  page === 'home'
+    ? JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        name: 'MikuTV',
+        operatingSystem: 'tvOS 18.0+',
+        applicationCategory: 'MultimediaApplication',
+        license: 'https://www.apache.org/licenses/LICENSE-2.0',
+        url: 'https://mikutv.yuchanns.dev/',
+        codeRepository: 'https://github.com/yuchanns/MikuTV',
+        description,
+        offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      })
+    : null
+---
+
+<!doctype html>
+<html lang={t.langCode}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    {page !== '404' && (
+      <>
+        <link rel="canonical" href={currentUrl} />
+        <link rel="alternate" hreflang="en" href={enUrl} />
+        <link rel="alternate" hreflang="zh-Hans" href={zhUrl} />
+        <link rel="alternate" hreflang="x-default" href={enUrl} />
+      </>
+    )}
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MikuTV" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={currentUrl} />
+    <meta property="og:image" content="https://mikutv.yuchanns.dev/images/appearance-day-night.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content="https://mikutv.yuchanns.dev/images/appearance-day-night.jpg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    {softwareLd && <script type="application/ld+json" set:html={softwareLd} />}
+    <ClientRouter />
+  </head>
+  <body class={page === 'home' ? 'page-home' : ''}>
+    <header class="site-nav">
+      <a href={homeHref} class="brand-mark" aria-label="MikuTV">
+        <img src="/logo-mark-dark.svg" alt="" width="22" height="22" />
+        <span>MikuTV</span>
+      </a>
+
+      <nav class="nav-rail" aria-label="Primary">
+        <a href={pluginsHref} class:list={[{ 'is-active': page === 'plugins' }]}>{t.nav.plugins}</a>
+        <a href={developHref} class:list={[{ 'is-active': page === 'develop' }]}>{t.nav.develop}</a>
+        <a href="https://github.com/yuchanns/MikuTV" target="_blank" rel="noopener noreferrer">{t.nav.github}</a>
+        <a href={altHref} aria-label="Switch language">{t.altLabel}</a>
+      </nav>
+    </header>
+
+    <main>
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="Footer">
+        <a href="https://github.com/yuchanns/MikuTV" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <a href="https://github.com/yuchanns/MikuTV/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+        <a href={pluginsHref}>{t.footer.plugins}</a>
+        <a href={developHref}>{t.footer.develop}</a>
+        <span>Apache-2.0</span>
+      </nav>
+      <span class="mono">mikutv.yuchanns.dev</span>
+    </footer>
+  </body>
+</html>

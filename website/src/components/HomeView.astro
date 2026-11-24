@@ -1,0 +1,373 @@
+---
+import { LAUNCH_VIDEO_URL } from '../data/catalog'
+import { COPY, type Lang } from '../data/i18n'
+
+interface Props {
+  lang: Lang
+}
+
+const { lang } = Astro.props
+const t = COPY[lang]
+const prefix = lang === 'zh' ? '/zh' : ''
+const pluginsHref = `${prefix}/plugins/`
+const heroVideoSrc = `${LAUNCH_VIDEO_URL}#t=34.5`
+---
+
+<!-- ================= 00 HERO ================= -->
+<section class="hero-stage">
+  <div class="hero-screen-col">
+    <div class="hero-media-wrap" transition:persist="hero-tv-media">
+      <div class="hero-spill" aria-hidden="true">
+        <img src="/images/cinema-home.jpg" alt="" class="spill-base" />
+        <video
+          id="hero-spill-video"
+          src={heroVideoSrc}
+          autoplay
+          muted
+          loop
+          playsinline
+          preload="auto"
+        ></video>
+      </div>
+
+      <div class="hero-tv-frame">
+        <img
+          src="/images/cinema-home.jpg"
+          alt="MikuTV on Apple TV 4K"
+          class="hero-tv-poster"
+        />
+        <video
+          id="hero-main-video"
+          src={heroVideoSrc}
+          autoplay
+          muted
+          loop
+          playsinline
+          preload="auto"
+        ></video>
+      </div>
+    </div>
+
+    <div class="hero-tv-caption">
+      <span class="mono">{t.hero.screenLabel}</span>
+      <button
+        type="button"
+        class="sound-toggle"
+        id="hero-sound-btn"
+        aria-pressed="false"
+        data-label-off={t.hero.soundOff}
+        data-label-on={t.hero.soundOn}
+      >
+        {t.hero.soundOff}
+      </button>
+    </div>
+  </div>
+
+  <div class="hero-copy-col">
+    <h1 class="display-title">
+      {t.hero.titleLines[0]}{' '}
+      <br />
+      {t.hero.titleLines[1]}
+    </h1>
+    <p class="hero-lead">{t.hero.lead}</p>
+    <div class="hero-actions">
+      <a href="#install" class="action-solid">{t.hero.ctaPrimary}</a>
+      <a href={pluginsHref} class="action-link">{t.hero.ctaSecondary}</a>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 01 STATEMENT ================= -->
+<section class="band">
+  <div class="rule-top">
+    <div class="grid-12">
+      <div class="statement-prose">
+        {t.statement.map((para) => <p>{para}</p>)}
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 02 ONE EVENING ================= -->
+<!-- 18:12 Home Screen -->
+<section class="moment">
+  <div class="moment__rule">
+    <span class="mono">{t.evening.m1.time}</span>
+    <span class="mono">{t.evening.m1.label}</span>
+  </div>
+  <div class="moment__grid">
+    <div class="moment__text">
+      <h2 class="moment__title">{t.evening.m1.title}</h2>
+      {t.evening.m1.body.map((p) => <p class="moment__body">{p}</p>)}
+    </div>
+    <div class="moment__screen">
+      <img
+        src="/images/tvos-home-icon.jpg"
+        alt="MikuTV on the Apple TV Home Screen top row with Top Shelf"
+      />
+    </div>
+  </div>
+</section>
+
+<!-- 18:47 Sunset Diagonal Wipe -->
+<section class="moment">
+  <div class="moment__rule">
+    <span class="mono">{t.evening.m2.time}</span>
+    <span class="mono">{t.evening.m2.label}</span>
+  </div>
+  <div class="moment__grid">
+    <div class="moment__text">
+      <h2 class="moment__title">{t.evening.m2.title}</h2>
+      {t.evening.m2.body.map((p) => <p class="moment__body">{p}</p>)}
+    </div>
+    <div class="moment__screen">
+      <div class="sunset-wipe" id="sunset-wipe">
+        <img src="/images/theme-picker-dark.jpg" alt="MikuTV dark theme drawer on Apple TV 4K" />
+        <img
+          src="/images/theme-picker-light.jpg"
+          alt="MikuTV light theme drawer on Apple TV 4K"
+          class="sunset-wipe__light"
+          id="sunset-wipe-light"
+        />
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 19:30 Sit Down — Offset Layered Frames -->
+<section class="moment">
+  <div class="moment__rule">
+    <span class="mono">{t.evening.m3.time}</span>
+    <span class="mono">{t.evening.m3.label}</span>
+  </div>
+  <div class="moment__grid">
+    <div class="moment__text">
+      <h2 class="moment__title">{t.evening.m3.title}</h2>
+      {t.evening.m3.body.map((p) => <p class="moment__body">{p}</p>)}
+    </div>
+    <div class="screen-overlap">
+      <div class="screen-overlap__back">
+        <img src="/images/cinema-home.jpg" alt="MikuTV Home Hero focus on Apple TV 4K" />
+      </div>
+      <div class="screen-overlap__front">
+        <img src="/images/cinema-wall.jpg" alt="MikuTV media library poster grid on Apple TV 4K" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 21:04 Playback — Full-Bleed Frame -->
+<section class="moment-fullbleed">
+  <div class="moment-fullbleed__head">
+    <div class="rule-top" style="margin-bottom:28px;display:flex;justify-content:space-between;">
+      <span class="mono">{t.evening.m4.time}</span>
+      <span class="mono">{t.evening.m4.label}</span>
+    </div>
+    <div class="moment-fullbleed__copy">
+      <h2 class="moment__title">{t.evening.m4.title}</h2>
+      {t.evening.m4.body.map((p) => <p class="moment__body">{p}</p>)}
+    </div>
+  </div>
+  <div class="fullbleed-frame">
+    <img src="/images/cinema-playback.jpg" alt="MikuTV hardware AVPlayer playback with subtitles on Apple TV 4K" />
+  </div>
+</section>
+
+<!-- ================= 03 THEN YOU FILL IT ================= -->
+<section class="moment">
+  <div class="moment__rule">
+    <span class="mono">{t.fill.label}</span>
+    <span class="mono">TOPIC:MIKUTV-PLUGIN</span>
+  </div>
+  <div class="moment__grid">
+    <div class="fill-left">
+      <h2 class="moment__title">{t.fill.title}</h2>
+      {t.fill.body.map((p) => <p class="moment__body">{p}</p>)}
+
+      <div class="ledger ledger--interactive">
+        {t.fill.rows.map((r) => (
+          <a href={pluginsHref} class="ledger-row">
+            <span class="ledger-row__k">{r.k}</span>
+            <span class="ledger-row__v">{r.v}</span>
+          </a>
+        ))}
+      </div>
+
+      <div style="margin-top:26px;">
+        <a href={pluginsHref} class="action-link">{t.fill.link}</a>
+      </div>
+    </div>
+
+    <div class="fill-right">
+      <img src="/images/plugin-discover-themes.jpg" alt="MikuTV plugin discovery screen on Apple TV 4K" />
+    </div>
+  </div>
+</section>
+
+<!-- ================= 04 SPECIFICATION NAMEPLATE ================= -->
+<section class="band">
+  <div class="rule-top">
+    <div class="grid-12">
+      <div class="spec-plate">
+        <div class="mono" style="margin-bottom:14px;">{t.build.label}</div>
+        <h2 class="moment__title" style="font-size:clamp(1.6rem,2.6vw,2.3rem);">{t.build.title}</h2>
+        <p class="moment__body">{t.build.lead}</p>
+        <dl class="spec-plate__list">
+          {t.build.rows.map((r) => (
+            <div class="spec-plate__row">
+              <dt>{r.k}</dt>
+              <dd>{r.v}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+
+      <div class="nameplate-pair">
+        <figure>
+          <img src="/images/about-dark.jpg" alt="MikuTV About screen in Tokyo Night" />
+          <figcaption class="mono">{t.build.darkCap}</figcaption>
+        </figure>
+        <figure>
+          <img src="/images/about-light.jpg" alt="MikuTV About screen in Rosé Pine Dawn" />
+          <figcaption class="mono">{t.build.lightCap}</figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 05 INSTALLATION ================= -->
+<section class="band" id="install">
+  <div class="rule-top">
+    <div class="grid-12">
+      <div class="install-left">
+        <div class="mono" style="margin-bottom:14px;">{t.install.label}</div>
+        <h2 class="moment__title">{t.install.title}</h2>
+        {t.install.body.map((p) => <p class="moment__body">{p}</p>)}
+        <p class="mono" style="margin-top:24px;">{t.install.req}</p>
+      </div>
+
+      <div class="install-right">
+        <div class="file-ledger">
+          {t.install.files.map((f) => (
+            <a href={f.href} target="_blank" rel="noopener noreferrer" class="file-row">
+              <span class="file-row__name">{f.name}</span>
+              <span class="file-row__note">{f.note}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 06 CLOSING ================= -->
+<section class="closing">
+  <p class="display-title">{t.closing}</p>
+</section>
+
+<script>
+  function initHome() {
+    const mainVid = document.getElementById('hero-main-video') as HTMLVideoElement | null
+    const spillVid = document.getElementById('hero-spill-video') as HTMLVideoElement | null
+    const soundBtn = document.getElementById('hero-sound-btn') as HTMLButtonElement | null
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    if (mainVid && spillVid && !mainVid.dataset.synced) {
+      mainVid.dataset.synced = '1'
+      if (reducedMotion) {
+        mainVid.pause()
+        spillVid.pause()
+      } else {
+        const SEEK_START = 34.5
+        const ensureLitStart = () => {
+          if (mainVid.duration && mainVid.currentTime < SEEK_START - 0.5) {
+            try {
+              mainVid.currentTime = SEEK_START
+              spillVid.currentTime = SEEK_START
+            } catch {
+              // ignore seek error before metadata ready
+            }
+          }
+        }
+        const revealWhenLit = () => {
+          if (mainVid.readyState >= 2 && mainVid.currentTime >= SEEK_START - 0.5) {
+            mainVid.classList.add('is-ready')
+            if (spillVid.readyState >= 2) {
+              spillVid.classList.add('is-ready')
+            }
+          }
+        }
+        const syncSpill = () => {
+          if (Math.abs(spillVid.currentTime - mainVid.currentTime) > 0.25) {
+            spillVid.currentTime = mainVid.currentTime
+          }
+          revealWhenLit()
+        }
+
+        mainVid.addEventListener('loadedmetadata', ensureLitStart)
+        mainVid.addEventListener('seeked', revealWhenLit)
+        mainVid.addEventListener('playing', revealWhenLit)
+        mainVid.addEventListener('timeupdate', syncSpill)
+        mainVid.addEventListener('play', () => spillVid.play().catch(() => {}))
+        mainVid.addEventListener('pause', () => spillVid.pause())
+        spillVid.addEventListener('canplay', revealWhenLit)
+
+        if (mainVid.readyState >= 1) ensureLitStart()
+        revealWhenLit()
+        mainVid.play().catch(() => {})
+        spillVid.play().catch(() => {})
+      }
+    }
+
+    if (soundBtn && mainVid) {
+      soundBtn.setAttribute('aria-pressed', String(!mainVid.muted))
+      soundBtn.textContent = mainVid.muted
+        ? soundBtn.dataset.labelOff || 'SOUND OFF'
+        : soundBtn.dataset.labelOn || 'SOUND ON'
+
+      if (!soundBtn.dataset.bound) {
+        soundBtn.dataset.bound = '1'
+        soundBtn.addEventListener('click', () => {
+          mainVid.muted = !mainVid.muted
+          soundBtn.setAttribute('aria-pressed', String(!mainVid.muted))
+          soundBtn.textContent = mainVid.muted
+            ? soundBtn.dataset.labelOff || 'SOUND OFF'
+            : soundBtn.dataset.labelOn || 'SOUND ON'
+          if (mainVid.paused) mainVid.play().catch(() => {})
+        })
+      }
+    }
+
+    // Sunset diagonal wipe interactive scrub (complements scroll-driven CSS animation)
+    const wipe = document.getElementById('sunset-wipe')
+    const wipeLight = document.getElementById('sunset-wipe-light')
+    if (wipe && wipeLight && !wipe.dataset.bound) {
+      wipe.dataset.bound = '1'
+      const setDiagonal = (ratio: number) => {
+        const p = Math.max(0.06, Math.min(0.94, ratio))
+        const topX = Math.round((p + 0.14) * 100)
+        const botX = Math.round((p - 0.14) * 100)
+        wipe.classList.add('is-scrubbed')
+        wipeLight.style.clipPath = `polygon(0 0, ${topX}% 0, ${botX}% 100%, 0 100%)`
+      }
+      let dragging = false
+      wipe.addEventListener('pointerdown', (e) => {
+        dragging = true
+        wipe.setPointerCapture(e.pointerId)
+        const r = wipe.getBoundingClientRect()
+        setDiagonal((e.clientX - r.left) / r.width)
+      })
+      wipe.addEventListener('pointermove', (e) => {
+        if (!dragging) return
+        const r = wipe.getBoundingClientRect()
+        setDiagonal((e.clientX - r.left) / r.width)
+      })
+      wipe.addEventListener('pointerup', () => { dragging = false })
+      wipe.addEventListener('pointercancel', () => { dragging = false })
+    }
+  }
+
+  document.addEventListener('astro:page-load', initHome)
+  if (document.readyState !== 'loading') initHome()
+</script>

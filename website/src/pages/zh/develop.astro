@@ -1,0 +1,11 @@
+---
+import DevelopView from '../../components/DevelopView.astro'
+import { COPY } from '../../data/i18n'
+import Layout from '../../layouts/Layout.astro'
+
+const meta = COPY.zh.meta
+---
+
+<Layout lang="zh" page="develop" title={meta.developTitle} description={meta.developDesc}>
+  <DevelopView lang="zh" />
+</Layout>
