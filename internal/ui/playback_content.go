@@ -354,6 +354,8 @@ func (p *PageContext) playbackTextLayers(c *ui.Context, state app.PlaybackState)
 			bottom := float32(73)
 			if s.visible {
 				bottom = 212
+			} else if s.trick.hudVisible(c.Now()) {
+				bottom = 168
 			}
 			ui.Column(c).Absolute().Left(p.Width * 0.17).Right(p.Width * 0.17).Bottom(bottom).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, cue.Text).Padding(6, 12).Radius(5).FontSize(30).FontWeight(550).
@@ -536,7 +538,7 @@ func (p *PageContext) drawDanmaku(c *ui.Context, state app.PlaybackState) {
 	}
 	rate := float64(1)
 	if p.host.Playback != nil {
-		rate = p.host.Playback.Rate()
+		rate = p.host.Playback.EffectiveRate()
 	}
 	position := content.danmakuPosition(c.Now(), state, rate)
 	schedule := content.ensureDanmakuSchedule(display, snap.Rules, snap.Revision, p.Width)

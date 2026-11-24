@@ -111,7 +111,9 @@
     "BranchQuestion": "\u63a5\u4e0b\u6765\uff0c\u505a\u51fa\u4f60\u7684\u9009\u62e9",
     "BranchButton": "\u4e92\u52a8\u5206\u652f",
     "AudioTrack": "\u97f3\u8f68",
-    "AudioDefault": "\u9ed8\u8ba4"
+    "AudioDefault": "\u9ed8\u8ba4",
+    "FastForward": "\u5feb\u8fdb",
+    "Rewind": "\u5feb\u9000"
   },
   "PlaybackPrefs": {
     "Title": "\u64ad\u653e",

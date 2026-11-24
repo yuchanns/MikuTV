@@ -148,12 +148,16 @@ func (s *creatorState) visibleTabs() []provider.CreatorTab {
 	return defaultCreatorTabs
 }
 
-func (p *PageContext) canOpenCreator(creator *provider.Creator) bool {
+func (v *View) canOpenCreator(creator *provider.Creator) bool {
 	if creator == nil || strings.TrimSpace(creator.ID) == "" {
 		return false
 	}
-	entry, _ := p.State.Current()
+	entry, _ := v.State.Current()
 	return entry.Capabilities.Has(provider.ReadCreator)
+}
+
+func (p *PageContext) canOpenCreator(creator *provider.Creator) bool {
+	return p.host.canOpenCreator(creator)
 }
 
 func (p *PageContext) openCreator(creator provider.Creator) {

@@ -17,7 +17,7 @@ const (
 )
 
 func playbackShowNetworkSpeed(state app.PlaybackState, s *playbackView) bool {
-	if s.content.overlay() || playbackHasAccessDialog(state) || state.Failure != "" || state.Clock.Ended || state.LiveEnded {
+	if s.content.overlay() || playbackHasAccessDialog(state) || state.Failure != "" || state.Clock.Ended || state.LiveEnded || s.trick.active() {
 		return false
 	}
 	return state.Loading || state.Switching || (state.Clock.Buffering && state.Playing && !s.scrubbing && !s.selectingChapter)
@@ -83,7 +83,7 @@ const (
 )
 
 func (s *playbackView) feedbackFor(c *ui.Context, state app.PlaybackState) playbackFeedback {
-	buffering := state.Loading || state.Clock.Buffering && state.Playing && !s.scrubbing && !s.selectingChapter
+	buffering := state.Loading || state.Clock.Buffering && state.Playing && !s.scrubbing && !s.selectingChapter && !s.trick.hudVisible(c.Now())
 	if !buffering {
 		s.bufferSince = time.Time{}
 	}

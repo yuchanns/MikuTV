@@ -677,3 +677,88 @@ func TestPlaybackAutoQualityIgnoresSeeksAndPeriodicSaveIsOrderedOffMain(t *testi
 		t.Fatalf("saved position order = %v, want [150 188]", store.saved)
 	}
 }
+
+func TestPlaybackTrickRatePreservesUserSpeedAndSuppressesAutoQualityAndStall(t *testing.T) {
+	deliveries := make(chan func(), 8)
+	deliver := func() {
+		t.Helper()
+		select {
+		case fn := <-deliveries:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for playback delivery")
+		}
+	}
+	source := &autoQualitySession{requests: make(chan provider.PlaybackRequest, 8)}
+	clock := player.Status{HasFrame: true, Duration: 300, Position: 40, BufferEnd: 50}
+	var engineRate float64
+	pb := NewPlayback(&Catalog{session: source}, player.Engine{
+		Open:         func(string, float64) bool { return true },
+		Snapshot:     func() player.Status { return clock },
+		Seek:         func(sec float64) { clock.Position = sec },
+		SetRate:      func(r float64) { engineRate = r },
+		Capabilities: func() player.Capabilities { return player.Capabilities{HDR: false, HEVC: true} },
+	}, nil, func(fn func()) { deliveries <- fn }, func() {})
+	defer pb.Close()
+
+	pb.Start(provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "entry", Kind: provider.Video, ID: "trick1"}}, "user", false, nil)
+	deliver()
+	<-source.requests
+	pb.SetRate(1.25)
+	if engineRate != 1.25 || pb.Rate() != 1.25 || pb.EffectiveRate() != 1.25 {
+		t.Fatalf("initial rate mismatch: engine=%.2f user=%.2f effective=%.2f", engineRate, pb.Rate(), pb.EffectiveRate())
+	}
+
+	// Native +2x trick play uses AVPlayer 2.0 while preserving user's 1.25x.
+	pb.SetTrickRate(2)
+	if engineRate != 2 || pb.Rate() != 1.25 || pb.TrickRate() != 2 || pb.EffectiveRate() != 2 {
+		t.Fatalf("+2x trick mismatch: engine=%.2f user=%.2f trick=%.2f effective=%.2f", engineRate, pb.Rate(), pb.TrickRate(), pb.EffectiveRate())
+	}
+
+	// Scan-seek rates (+4x, -2x) pause AVPlayer (engineRate=0) and suppress stall timeout & auto downgrade.
+	pb.SetTrickRate(4)
+	if engineRate != 0 || pb.Rate() != 1.25 || pb.EffectiveRate() != 0 {
+		t.Fatalf("+4x scan mismatch: engine=%.2f user=%.2f effective=%.2f", engineRate, pb.Rate(), pb.EffectiveRate())
+	}
+	clock.Buffering = true
+	t0 := time.Now()
+	pb.Tick(t0)
+	pb.Tick(t0.Add(playbackStallTimeout + 5*time.Second))
+	if pb.State().Failure != "" || pb.State().Switching {
+		t.Fatalf("scan-seek triggered spurious failure or downgrade: failure=%q switching=%t", pb.State().Failure, pb.State().Switching)
+	}
+
+	// Exiting trick play restores user's configured 1.25x speed.
+	clock.Buffering = false
+	pb.SetTrickRate(0)
+	if engineRate != 1.25 || pb.TrickRate() != 0 || pb.EffectiveRate() != 1.25 {
+		t.Fatalf("exit trick did not restore 1.25x: engine=%.2f trick=%.2f effective=%.2f", engineRate, pb.TrickRate(), pb.EffectiveRate())
+	}
+
+	// Toggle clears any active trick rate.
+	pb.SetTrickRate(-2)
+	pb.Toggle()
+	if pb.TrickRate() != 0 || pb.State().Playing || engineRate != 0 {
+		t.Fatalf("Toggle did not clear trick rate cleanly: trick=%.2f playing=%t engine=%.2f", pb.TrickRate(), pb.State().Playing, engineRate)
+	}
+
+	// Stream URL expiry during trick play clears trick rate during re-resolution so playback resumes at user speed.
+	pb.Toggle() // resume at 1.25x
+	pb.SetTrickRate(-4)
+	pb.state.Resolution.Plan.ExpiresAt = time.Now().Add(-time.Minute).Unix()
+	pb.Seek(35)
+	if !pb.State().Loading || pb.TrickRate() != 0 {
+		t.Fatalf("expired seek during trick play did not clear trickRate while loading: loading=%t trick=%.2f", pb.State().Loading, pb.TrickRate())
+	}
+	// Explicit zero-rate reset must also be honored if trickRate was set while Loading.
+	pb.trickRate = 2
+	pb.SetTrickRate(0)
+	if pb.TrickRate() != 0 {
+		t.Fatalf("SetTrickRate(0) during Loading was rejected: trick=%.2f", pb.TrickRate())
+	}
+	deliver()
+	<-source.requests
+	if pb.TrickRate() != 0 || engineRate != 1.25 {
+		t.Fatalf("post-expiry resolution did not resume at user 1.25x: trick=%.2f engine=%.2f", pb.TrickRate(), engineRate)
+	}
+}
