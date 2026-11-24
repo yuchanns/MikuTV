@@ -13,7 +13,7 @@ import (
 
 const (
 	trickSkipSeconds     = 10.0
-	trickDoubleTapWindow = 800 * time.Millisecond
+	trickDoubleTapWindow = 550 * time.Millisecond
 	trickSkipHUDDuration = 1500 * time.Millisecond
 	trickSeekInterval    = 280 * time.Millisecond
 )
@@ -33,6 +33,10 @@ type playbackTrickState struct {
 	skipAt     time.Time
 	skipUntil  time.Time
 	skipTarget float64
+
+	scrubTapDir int
+	scrubTapAt  time.Time
+	scrubHeld   bool
 }
 
 func (t *playbackTrickState) active() bool {
@@ -53,6 +57,12 @@ func (t *playbackTrickState) clearFeedback() {
 	t.skipAt = time.Time{}
 	t.skipUntil = time.Time{}
 	t.skipTarget = 0
+}
+
+func (t *playbackTrickState) clearScrubTap() {
+	t.scrubTapDir = 0
+	t.scrubTapAt = time.Time{}
+	t.scrubHeld = false
 }
 
 func (t *playbackTrickState) reset() {
@@ -136,7 +146,15 @@ func (v *View) handlePlaybackTrickKey(event ui.InputEvent) bool {
 				v.dispatch(func() { v.exitPlaybackTrick(true) })
 			}
 			return true
-		case ui.KeyUp, ui.KeyDown:
+		case ui.KeyUp:
+			if !event.Repeat {
+				v.dispatch(func() {
+					v.exitPlaybackTrick(true)
+					s.showAt(v, playerTimeline)
+				})
+			}
+			return true
+		case ui.KeyDown:
 			if !event.Repeat {
 				v.dispatch(func() {
 					v.exitPlaybackTrick(true)
@@ -147,35 +165,84 @@ func (v *View) handlePlaybackTrickKey(event ui.InputEvent) bool {
 		}
 		return false
 	}
-	if s.visible || (event.Key != ui.KeyLeft && event.Key != ui.KeyRight) || !v.canPlaybackTrick(state) {
+	if (event.Key != ui.KeyLeft && event.Key != ui.KeyRight) || !v.canPlaybackTrick(state) {
 		return false
 	}
 	dir := 1
 	if event.Key == ui.KeyLeft {
 		dir = -1
 	}
-	v.dispatch(func() { v.triggerPlaybackQuickOrTrick(dir, event.Repeat) })
-	return true
+	if !s.visible {
+		v.dispatch(func() { v.handleHiddenPlaybackSeek(dir, event.Repeat) })
+		return true
+	}
+	if !s.selectingChapter && (v.State.Focus == playerTimeline || s.scrubbing) {
+		v.dispatch(func() { v.handleTimelinePlaybackSeek(dir, event.Repeat) })
+		return true
+	}
+	return false
 }
 
-func (v *View) triggerPlaybackQuickOrTrick(dir int, repeat bool) {
+func (v *View) startPlaybackTrick(dir int, startPos float64, wasPlaying bool, now time.Time) {
+	s := &v.player
+	rate := float64(dir) * trickRates[0]
+	v.Playback.SetTrickRate(rate)
+	if v.Playback.TrickRate() != rate {
+		s.trick.reset()
+		return
+	}
+	s.trick.rate = rate
+	s.trick.wasPlaying = wasPlaying
+	s.trick.position = startPos
+	s.trick.lastTickAt = now
+	s.trick.lastSeekAt = time.Time{}
+	s.trick.lastSeekPos = startPos
+	s.trick.clearFeedback()
+	s.trick.clearScrubTap()
+}
+
+func (v *View) stepTimelineScrub(state app.PlaybackState, dir int) {
+	s := &v.player
+	if !s.scrubbing {
+		s.scrubbing, s.scrubWasPlaying = true, state.Playing
+		s.scrubPosition = state.Position
+		if state.Playing {
+			v.Playback.Toggle()
+		}
+	}
+	s.scrubPosition = min(max(s.scrubPosition+float64(dir)*trickSkipSeconds, 0), state.Duration)
+}
+
+func (v *View) handleHiddenPlaybackSeek(dir int, repeat bool) {
 	s := &v.player
 	state := v.Playback.State()
 	if !v.canPlaybackTrick(state) {
 		return
 	}
 	now := s.trickNow()
-	doubleTap := !s.trick.skipAt.IsZero() && s.trick.skipDir == dir && now.Sub(s.trick.skipAt) <= trickDoubleTapWindow
-	if repeat || doubleTap {
-		pos := state.Position
-		s.trick.rate = float64(dir) * trickRates[0]
-		s.trick.wasPlaying = state.Playing
-		s.trick.position = pos
-		s.trick.lastTickAt = now
-		s.trick.lastSeekAt = time.Time{}
-		s.trick.lastSeekPos = pos
+	if repeat {
+		startPos := state.Position
+		if !s.trick.skipAt.IsZero() && s.trick.skipDir == dir && now.Sub(s.trick.skipAt) <= trickSkipHUDDuration {
+			startPos = s.trick.skipTarget
+		}
 		s.trick.clearFeedback()
-		v.Playback.SetTrickRate(s.trick.rate)
+		s.visible = true
+		s.hideAt = now.Add(playerIdle)
+		s.scrubbing, s.scrubWasPlaying = true, state.Playing
+		s.scrubPosition = min(max(startPos+float64(dir)*trickSkipSeconds, 0), state.Duration)
+		if state.Playing {
+			v.Playback.Toggle()
+		}
+		s.trick.scrubHeld = true
+		s.trick.scrubTapDir = 0
+		s.trick.scrubTapAt = time.Time{}
+		s.controlFocus = playerTimeline
+		v.State.Focus, v.reveal = playerTimeline, true
+		return
+	}
+	doubleTap := !s.trick.skipAt.IsZero() && s.trick.skipDir == dir && now.Sub(s.trick.skipAt) <= trickDoubleTapWindow
+	if doubleTap {
+		v.startPlaybackTrick(dir, state.Position, state.Playing, now)
 		return
 	}
 	target := min(max(state.Position+float64(dir)*trickSkipSeconds, 0), state.Duration)
@@ -185,6 +252,53 @@ func (v *View) triggerPlaybackQuickOrTrick(dir int, repeat bool) {
 	s.trick.skipAt = now
 	s.trick.skipUntil = now.Add(trickSkipHUDDuration)
 	s.trick.skipTarget = target
+}
+
+func (v *View) handleTimelinePlaybackSeek(dir int, repeat bool) {
+	s := &v.player
+	state := v.Playback.State()
+	if !v.canPlaybackTrick(state) {
+		return
+	}
+	now := s.trickNow()
+	s.hideAt = now.Add(playerIdle)
+	if repeat {
+		s.trick.scrubHeld = true
+		s.trick.scrubTapDir = 0
+		s.trick.scrubTapAt = time.Time{}
+		v.stepTimelineScrub(state, dir)
+		return
+	}
+	doubleTap := !s.trick.scrubHeld && !s.trick.scrubTapAt.IsZero() &&
+		s.trick.scrubTapDir == dir && now.Sub(s.trick.scrubTapAt) <= trickDoubleTapWindow
+	if doubleTap {
+		startPos := state.Position
+		wasPlaying := state.Playing
+		if s.scrubbing {
+			startPos = s.scrubPosition
+			wasPlaying = s.scrubWasPlaying
+			s.scrubbing = false
+		}
+		s.trick.clearScrubTap()
+		s.visible = false
+		s.controlFocus = ""
+		v.State.Focus, v.reveal = playerWake, true
+		if math.Abs(startPos-state.Position) > 0.25 {
+			v.Playback.Seek(startPos)
+		}
+		if dir > 0 && wasPlaying && !v.Playback.State().Playing {
+			v.Playback.Toggle()
+		}
+		v.startPlaybackTrick(dir, startPos, wasPlaying, now)
+		if !s.trick.active() && wasPlaying && !v.Playback.State().Playing {
+			v.Playback.Toggle()
+		}
+		return
+	}
+	s.trick.scrubHeld = false
+	s.trick.scrubTapDir = dir
+	s.trick.scrubTapAt = now
+	v.stepTimelineScrub(state, dir)
 }
 
 func (v *View) stepPlaybackTrick(dir int) {
@@ -263,12 +377,12 @@ func (v *View) tickPlaybackTrick(c *ui.Context, now time.Time, state app.Playbac
 			}
 			if s.trick.position <= 0 {
 				s.trick.position = 0
-				v.exitPlaybackTrick(false)
+				v.exitPlaybackTrick(s.trick.wasPlaying)
 				return
 			}
 			if state.Duration > 0 && s.trick.position >= state.Duration {
 				s.trick.position = max(0, state.Duration-0.5)
-				v.exitPlaybackTrick(false)
+				v.exitPlaybackTrick(s.trick.wasPlaying)
 				return
 			}
 			if !state.Clock.Seeking &&
