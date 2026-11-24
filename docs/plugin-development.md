@@ -233,26 +233,45 @@ MikuTV includes built-in Simplified Chinese (`zh-Hans`) and English (`en`) UI st
 
 ---
 
-## 5. Agent Workflow & Verification Checklist
+## 5. Publishing & Verification
 
-When an AI coding agent develops a MikuTV plugin, follow this loop:
+Put the plugin in a public GitHub repository with `plugin.json` and `LICENSE` at the root, and add the topic **`mikutv-plugin`** (plus `mikutv-theme` for themes or `mikutv-locale` for language packs). MikuTV reads the latest non-draft GitHub Release whose tag matches `v<version>` in `plugin.json` and installs its `plugin.zip` asset.
+
+### Release Workflow
+
+Add `.github/workflows/release.yml` using [`yuchanns/release-mikutv-plugin`](https://github.com/yuchanns/release-mikutv-plugin). Pushing a `v*` tag validates `plugin.json`, builds a deterministic `plugin.zip` and `SHA256SUMS.txt`, and publishes the GitHub Release (automatically marking SemVer prerelease tags as prereleases):
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: yuchanns/release-mikutv-plugin@v1
+```
+
+### Verification Checklist
 
 1. **Read authoritative Go contracts first**:
    - Manifest & archive validation: `internal/plugin/manifest.go`, `internal/plugin/package.go`, `internal/plugin/theme.go`, `internal/plugin/locale.go`
    - Provider request/response structs: `internal/provider/*.go`
    - Theme schema & contrast rules: `internal/theme/theme.go`, `internal/theme/parse.go`
    - UI locale baseline keys: `internal/ui/assets/labels.en.json`
-2. **Scaffold the plugin repo** with `plugin.json` at root, `LICENSE`, and clean `.js`/`.json` files. Avoid external Node-only dependencies (only pure JS + `fetch` + `host.*` are available inside `moejs`).
-3. **Build `plugin.zip` deterministically** from the repository root (no parent directory prefix, no symlinks, no `.git/`):
+2. **Scaffold the repository**: keep `plugin.json`, `LICENSE`, and `.js`/`.json` files at the root (only pure JS, `fetch`, and `host.*` are available inside `moejs`), and add `plugin.zip` and `SHA256SUMS.txt` to `.gitignore`.
+3. **Validate with MikuTV's Go loader**: run a Go test against `github.com/yuchanns/MikuTV/internal/plugin` calling `plugin.InspectPackage` along with `plugin.Open` (`source`), `plugin.OpenTheme` (`theme`), or `plugin.OpenLocale` (`locale`) to confirm zero unknown fields, valid host allowlist, contrast/locale rules, and declared exports; cover JS exports with mocked HTTP fixtures.
+4. **Tag and publish**: bump `version` in `plugin.json`, push to `main`, and push the matching tag:
    ```bash
-   zip -r -X plugin.zip plugin.json LICENSE index.js  # include all plugin files at root
+   git tag -a v1.0.0 -m "Release v1.0.0"
+   git push origin v1.0.0
    ```
-4. **Validate directly with MikuTV's Go loader** before publishing:
-   - Run a small Go test or command against `github.com/yuchanns/MikuTV/internal/plugin` calling `plugin.InspectPackage`, `plugin.Open` (for `source`), `plugin.OpenTheme` (for `theme`), or `plugin.OpenLocale` (for `locale`).
-   - Verify `plugin.Open` succeeds with zero unknown fields, valid host allowlist, and all declared capability exports present.
-   - Write unit tests exercising your plugin's JS exports with mocked HTTP fixtures.
-5. **Publish to GitHub**:
-   - Add repository topic `mikutv-plugin`.
-   - Create tag `v<version>` matching `plugin.json` `version`.
-   - Attach `plugin.zip` to the GitHub Release.
-   - Verify live resolution: `GET https://api.github.com/repos/<owner>/<repo>/releases/latest` contains an asset named `plugin.zip` and `tag_name == "v" + version`.
+   Once the workflow finishes, `GET https://api.github.com/repos/<owner>/<repo>/releases/latest` serves `plugin.zip` under `tag_name == "v" + version`.

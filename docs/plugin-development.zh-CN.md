@@ -232,25 +232,45 @@ MikuTV 内置简体中文（`zh-Hans`）与英文（`en`）界面，并默认跟
 
 ---
 
-## 5. 给 AI 助手的开发与验收清单（Agent Workflow）
+## 5. 发布与验收流程
 
-当 AI 编程助手为用户开发 MikuTV 插件时，建议按以下闭环执行：
+将插件放入公开的 GitHub 仓库，保持 `plugin.json` 与 `LICENSE` 位于仓库根目录，并为仓库添加 Topic **`mikutv-plugin`**（主题可附 `mikutv-theme`，语言包可附 `mikutv-locale`）。MikuTV 会读取最新的正式 GitHub Release（标签需匹配 `plugin.json` 中的 `v<version>`），并安装其中的 `plugin.zip` 附件。
+
+### 自动发布工作流
+
+在仓库中添加 `.github/workflows/release.yml` 并引用 [`yuchanns/release-mikutv-plugin`](https://github.com/yuchanns/release-mikutv-plugin)。推送 `v*` 标签时会自动校验 `plugin.json`、生成确定性的 `plugin.zip` 与 `SHA256SUMS.txt` 并发布 GitHub Release（语义化预发布版本自动标记为 Prerelease）：
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: yuchanns/release-mikutv-plugin@v1
+```
+
+### 验收清单
 
 1. **先读真实 Go 契约源码**：
    - 清单与包结构校验：`internal/plugin/manifest.go`、`internal/plugin/package.go`、`internal/plugin/theme.go`、`internal/plugin/locale.go`
    - Provider 数据结构：`internal/provider/*.go`
    - 主题令牌与对比度规则：`internal/theme/theme.go`、`internal/theme/parse.go`
    - 界面文案基线键表：`internal/ui/assets/labels.en.json`
-2. **搭建独立插件仓库**：`plugin.json` 与 `LICENSE` 置于根目录；内容源插件仅使用纯 JS、受控 `fetch` 与 `host.*`（不依赖 Node.js 专属 API）。
-3. **从仓库根目录确定性打包 `plugin.zip`**（无外层目录、无软链接、无 `.git/`）：
+2. **整理仓库结构**：将 `plugin.json`、`LICENSE` 及 `.js`/`.json` 文件放在根目录（内容源插件仅使用纯 JS、受控 `fetch` 与 `host.*`），并将 `plugin.zip` 与 `SHA256SUMS.txt` 写入 `.gitignore`。
+3. **使用 MikuTV 的 Go 加载器实测校验**：调用 `github.com/yuchanns/MikuTV/internal/plugin` 的 `InspectPackage` 及 `Open`（内容源）、`OpenTheme`（主题）或 `OpenLocale`（语言包），确认清单字段、域名白名单、对比度、文案结构与导出函数全部通过，并用 Mock HTTP 夹具测试核心导出函数。
+4. **打标签发布**：更新 `plugin.json` 中的 `version` 并推送至 `main`，再推送一致的标签：
    ```bash
-   zip -r -X plugin.zip plugin.json LICENSE index.js  # 按实际文件列出
+   git tag -a v1.0.0 -m "Release v1.0.0"
+   git push origin v1.0.0
    ```
-4. **使用 MikuTV 的 Go 加载器实测校验**：
-   - 调用 `github.com/yuchanns/MikuTV/internal/plugin` 的 `InspectPackage`、`Open`（内容源）、`OpenTheme`（主题）或 `OpenLocale`（语言包），确认清单字段、域名白名单、对比度、文案结构与导出函数全部通过。
-   - 编写基于 Mock HTTP 夹具的自动化测试覆盖核心导出函数。
-5. **发布到 GitHub**：
-   - 为仓库添加 Topic `mikutv-plugin`；
-   - 创建与 `plugin.json` 中 `version` 一致的标签 `v<version>`；
-   - 将 `plugin.zip` 上传为该 Release 的附件；
-   - 验证 `GET https://api.github.com/repos/<owner>/<repo>/releases/latest` 返回 `plugin.zip` 且 `tag_name == "v" + version`。
+   工作流完成后，确认 `GET https://api.github.com/repos/<owner>/<repo>/releases/latest` 返回 `plugin.zip` 且 `tag_name == "v" + version`。
