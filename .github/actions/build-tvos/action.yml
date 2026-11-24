@@ -1,0 +1,58 @@
+name: Build & Verify tvOS IPA
+description: Package unsigned tvOS IPA and verify architecture, system frameworks, plist versions, and archive layout
+
+inputs:
+  app-version:
+    description: Semantic version X.Y.Z for APP_VERSION (optional; defaults to scripts/tvos.py)
+    required: false
+    default: ''
+  build-number:
+    description: Positive integer build number for CFBundleVersion
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Package unsigned tvOS IPA
+      shell: bash
+      env:
+        INPUT_APP_VERSION: ${{ inputs.app-version }}
+        BUILD_NUMBER: ${{ inputs.build-number }}
+      run: |
+        set -euo pipefail
+        if [ -n "$INPUT_APP_VERSION" ]; then
+          export APP_VERSION="$INPUT_APP_VERSION"
+        fi
+        python3 scripts/tvos.py package
+
+    - name: Verify Mach-O binaries, Info.plist, and IPA archive
+      shell: bash
+      env:
+        EXPECTED_VERSION: ${{ inputs.app-version }}
+      run: |
+        set -euo pipefail
+        app=".build/tvos/Payload/MikuTV.app"
+        ipa=".build/tvos/MikuTV-unsigned.ipa"
+        test -f "$ipa"
+        if [ -n "$EXPECTED_VERSION" ]; then
+          for plist in "$app/Info.plist" "$app/PlugIns/TopShelf.appex/Info.plist"; do
+            got_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+            if [ "$got_ver" != "$EXPECTED_VERSION" ]; then
+              echo "::error::CFBundleShortVersionString mismatch in $plist: got '$got_ver', expected '$EXPECTED_VERSION'"
+              exit 1
+            fi
+          done
+        fi
+        for bin in "$app/MikuTV" "$app/PlugIns/TopShelf.appex/TopShelf"; do
+          file_info="$(file "$bin")"
+          printf '%s\n' "$file_info" | grep -q "arm64"
+          non_sys="$(otool -L "$bin" | tail -n +2 | awk '{print $1}' | grep -Ev '^(/usr/lib/|/System/Library/Frameworks/)' || true)"
+          if [ -n "$non_sys" ]; then
+            echo "::error::Unexpected non-system dynamic libraries in $bin: $non_sys"
+            exit 1
+          fi
+        done
+        listing="$(unzip -l "$ipa")"
+        printf '%s\n' "$listing" | grep -q "Payload/MikuTV.app/Info.plist"
+        printf '%s\n' "$listing" | grep -q "Payload/MikuTV.app/PlugIns/TopShelf.appex/TopShelf"
+        shasum -a 256 "$ipa"

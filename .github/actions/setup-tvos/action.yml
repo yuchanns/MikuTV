@@ -1,0 +1,36 @@
+name: Setup tvOS Build Environment
+description: Set up Go and select an Xcode installation with the AppleTVOS SDK
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+        cache: true
+
+    - name: Select Xcode with AppleTVOS SDK
+      shell: bash
+      run: |
+        set -euo pipefail
+        if xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
+          echo "Using default Xcode: $(xcode-select -p)"
+          xcodebuild -version
+          exit 0
+        fi
+        selected=""
+        for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
+          if DEVELOPER_DIR="$app/Contents/Developer" xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
+            selected="$app/Contents/Developer"
+            break
+          fi
+        done
+        if [ -z "$selected" ]; then
+          echo "::error::No installed Xcode contains the appletvos SDK"
+          ls -la /Applications
+          exit 1
+        fi
+        sudo xcode-select -s "$selected"
+        xcodebuild -version
+        xcrun --sdk appletvos --show-sdk-path

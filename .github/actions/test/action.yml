@@ -1,0 +1,13 @@
+name: Vet & Test Go Packages
+description: Run go vet and race-enabled unit tests against the prepared vendor tree
+
+runs:
+  using: composite
+  steps:
+    - name: Go vet
+      shell: bash
+      run: go vet -mod=vendor ./...
+
+    - name: Go test (race)
+      shell: bash
+      run: go test -mod=vendor -race -count=1 -timeout 20m ./...

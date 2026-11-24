@@ -121,45 +121,17 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.existing_release_commit || needs.plan.outputs.source_commit }}
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
+      - name: Setup tvOS environment
+        uses: ./.github/actions/setup-tvos
+
+      - name: Build and verify unsigned tvOS IPA
+        uses: ./.github/actions/build-tvos
         with:
-          go-version-file: go.mod
-          cache: true
+          app-version: ${{ needs.plan.outputs.base_version }}
+          build-number: ${{ github.run_number }}
 
-      - name: Select Xcode with AppleTVOS SDK
-        run: |
-          set -euo pipefail
-          if xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
-            echo "Using default Xcode: $(xcode-select -p)"
-            xcodebuild -version
-            exit 0
-          fi
-          selected=""
-          for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
-            if DEVELOPER_DIR="$app/Contents/Developer" xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
-              selected="$app/Contents/Developer"
-              break
-            fi
-          done
-          if [ -z "$selected" ]; then
-            echo "::error::No installed Xcode contains the appletvos SDK"
-            ls -la /Applications
-            exit 1
-          fi
-          sudo xcode-select -s "$selected"
-          xcodebuild -version
-          xcrun --sdk appletvos --show-sdk-path
-
-      - name: Build tvOS package and run vet & tests
-        env:
-          APP_VERSION: ${{ needs.plan.outputs.base_version }}
-          BUILD_NUMBER: ${{ github.run_number }}
-        run: |
-          set -euo pipefail
-          python3 scripts/tvos.py package
-          go vet -mod=vendor ./...
-          go test -mod=vendor -race -count=1 -timeout 20m ./...
+      - name: Run vet and tests
+        uses: ./.github/actions/test
 
   prepare:
     name: Update Changelog & Create Verified Release Commit
@@ -322,69 +294,24 @@ jobs:
           fetch-tags: true
           ref: ${{ needs.prepare.outputs.release_commit }}
 
-      - name: Set up Go
-        uses: actions/setup-go@v7
+      - name: Setup tvOS environment
+        uses: ./.github/actions/setup-tvos
+
+      - name: Build and verify unsigned tvOS IPA
+        uses: ./.github/actions/build-tvos
         with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Select Xcode with AppleTVOS SDK
-        run: |
-          set -euo pipefail
-          if xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
-            echo "Using default Xcode: $(xcode-select -p)"
-            xcodebuild -version
-            exit 0
-          fi
-          selected=""
-          for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
-            if DEVELOPER_DIR="$app/Contents/Developer" xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
-              selected="$app/Contents/Developer"
-              break
-            fi
-          done
-          if [ -z "$selected" ]; then
-            echo "::error::No installed Xcode contains the appletvos SDK"
-            ls -la /Applications
-            exit 1
-          fi
-          sudo xcode-select -s "$selected"
-          xcodebuild -version
-          xcrun --sdk appletvos --show-sdk-path
-
-      - name: Build unsigned tvOS IPA
-        env:
-          APP_VERSION: ${{ needs.plan.outputs.base_version }}
-          BUILD_NUMBER: ${{ github.run_number }}
-        run: python3 scripts/tvos.py package
+          app-version: ${{ needs.plan.outputs.base_version }}
+          build-number: ${{ github.run_number }}
 
       - name: Vet release build tree
         run: go vet -mod=vendor ./...
 
-      - name: Verify artifacts and generate SHA256SUMS
+      - name: Prepare release distribution files and SHA256SUMS
         env:
           RELEASE_TAG: ${{ needs.plan.outputs.tag }}
-          APP_VERSION: ${{ needs.plan.outputs.base_version }}
         run: |
           set -euo pipefail
-          app=".build/tvos/Payload/MikuTV.app"
           src=".build/tvos/MikuTV-unsigned.ipa"
-          for plist in "$app/Info.plist" "$app/PlugIns/TopShelf.appex/Info.plist"; do
-            got_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
-            if [ "$got_ver" != "$APP_VERSION" ]; then
-              echo "::error::CFBundleShortVersionString mismatch in $plist: got '$got_ver', expected '$APP_VERSION'"
-              exit 1
-            fi
-          done
-          for bin in "$app/MikuTV" "$app/PlugIns/TopShelf.appex/TopShelf"; do
-            file_info="$(file "$bin")"
-            printf '%s\n' "$file_info" | grep -q "arm64"
-            non_sys="$(otool -L "$bin" | tail -n +2 | awk '{print $1}' | grep -Ev '^(/usr/lib/|/System/Library/Frameworks/)' || true)"
-            if [ -n "$non_sys" ]; then
-              echo "::error::Unexpected non-system dynamic libraries in $bin: $non_sys"
-              exit 1
-            fi
-          done
           mkdir -p dist
           cp "$src" "dist/MikuTV-tvOS.ipa"
           cp "$src" "dist/MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa"
