@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
@@ -280,6 +281,7 @@ type playbackLabels struct {
 	LiveChatSendFailed, LiveChatRateLimited                                                               string
 	Interactive, BranchQuestion, BranchButton                                                             string
 	AudioTrack, AudioDefault                                                                              string
+	FastForward, Rewind                                                                                   string
 }
 
 type playbackAccessLabels struct {
@@ -385,63 +387,112 @@ func (a *Assets) BrandMark(dark bool) ui.ImageSource {
 	return a.Brand
 }
 
+type baseAssets struct {
+	baseZH       []byte
+	baseEN       []byte
+	baseSections []section
+	icons        map[string]*ui.SVG
+	brand        ui.ImageSource
+	brandLight   ui.ImageSource
+	license      string
+	err          error
+}
+
+var (
+	baseAssetsOnce sync.Once
+	sharedAssets   baseAssets
+)
+
+func loadBaseAssets() *baseAssets {
+	baseAssetsOnce.Do(func() {
+		b := &sharedAssets
+		b.icons = make(map[string]*ui.SVG)
+		text, err := files.ReadFile("assets/labels.json")
+		if err != nil {
+			b.err = err
+			return
+		}
+		enText, err := files.ReadFile("assets/labels.en.json")
+		if err != nil {
+			b.err = err
+			return
+		}
+		var parsed labels
+		if err := json.Unmarshal(text, &parsed); err != nil {
+			b.err = fmt.Errorf("decode labels: %w", err)
+			return
+		}
+		b.baseZH = text
+		b.baseEN = enText
+		b.baseSections = append([]section(nil), parsed.Sections...)
+		icons, err := files.ReadDir("assets/icons")
+		if err != nil {
+			b.err = err
+			return
+		}
+		tmp := &Assets{icons: b.icons}
+		for _, file := range icons {
+			data, err := files.ReadFile("assets/icons/" + file.Name())
+			if err != nil {
+				b.err = err
+				return
+			}
+			icon, err := ui.ParseSVG(data)
+			if err != nil {
+				b.err = fmt.Errorf("decode icon %s: %w", file.Name(), err)
+				return
+			}
+			name := file.Name()[:len(file.Name())-4]
+			b.icons[name] = icon
+			if err := tmp.loadDetailIconVariants(name, data); err != nil {
+				b.err = err
+				return
+			}
+		}
+		for _, image := range []struct {
+			path string
+			dst  *ui.ImageSource
+		}{{"assets/brand.svg", &b.brand}, {"assets/brand-light.svg", &b.brandLight}} {
+			data, err := files.ReadFile(image.path)
+			if err != nil {
+				b.err = err
+				return
+			}
+			*image.dst, err = ui.DecodeImage(data)
+			if err != nil {
+				b.err = fmt.Errorf("decode %s: %w", image.path, err)
+				return
+			}
+		}
+		license, err := files.ReadFile("assets/LICENSE.txt")
+		if err != nil {
+			b.err = err
+			return
+		}
+		b.license = string(license)
+	})
+	return &sharedAssets
+}
+
 func LoadAssets() (*Assets, error) {
+	base := loadBaseAssets()
+	if base.err != nil {
+		return nil, base.err
+	}
 	a := &Assets{
-		LocaleTag: app.LocaleBuiltinZH,
-		icons:     make(map[string]*ui.SVG),
-		images:    make(map[string]ui.ImageSource),
+		LocaleTag:    app.LocaleBuiltinZH,
+		Brand:        base.brand,
+		BrandLight:   base.brandLight,
+		License:      base.license,
+		baseZH:       base.baseZH,
+		baseEN:       base.baseEN,
+		baseSections: append([]section(nil), base.baseSections...),
+		icons:        base.icons,
+		images:       make(map[string]ui.ImageSource),
 	}
-	text, err := files.ReadFile("assets/labels.json")
-	if err != nil {
-		return nil, err
-	}
-	enText, err := files.ReadFile("assets/labels.en.json")
-	if err != nil {
-		return nil, err
-	}
-	a.baseZH = text
-	a.baseEN = enText
-	if err := json.Unmarshal(text, &a.Text); err != nil {
+	if err := json.Unmarshal(base.baseZH, &a.Text); err != nil {
 		return nil, fmt.Errorf("decode labels: %w", err)
 	}
-	a.baseSections = append([]section(nil), a.Text.Sections...)
-	icons, err := files.ReadDir("assets/icons")
-	if err != nil {
-		return nil, err
-	}
-	for _, file := range icons {
-		data, err := files.ReadFile("assets/icons/" + file.Name())
-		if err != nil {
-			return nil, err
-		}
-		icon, err := ui.ParseSVG(data)
-		if err != nil {
-			return nil, fmt.Errorf("decode icon %s: %w", file.Name(), err)
-		}
-		name := file.Name()[:len(file.Name())-4]
-		a.icons[name] = icon
-		if err := a.loadDetailIconVariants(name, data); err != nil {
-			return nil, err
-		}
-	}
-	for _, image := range []struct {
-		path string
-		dst  *ui.ImageSource
-	}{{"assets/brand.svg", &a.Brand}, {"assets/brand-light.svg", &a.BrandLight}} {
-		data, err := files.ReadFile(image.path)
-		if err != nil {
-			return nil, err
-		}
-		*image.dst, err = ui.DecodeImage(data)
-		if err != nil {
-			return nil, fmt.Errorf("decode %s: %w", image.path, err)
-		}
-	}
-	license, err := files.ReadFile("assets/LICENSE.txt")
-	if err != nil {
-		return nil, err
-	}
-	a.License = string(license)
 	return a, nil
 }
 

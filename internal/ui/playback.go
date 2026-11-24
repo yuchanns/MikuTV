@@ -20,6 +20,7 @@ const (
 	playerNext         app.FocusID = "player/next"
 	playerTimeline     app.FocusID = "player/timeline"
 	playerWake         app.FocusID = "player/wake"
+	playerCreator      app.FocusID = "player/creator"
 	playerInfo         app.FocusID = "player/info"
 	playerLike         app.FocusID = "player/like"
 	playerComments     app.FocusID = "player/comments"
@@ -87,6 +88,8 @@ type playbackView struct {
 	speedSince       time.Time
 	speedSampleAt    time.Time
 	speedDisplayed   float64
+	lastFrameAt      time.Time
+	trick            playbackTrickState
 	content          playbackContent
 	discussion       videoDetailState
 }
@@ -225,10 +228,12 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 	s.discussion.cancelOperation()
 	s.discussion = videoDetailState{}
 	s.index = index
-	if index == 0 && v.State.Focus == playerPrevious || index == len(s.items)-1 && v.State.Focus == playerNext {
+	if index == 0 && v.State.Focus == playerPrevious || index == len(s.items)-1 && v.State.Focus == playerNext ||
+		(v.State.Focus == playerCreator && !v.canOpenCreator(s.items[index].item.Creator)) {
 		v.State.Focus, v.reveal = playerToggle, true
 	}
 	s.visible, s.hideAt, s.scrubbing, s.selectingChapter = true, time.Time{}, false, false
+	s.trick.reset()
 	s.showAccessHelp = false
 	s.resetNetworkSpeed()
 	item, part := s.items[index].item, s.items[index].partID
@@ -329,6 +334,10 @@ func (v *View) togglePlayback() {
 }
 
 func (s *playbackView) show(v *View) {
+	if s.trick.active() {
+		v.exitPlaybackTrick(false)
+	}
+	s.trick.clearFeedback()
 	if !s.visible || v.State.Focus == playerWake {
 		v.State.Focus = playerToggle
 		v.reveal = true
@@ -350,6 +359,10 @@ func (v *View) backFromPlayback() bool {
 	}
 	if s.panel != "" {
 		s.closePanel(v)
+		return true
+	}
+	if s.trick.active() {
+		v.exitPlaybackTrick(false)
 		return true
 	}
 	if s.feedback != playbackFeedbackNone {
@@ -399,9 +412,12 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 		return
 	}
 	now := c.Now()
+	s.lastFrameAt = now
 	v.Playback.Tick(now)
 	state := v.Playback.State()
 	liveMode := isLivePlayback(state, s.current())
+	v.tickPlaybackTrick(c, now, state, liveMode)
+	state = v.Playback.State()
 	autoplay := v.playbackPreferences().Autoplay
 	if autoplay && !liveMode && state.Clock.Ended && state.Resolution.Plan.Access != provider.VideoAccessPreview &&
 		state.Failure == "" && !playbackHasAccessDialog(state) && !playbackHasBranchChoices(state) && !playbackAutoAdvancingBranch(state) &&
@@ -467,9 +483,11 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 	if drawerOpen && !playbackHasAccessDialog(state) {
 		surfaceWidth -= playerDrawerWidth
 	}
-	if s.content.needsAnimationFrame(v, state, now, surfaceWidth) ||
+	if s.trick.scanning() || s.content.needsAnimationFrame(v, state, now, surfaceWidth) ||
 		(liveMode && s.content.needsLiveDanmakuFrame(v, state, now)) {
 		c.AnimationFrame()
+	} else if s.trick.hudVisible(now) {
+		c.After(100 * time.Millisecond)
 	} else if !liveMode && state.Playing && !state.BranchPending && plan.Branch != nil && len(plan.Branch.Options) > 0 {
 		c.After(100 * time.Millisecond)
 	} else {
@@ -596,6 +614,9 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 						surface.playbackSeekPreview(c, display, item.item.CoverURL)
 					}
 				} else {
+					if !access && !contentModal && s.panel == "" && s.trick.hudVisible(now) {
+						surface.playbackTrickHUD(c, display, now)
+					}
 					surface.playbackWake(c)
 				}
 			}
@@ -746,7 +767,6 @@ func (p *PageContext) playbackTop(c *ui.Context, item playbackItem, display, liv
 
 func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, item playbackItem) {
 	v, s, text := p.host, &p.host.player, p.Assets.Text.Playback
-	colors := p.Theme.Colors
 	liveMode := isLivePlayback(state, item)
 	regions := focusEdges{}
 	if !liveMode {
@@ -775,11 +795,7 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 			}
 			ui.Row(c).Height(65).Gap(14).AlignItems(ui.Center).Children(func() {
 				if creator := item.item.Creator; creator != nil {
-					p.videoCommentAvatar(c, creator.Name, creator.AvatarURL, 49, p.catalogCover(creator.AvatarURL), false)
-					ui.Column(c).Width(115).Gap(5).Children(func() {
-						ui.Text(c, creator.Name).FillWidth().MaxLines(1).FontSize(19).TextColor(paint(colors.Playback.Foreground))
-						ui.Text(c, infoLabel).FontSize(13).TextColor(paint(colors.Playback.Secondary))
-					})
+					controls.playbackCreatorButton(c, *creator, infoLabel)
 				}
 				controls.playerButton(c, playerInfo, "info", infoLabel, "", false, func() { s.openPanel(v, playerInfo) })
 			})
@@ -861,6 +877,43 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 				controls.playerButton(c, playerSpeed, "", text.Speed, playbackRateLabel(v.Playback.Rate()), false, func() { s.openPanel(v, playerSpeed) })
 			})
 		})
+	})
+}
+
+func (p *PageContext) playbackOpenCreator(creator provider.Creator) {
+	if !p.canOpenCreator(&creator) {
+		return
+	}
+	p.State.Back()
+	if p.State.Page != app.Creator || p.host.creator == nil || p.host.creator.seed.ID != creator.ID {
+		p.openCreator(creator)
+	}
+}
+
+func (p *PageContext) playbackCreatorButton(c *ui.Context, creator provider.Creator, infoLabel string) {
+	colors := p.Theme.Colors
+	if p.canOpenCreator(&creator) {
+		focused := p.paintFocus() == playerCreator
+		border := ui.Transparent
+		if focused {
+			border = paint(colors.Focus.Ring)
+		}
+		selected := creator
+		button := ui.Button(c.Key(string(playerCreator)), "").Label(creator.Name).Size(55, 55).Padding(0, 0).
+			Radius(27.5).Border(3, border).Background(ui.Transparent).Center().Shrink(0).IgnoreInput(!p.active).
+			OnClick(func() {
+				p.dispatch(func() { p.playbackOpenCreator(selected) })
+			})
+		p.bind(button, playerCreator, playerControls)
+		button.Children(func() {
+			p.videoCommentAvatar(c, creator.Name, creator.AvatarURL, 49, p.catalogCover(creator.AvatarURL), false)
+		})
+	} else {
+		p.videoCommentAvatar(c, creator.Name, creator.AvatarURL, 49, p.catalogCover(creator.AvatarURL), false)
+	}
+	ui.Column(c).Width(115).Gap(5).Children(func() {
+		ui.Text(c, creator.Name).FillWidth().MaxLines(1).FontSize(19).TextColor(paint(colors.Playback.Foreground))
+		ui.Text(c, infoLabel).FontSize(13).TextColor(paint(colors.Playback.Secondary))
 	})
 }
 

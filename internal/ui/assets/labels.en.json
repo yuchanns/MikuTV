@@ -111,7 +111,9 @@
     "BranchQuestion": "Choose what happens next",
     "BranchButton": "Choices",
     "AudioTrack": "Audio Track",
-    "AudioDefault": "Default"
+    "AudioDefault": "Default",
+    "FastForward": "Fast Forward",
+    "Rewind": "Rewind"
   },
   "PlaybackPrefs": {
     "Title": "Playback",

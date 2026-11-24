@@ -102,6 +102,7 @@ type Playback struct {
 	syncSource       bool
 	active           bool
 	rate             float64
+	trickRate        float64
 	media            *player.Media
 	cancel           context.CancelFunc
 	request          uint64
@@ -190,6 +191,22 @@ func (p *Playback) Rate() float64 {
 	}
 	return p.defaultSpeed()
 }
+func (p *Playback) TrickRate() float64 { return p.trickRate }
+func (p *Playback) EffectiveRate() float64 {
+	if p.trickRate != 0 && !p.isLive() {
+		if p.trickRate > 0 && p.trickRate <= 2 {
+			return p.trickRate
+		}
+		return 0
+	}
+	if !p.state.Playing {
+		return 0
+	}
+	if p.isLive() {
+		return 1
+	}
+	return p.Rate()
+}
 func (p *Playback) Owner() string { return p.owner }
 func (p *Playback) isLive() bool {
 	return p.state.Target.Ref.Kind == provider.Live || p.state.Resolution.Plan.Live
@@ -235,6 +252,7 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 	p.branchID, p.branchState, p.branchTriggered = "", "", false
 	p.selectedAudio = ""
 	p.lastSaved, p.savedAsEnd = -1, false
+	p.trickRate = 0
 	p.resetAutoQuality(true)
 	if target.Ref.Kind == provider.Live {
 		p.rate = 1
@@ -268,6 +286,7 @@ func (p *Playback) Close() {
 	p.selectedAudio = ""
 	p.state = PlaybackState{Revision: p.state.Revision}
 	p.rate = 0
+	p.trickRate = 0
 	p.resetAutoQuality(true)
 	p.changed()
 }
@@ -415,6 +434,7 @@ func (p *Playback) resolveMode(selected, requestQuality, selectedLine string, pr
 	p.cancel = cancel
 	p.request++
 	request := p.request
+	p.trickRate = 0
 	p.state.Loading, p.state.Switching = !preserve, preserve
 	p.state.Failure, p.state.Limit, p.state.Fallback = "", "", ""
 	p.state.LiveEnded = false
@@ -660,6 +680,7 @@ func (p *Playback) Tick(now time.Time) {
 					p.state.BranchPending = true
 					p.state.BranchDismissed = false
 					p.state.Playing = false
+					p.trickRate = 0
 					p.didEnd = false
 					p.applyRate()
 					p.changed()
@@ -675,6 +696,7 @@ func (p *Playback) Tick(now time.Time) {
 			return
 		}
 		p.didEnd, p.state.Playing = true, false
+		p.trickRate = 0
 		if live {
 			p.state.LiveEnded = true
 		} else {
@@ -697,7 +719,8 @@ func (p *Playback) Tick(now time.Time) {
 		p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
 		return
 	}
-	if clock.Buffering {
+	trickScanning := p.trickRate < 0 || p.trickRate > 2
+	if clock.Buffering && !trickScanning {
 		if p.bufferedAt.IsZero() {
 			p.bufferedAt = now
 		}
@@ -707,8 +730,8 @@ func (p *Playback) Tick(now time.Time) {
 	if !live && p.stepAutoQuality(now, clock) {
 		return
 	}
-	timedOut := !clock.HasFrame && now.Sub(p.startedAt) > playbackStallTimeout ||
-		!p.bufferedAt.IsZero() && now.Sub(p.bufferedAt) > playbackStallTimeout
+	timedOut := !trickScanning && (!clock.HasFrame && now.Sub(p.startedAt) > playbackStallTimeout ||
+		!p.bufferedAt.IsZero() && now.Sub(p.bufferedAt) > playbackStallTimeout)
 	if clock.Failed || timedOut {
 		if code == "" {
 			code = provider.Network
@@ -716,6 +739,7 @@ func (p *Playback) Tick(now time.Time) {
 				code = provider.Timeout
 			}
 		}
+		p.trickRate = 0
 		p.state.Failure = code
 		if p.engine.SetRate != nil {
 			p.engine.SetRate(0)
@@ -755,7 +779,7 @@ func autoPlayableQualities(qualities []provider.PlaybackQuality) []provider.Play
 }
 
 func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
-	if p.state.Selected != "" || p.preferredQuality() != "" || !p.state.Playing || p.media == nil {
+	if p.state.Selected != "" || p.preferredQuality() != "" || !p.state.Playing || p.media == nil || p.trickRate != 0 {
 		return false
 	}
 	if clock.Seeking {
@@ -900,6 +924,7 @@ func (p *Playback) Toggle() {
 		p.Retry()
 		return
 	}
+	p.trickRate = 0
 	p.state.Playing = !p.state.Playing
 	if !p.state.Playing {
 		if p.isLive() {
@@ -921,6 +946,37 @@ func (p *Playback) SetRate(rate float64) {
 		rate = 1
 	}
 	p.rate = rate
+	p.trickRate = 0
+	p.applyRate()
+	p.changed()
+}
+
+// SetTrickRate applies a temporary fast-forward or rewind scan rate without
+// altering the user's configured playback speed. Rates in (0, 2] play smoothly
+// through AVPlayer; negative rates or rates above 2 pause native playback so
+// the UI can drive throttled keyframe seeks cleanly across DASH/HLS/MP4.
+func (p *Playback) SetTrickRate(rate float64) {
+	if rate == 0 {
+		if p.trickRate == 0 {
+			return
+		}
+		p.trickRate = 0
+		if p.active {
+			p.applyRate()
+			p.changed()
+		}
+		return
+	}
+	if !p.active || p.isLive() || p.state.Loading || p.state.PreviewPending || p.state.BranchPending || p.state.LiveEnded {
+		return
+	}
+	if p.trickRate == rate {
+		return
+	}
+	p.trickRate = rate
+	p.bufferedAt = time.Time{}
+	p.autoHealthyAt = time.Time{}
+	p.autoStallActive = false
 	p.applyRate()
 	p.changed()
 }
@@ -930,7 +986,11 @@ func (p *Playback) applyRate() {
 		return
 	}
 	rate := float64(0)
-	if p.state.Playing {
+	if p.trickRate != 0 && !p.isLive() {
+		if p.trickRate > 0 && p.trickRate <= 2 {
+			rate = p.trickRate
+		}
+	} else if p.state.Playing {
 		rate = p.rate
 		if p.isLive() {
 			rate = 1
@@ -970,7 +1030,9 @@ func (p *Playback) Seek(seconds float64) {
 		p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
 		return
 	}
-	p.engine.Seek(p.state.Position)
+	if p.engine.Seek != nil {
+		p.engine.Seek(p.state.Position)
+	}
 	p.applyRate()
 	p.changed()
 }
@@ -982,6 +1044,7 @@ func (p *Playback) ChooseQuality(quality string) {
 	if quality == p.state.Selected && (quality != "" || p.autoQuality == "") && p.media != nil && p.state.Failure == "" {
 		return
 	}
+	p.trickRate = 0
 	p.refreshed = false
 	p.resetAutoQuality(quality == "")
 	p.resolveMode(quality, quality, p.state.SelectedLine, p.media != nil && p.state.Failure == "", false)
@@ -994,6 +1057,7 @@ func (p *Playback) ChooseLine(line string) {
 	if line == p.state.SelectedLine && p.media != nil && p.state.Failure == "" && !p.state.LiveEnded {
 		return
 	}
+	p.trickRate = 0
 	p.state.Playing = true
 	p.state.Limit = ""
 	p.loaded, p.didEnd, p.refreshed, p.liveEndChecked = false, false, false, false
@@ -1112,6 +1176,7 @@ func (p *Playback) OpenBranch() {
 	p.state.BranchPending = true
 	p.state.BranchDismissed = false
 	p.state.Playing = false
+	p.trickRate = 0
 	p.applyRate()
 	p.changed()
 }
@@ -1143,6 +1208,7 @@ func (p *Playback) SelectBranch(optionID string) bool {
 	if chosen == nil {
 		return false
 	}
+	p.trickRate = 0
 	p.clearPreload()
 	p.clearStream()
 	if chosen.PartID != "" {
@@ -1170,6 +1236,7 @@ func (p *Playback) Retry() {
 	if !p.active {
 		return
 	}
+	p.trickRate = 0
 	p.state.Playing = true
 	p.state.Limit = ""
 	p.state.LiveEnded = false

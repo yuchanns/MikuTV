@@ -655,3 +655,275 @@ func TestPlaybackSourceUnavailableDialogDoesNotShowQualityMessage(t *testing.T) 
 		t.Fatalf("actions = %+v, want single return action", dialog.actions)
 	}
 }
+
+func TestPlaybackQuickSkipAndMultiSpeedTrickPlay(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := testEntries()
+	entries[0].Capabilities = append(entries[0].Capabilities, provider.GetCatalogItem, provider.ResolvePlayback)
+	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveries := make(chan func(), 8)
+	deliver := func() {
+		t.Helper()
+		select {
+		case fn := <-deliveries:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for playback delivery")
+		}
+	}
+	source := &autoNextPlaybackSession{plans: make(chan provider.PlaybackPlan, 8)}
+	clock := player.Status{HasFrame: true, Duration: 300, Position: 60, BufferEnd: 120}
+	var engineRate float64
+	var seeks []float64
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default()})
+	catalogEvents := make(chan func(), 8)
+	view.Catalog = app.NewCatalog(func(string) provider.Session { return source }, func(fn func()) { catalogEvents <- fn }, func() {})
+	view.Catalog.Select(entries[0])
+	(<-catalogEvents)()
+	view.Playback = app.NewPlayback(view.Catalog, player.Engine{
+		Open:     func(string, float64) bool { return true },
+		Snapshot: func() player.Status { return clock },
+		SetRate:  func(r float64) { engineRate = r },
+		Seek: func(sec float64) {
+			seeks = append(seeks, sec)
+			clock.Position = sec
+		},
+	}, nil, func(fn func()) { deliveries <- fn }, func() {})
+	defer view.Playback.Close()
+
+	item := provider.MediaItem{
+		Ref:   provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "BV1trick"},
+		Title: "Trick Play Test",
+	}
+	source.plans <- provider.PlaybackPlan{PartID: "p1", Duration: 300, Access: provider.VideoAccessGranted}
+	startAt := 60.0
+	view.context(state.Location, true, 1920, 1080).openPlayback([]playbackItem{{item: item, partID: "p1"}}, 0, true, &startAt)
+	deliver()
+	view.Playback.SetRate(1.25)
+
+	// Hide controls so focus is on playerWake.
+	view.player.visible = false
+	state.Focus, view.reveal = playerWake, true
+
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	tester.Frame()
+
+	// 1. Single tap Right -> immediate +10s quick skip (70s), controls remain hidden.
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if view.player.visible || view.player.trick.rate != 0 || math.Abs(clock.Position-70) > 0.1 {
+		t.Fatalf("single Right tap failed: visible=%t trick=%.1f pos=%.1f", view.player.visible, view.player.trick.rate, clock.Position)
+	}
+	if !view.player.trick.hudVisible(tester.Now()) {
+		t.Fatal("expected quick-skip HUD to be visible right after single tap")
+	}
+
+	// 2. Wait >1.5s -> quick-skip HUD fades; next Right tap is another single +10s (80s), not 2x.
+	tester.Advance(1600 * time.Millisecond)
+	if view.player.trick.hudVisible(tester.Now()) {
+		t.Fatal("expected quick-skip HUD to auto-hide after 1.5s")
+	}
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if view.player.trick.rate != 0 || math.Abs(clock.Position-80) > 0.1 {
+		t.Fatalf("second spaced Right tap should quick-skip to 80s: trick=%.1f pos=%.1f", view.player.trick.rate, clock.Position)
+	}
+
+	// 3. Rapid second Right tap within 800ms -> enters +2x native trick play, preserving user 1.25x.
+	tester.Advance(250 * time.Millisecond)
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if view.player.trick.rate != 2 || engineRate != 2 || view.Playback.Rate() != 1.25 || view.player.visible {
+		t.Fatalf("double-tap Right did not enter +2x: trick=%.1f engine=%.2f user=%.2f visible=%t",
+			view.player.trick.rate, engineRate, view.Playback.Rate(), view.player.visible)
+	}
+
+	// 4. Subsequent Right taps step 2x -> 4x -> 8x -> 16x (clamped at 16x).
+	for _, want := range []float64{4, 8, 16, 16} {
+		tester.Key(0, ui.KeyRight)
+		tester.Frame()
+		if view.player.trick.rate != want || engineRate != 0 {
+			t.Fatalf("step-up Right = %.1f (engine=%.2f), want %.1f (engine=0)", view.player.trick.rate, engineRate, want)
+		}
+	}
+
+	// 5. Advance 600ms at +16x -> virtual position advances ~9.6s and dispatches throttled seeks.
+	seeksBefore := len(seeks)
+	tester.Advance(600 * time.Millisecond)
+	if view.player.trick.position < 88 || len(seeks) <= seeksBefore {
+		t.Fatalf("+16x scan did not advance & seek: pos=%.2f seeksDelta=%d", view.player.trick.position, len(seeks)-seeksBefore)
+	}
+
+	// 6. Opposite-direction Left taps step down 16x -> 8x -> 4x -> 2x -> exit to 1.25x.
+	for _, want := range []float64{8, 4, 2} {
+		tester.Key(0, ui.KeyLeft)
+		tester.Frame()
+		if view.player.trick.rate != want {
+			t.Fatalf("step-down Left = %.1f, want %.1f", view.player.trick.rate, want)
+		}
+	}
+	if engineRate != 2 {
+		t.Fatalf("stepping down to +2x did not restore native 2x rate: got %.2f", engineRate)
+	}
+	tester.Key(0, ui.KeyLeft)
+	tester.Frame()
+	if view.player.trick.rate != 0 || engineRate != 1.25 {
+		t.Fatalf("stepping down past +2x did not exit to 1.25x: trick=%.1f engine=%.2f", view.player.trick.rate, engineRate)
+	}
+
+	// 7. Rewind via double-tap Left -> -2x -> -4x, scan backward, then Select resumes normal 1.25x.
+	tester.Advance(1600 * time.Millisecond)
+	posBeforeRew := clock.Position
+	tester.Key(0, ui.KeyLeft)
+	tester.Frame()
+	if math.Abs(clock.Position-(posBeforeRew-10)) > 0.2 {
+		t.Fatalf("single Left did not skip -10s: pos=%.2f before=%.2f", clock.Position, posBeforeRew)
+	}
+	tester.Advance(200 * time.Millisecond)
+	tester.Key(0, ui.KeyLeft)
+	tester.Frame()
+	if view.player.trick.rate != -2 || engineRate != 0 {
+		t.Fatalf("double-tap Left did not enter -2x: trick=%.1f engine=%.2f", view.player.trick.rate, engineRate)
+	}
+	tester.Key(0, ui.KeyLeft)
+	tester.Frame()
+	if view.player.trick.rate != -4 {
+		t.Fatalf("third Left did not enter -4x: trick=%.1f", view.player.trick.rate)
+	}
+	posAtMinus4 := view.player.trick.position
+	tester.Advance(500 * time.Millisecond)
+	if view.player.trick.position >= posAtMinus4-1.0 {
+		t.Fatalf("-4x did not rewind virtual playhead: before=%.2f after=%.2f", posAtMinus4, view.player.trick.position)
+	}
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if view.player.trick.rate != 0 || engineRate != 1.25 || view.player.visible {
+		t.Fatalf("Enter did not exit trick play cleanly: trick=%.1f engine=%.2f visible=%t",
+			view.player.trick.rate, engineRate, view.player.visible)
+	}
+
+	// 8. Escape during trick play exits trick play without leaving app.Player.
+	tester.Key(0, ui.KeyRight)
+	tester.Advance(150 * time.Millisecond)
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if view.player.trick.rate != 2 {
+		t.Fatalf("expected +2x before Escape, got %.1f", view.player.trick.rate)
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if state.Page != app.Player || view.player.trick.rate != 0 || engineRate != 1.25 {
+		t.Fatalf("Escape during trick play should stay in Player at 1.25x: page=%s trick=%.1f engine=%.2f",
+			state.Page, view.player.trick.rate, engineRate)
+	}
+}
+
+func TestPlaybackCreatorAvatarFocusAndCapabilityGating(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Source WITH ReadCreator: bottom-left creator avatar to the left of Info is focusable and opens Creator Detail.
+	entries := testEntries()
+	entries[0].Capabilities = append(entries[0].Capabilities, provider.GetCatalogItem, provider.ResolvePlayback, provider.ReadCreator)
+	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveries := make(chan func(), 8)
+	source := &autoNextPlaybackSession{plans: make(chan provider.PlaybackPlan, 4)}
+	clock := player.Status{HasFrame: true, Duration: 120, Position: 35}
+	var fullscreen bool
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default()})
+	catalogEvents := make(chan func(), 8)
+	view.Catalog = app.NewCatalog(func(string) provider.Session { return source }, func(fn func()) { catalogEvents <- fn }, func() {})
+	view.Catalog.Select(entries[0])
+	(<-catalogEvents)()
+	view.Playback = app.NewPlayback(view.Catalog, player.Engine{
+		Open:       func(string, float64) bool { return true },
+		Snapshot:   func() player.Status { return clock },
+		Fullscreen: func(v bool) { fullscreen = v },
+	}, nil, func(fn func()) { deliveries <- fn }, func() {})
+	defer view.Playback.Close()
+
+	creator := &provider.Creator{ID: "up-39", Name: "Miku Creator", AvatarURL: "https://example.test/avatar.png"}
+	item := provider.MediaItem{
+		Ref:     provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "BV1creator"},
+		Title:   "Creator Jump Video",
+		Creator: creator,
+	}
+	source.plans <- provider.PlaybackPlan{PartID: "p1", Duration: 120, Access: provider.VideoAccessGranted}
+	view.context(state.Location, true, 1920, 1080).openPlayback([]playbackItem{{item: item, partID: "p1"}}, 0, true, nil)
+	(<-deliveries)()
+	view.player.visible = true
+	state.Focus, view.reveal = playerInfo, true
+
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	tester.Frame()
+	if view.focus.item(playerCreator) == nil {
+		t.Fatal("expected playerCreator to be focusable when entry supports ReadCreator")
+	}
+
+	// Left from Info focuses the creator avatar button right to its left.
+	tester.Key(0, ui.KeyLeft)
+	tester.Frame()
+	if state.Focus != playerCreator {
+		t.Fatalf("Left from playerInfo = %q, want %q", state.Focus, playerCreator)
+	}
+
+	// Clicking playerCreator exits playback cleanly (no zombie Player in history) and opens Creator Detail.
+	tester.Key(0, ui.KeyEnter)
+	tester.Frame()
+	if state.Page != app.Creator || view.creator == nil || view.creator.seed.ID != "up-39" {
+		t.Fatalf("clicking playerCreator did not open Creator Detail: page=%s creator=%+v", state.Page, view.creator)
+	}
+	if view.Playback.Active() || fullscreen {
+		t.Fatalf("playback stayed active behind Creator Detail: active=%t fullscreen=%t", view.Playback.Active(), fullscreen)
+	}
+	if state.RouteCount(app.Player) != 0 {
+		t.Fatalf("Player remained in navigation history: count=%d", state.RouteCount(app.Player))
+	}
+
+	// Back from Creator Detail returns cleanly to Home, never to a dead Player screen.
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if state.Page != app.Home {
+		t.Fatalf("Back from Creator Detail = %s, want Home", state.Page)
+	}
+
+	// 2. Source WITHOUT ReadCreator (e.g., Jellyfin): playerCreator must NOT be focusable.
+	noCreatorEntries := testEntries()
+	noCreatorEntries[0].Capabilities = append(noCreatorEntries[0].Capabilities, provider.ResolvePlayback)
+	noCreatorState, err := app.NewState(noCreatorEntries, noCreatorEntries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	noCreatorView := newTestView(t, Options{State: noCreatorState, Pages: pages, Assets: assets, Theme: theme.Default()})
+	noCreatorView.Playback = app.NewPlayback(noCreatorView.Catalog, player.Engine{}, nil, func(func()) {}, func() {})
+	noCreatorView.player.visible = true
+	noCreatorState.Focus = playerInfo
+	tester2 := ui.NewTester(func(c *ui.Context) {
+		noCreatorView.focus.begin(c)
+		p := noCreatorView.context(noCreatorState.Location, true, 1920, 1080)
+		p.playbackControls(c, app.PlaybackState{Clock: player.Status{HasFrame: true}, Duration: 60}, playbackItem{item: item})
+	}, 1920, 1080)
+	tester2.Frame()
+	if noCreatorView.focus.item(playerCreator) != nil {
+		t.Fatal("playerCreator must not be focusable when plugin lacks ReadCreator capability")
+	}
+}

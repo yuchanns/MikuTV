@@ -199,6 +199,9 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 			Component: playbackPage{}, FullScreen: true, RawScreen: true, TransparentCanvas: true,
 			Sync: syncPlayback, Back: (*View).backFromPlayback, Leave: (*View).leavePlayback,
 			HandleKey: func(v *View, event ui.InputEvent, _ string) bool {
+				if v.handlePlaybackTrickKey(event) {
+					return true
+				}
 				if event.Key == ui.KeySpace {
 					if !event.Repeat {
 						v.dispatch(v.togglePlayback)
