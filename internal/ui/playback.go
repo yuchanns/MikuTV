@@ -736,7 +736,7 @@ func (p *PageContext) playbackTop(c *ui.Context, item playbackItem, display, liv
 					p.playbackNetworkSpeed(c, live, true)
 				}
 				if label != "" {
-					ui.Text(c, label).Shrink(0).Padding(5, 8).Radius(4).FontSize(14).FontWeight(650).TextColor(paint(colors.Foreground)).
+					ui.Text(c, label).Shrink(0).MaxWidth(260).SingleLine().Padding(5, 8).Radius(4).FontSize(14).FontWeight(650).TextColor(paint(colors.Foreground)).
 						Border(1, withAlpha(colors.Foreground, 0x65))
 				}
 			})
@@ -896,9 +896,14 @@ func (p *PageContext) playerButton(c *ui.Context, id app.FocusID, icon, title, l
 	if disabled {
 		ink = withAlpha(color.Playback.Foreground, 0x40)
 	}
-	button := ui.Button(c.Key(string(id)), "").Label(title).Width(width).Height(height).
-		Padding(0, 0).Radius(height/2).Border(borderWidth, border).
+	button := ui.Button(c.Key(string(id)), "").Label(title).Height(height).
+		Radius(height/2).Border(borderWidth, border).
 		Background(background).TextColor(ink).Center().Shrink(0).Disabled(disabled).IgnoreInput(!p.active)
+	if label != "" {
+		button.MinWidth(width).MaxWidth(260).Padding(0, 18)
+	} else {
+		button.Width(width).Padding(0, 0)
+	}
 	if !disabled {
 		button.OnClick(func() {
 			p.dispatch(func() { p.host.player.show(p.host); action() })
@@ -911,7 +916,7 @@ func (p *PageContext) playerButton(c *ui.Context, id app.FocusID, icon, title, l
 			ui.Icon(c, p.Assets.Icon(icon)).Size(size, size).TextColor(ink)
 		}
 		if label != "" {
-			ui.Text(c, label).FontSize(18).FontWeight(550).TextColor(ink)
+			ui.Text(c, label).FontSize(18).FontWeight(550).SingleLine().TextColor(ink)
 		}
 	})
 }

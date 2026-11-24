@@ -582,10 +582,229 @@ func TestDASHMultiAudioSelectionCodecIsolationAndSecondaryResilience(t *testing.
 	if dolbyMedia.ActiveAudioID() != "dolby" || dolbyMedia.DefaultAudioID() != "aac-192" {
 		t.Fatalf("dolby media active=%q default=%q", dolbyMedia.ActiveAudioID(), dolbyMedia.DefaultAudioID())
 	}
-	dolbyMaster := readFixture(t, dolbyMedia.URL, "")
-	if !strings.Contains(dolbyMaster, `NAME="Dolby Atmos",DEFAULT=YES,AUTOSELECT=YES`) ||
+	if dolbyMaster := readFixture(t, dolbyMedia.URL, ""); !strings.Contains(dolbyMaster, `NAME="Dolby Atmos",DEFAULT=YES,AUTOSELECT=YES`) ||
 		!strings.Contains(dolbyMaster, `CODECS="hvc1.1.6.L150.90,ec-3"`) ||
 		strings.Contains(dolbyMaster, `AAC 192k`) {
 		t.Fatalf("dolby master playlist should isolate ec-3 codec group cleanly:\n%s", dolbyMaster)
 	}
+}
+
+func TestDASHPrefetchDoesNotEvictNextSegmentWhenBudgetFull(t *testing.T) {
+	frags := make([][]byte, 6)
+	for i := range frags {
+		frags[i] = bytes.Repeat([]byte{byte('0' + i)}, 8192)
+	}
+	movie, initR, idxR, ranges := buildMultiFragmentDASH(frags, 4000)
+	transport := &countingDASHTransport{data: movie}
+	video := provider.PlaybackTrack{
+		Resource:  provider.PlaybackResource{URLs: []string{"https://cdn1.example.com/v.m4s"}},
+		Bandwidth: 16_000_000, Width: 3840, Height: 2160, Codec: "hvc1.1.6.L150.90",
+		Init: &initR, Index: &idxR,
+	}
+	media, err := OpenMedia(context.Background(), provider.Playback{
+		Transport: transport,
+		Plan:      provider.PlaybackPlan{Streams: []provider.PlaybackStream{{Format: provider.PlaybackDASH, Video: video}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer media.Close()
+
+	// Cap budget so init + frag 0 (at cursor) + frag 1 + frag 2 (3 segments = 24 KiB)
+	// fit inside the 30s prefetch window, leaving no room for frag 3 without eviction.
+	media.cache.mu.Lock()
+	media.cache.budget = int64(initR.Last-initR.First+1) + 3*8192 + 512
+	media.cache.activeBudget = media.cache.budget
+	media.cache.mu.Unlock()
+
+	base := strings.TrimSuffix(media.URL, "stream.m3u8")
+	spec := func(i int) string { return fmt.Sprintf("bytes=%d-%d", ranges[i].First, ranges[i].Last) }
+
+	// Reading frag 0 triggers prefetch of frag 1 and frag 2, then must stop before
+	// frag 3 instead of evicting frag 1 and thrashing.
+	if got := readFixture(t, base+"video.mp4", spec(0)); got != string(frags[0]) {
+		t.Fatalf("frag 0 mismatch")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && transport.count(spec(2)) == 0 {
+		time.Sleep(15 * time.Millisecond)
+	}
+	// Give worker a chance to loop/thrash if broken.
+	time.Sleep(80 * time.Millisecond)
+	if got1, got2, got3 := transport.count(spec(1)), transport.count(spec(2)), transport.count(spec(3)); got1 != 1 || got2 != 1 || got3 != 0 {
+		t.Fatalf("prefetch thrashed or over-evicted: counts frag1=%d frag2=%d frag3=%d, want 1, 1, 0", got1, got2, got3)
+	}
+	// Reading frag 1 must hit cache (still 1 upstream fetch) and evict frag 0 to allow frag 3.
+	if got := readFixture(t, base+"video.mp4", spec(1)); got != string(frags[1]) {
+		t.Fatalf("frag 1 mismatch")
+	}
+	if got := transport.count(spec(1)); got != 1 {
+		t.Fatalf("frag 1 fetched %d times, want 1 (cache hit)", got)
+	}
+}
+
+type blockingFragTransport struct {
+	data         []byte
+	blockRange   string
+	enteredBlock chan struct{}
+	releaseBlock chan struct{}
+}
+
+func (b *blockingFragTransport) OpenResource(ctx context.Context, resource provider.PlaybackResource, method, byteRange string) (*http.Response, error) {
+	if byteRange == b.blockRange {
+		rng, _ := parseSingleByteRange(byteRange)
+		slice := b.data[rng.First : rng.Last+1]
+		req, _ := http.NewRequestWithContext(ctx, method, resource.URLs[0], nil)
+		hdr := http.Header{
+			"Accept-Ranges":  {"bytes"},
+			"Content-Type":   {"video/mp4"},
+			"Content-Length": {fmt.Sprint(len(slice))},
+			"Content-Range":  {fmt.Sprintf("bytes %d-%d/%d", rng.First, rng.Last, len(b.data))},
+		}
+		pr, pw := io.Pipe()
+		go func() {
+			half := len(slice) / 2
+			_, _ = pw.Write(slice[:half])
+			close(b.enteredBlock)
+			select {
+			case <-b.releaseBlock:
+				_, _ = pw.Write(slice[half:])
+				_ = pw.Close()
+			case <-ctx.Done():
+				_ = pw.CloseWithError(ctx.Err())
+			}
+		}()
+		return &http.Response{StatusCode: http.StatusPartialContent, Header: hdr, Body: pr, Request: req}, nil
+	}
+	return testResource(b.data).OpenResource(ctx, resource, method, byteRange)
+}
+
+func TestDASHOutOfOrderRequestDoesNotCancelForegroundFetch(t *testing.T) {
+	frags := [][]byte{
+		bytes.Repeat([]byte("A"), 4096),
+		bytes.Repeat([]byte("B"), 4096),
+		bytes.Repeat([]byte("C"), 4096),
+	}
+	movie, initR, idxR, ranges := buildMultiFragmentDASH(frags, 4000)
+	spec := func(i int) string { return fmt.Sprintf("bytes=%d-%d", ranges[i].First, ranges[i].Last) }
+	transport := &blockingFragTransport{
+		data:         movie,
+		blockRange:   spec(2),
+		enteredBlock: make(chan struct{}),
+		releaseBlock: make(chan struct{}),
+	}
+	video := provider.PlaybackTrack{
+		Resource:  provider.PlaybackResource{URLs: []string{"https://cdn1.example.com/v.m4s"}},
+		Bandwidth: 8_000_000, Width: 1920, Height: 1080, Codec: "avc1.640028",
+		Init: &initR, Index: &idxR,
+	}
+	media, err := OpenMedia(context.Background(), provider.Playback{
+		Transport: transport,
+		Plan:      provider.PlaybackPlan{Streams: []provider.PlaybackStream{{Format: provider.PlaybackDASH, Video: video}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer media.Close()
+
+	base := strings.TrimSuffix(media.URL, "stream.m3u8")
+	done2 := make(chan string, 1)
+	go func() {
+		done2 <- readFixture(t, base+"video.mp4", spec(2))
+	}()
+	<-transport.enteredBlock
+
+	// Concurrent 1-step-earlier request (frag 1 while frag 2 is in flight) must not cancel frag 2.
+	if got1 := readFixture(t, base+"video.mp4", spec(1)); got1 != string(frags[1]) {
+		t.Fatalf("frag 1 mismatch")
+	}
+	close(transport.releaseBlock)
+	if got2 := <-done2; got2 != string(frags[2]) {
+		t.Fatalf("in-flight foreground frag 2 was truncated or corrupted: len=%d want=%d", len(got2), len(frags[2]))
+	}
+}
+
+type stickyCancelTransport struct {
+	data         []byte
+	blockRange   string
+	enteredBlock chan struct{}
+	releaseBlock chan struct{}
+}
+
+func (s *stickyCancelTransport) OpenResource(ctx context.Context, resource provider.PlaybackResource, method, byteRange string) (*http.Response, error) {
+	if byteRange == s.blockRange {
+		rng, _ := parseSingleByteRange(byteRange)
+		slice := s.data[rng.First : rng.Last+1]
+		req, _ := http.NewRequestWithContext(ctx, method, resource.URLs[0], nil)
+		hdr := http.Header{
+			"Accept-Ranges":  {"bytes"},
+			"Content-Type":   {"video/mp4"},
+			"Content-Length": {fmt.Sprint(len(slice))},
+			"Content-Range":  {fmt.Sprintf("bytes %d-%d/%d", rng.First, rng.Last, len(s.data))},
+		}
+		pr, pw := io.Pipe()
+		go func() {
+			_, _ = pw.Write(slice[:len(slice)/2])
+			close(s.enteredBlock)
+			<-s.releaseBlock
+			_ = pw.CloseWithError(context.Canceled)
+		}()
+		return &http.Response{StatusCode: http.StatusPartialContent, Header: hdr, Body: pr, Request: req}, nil
+	}
+	return testResource(s.data).OpenResource(ctx, resource, method, byteRange)
+}
+
+func TestMediaCloseAsyncReturnsImmediatelyWhileWorkerBlocked(t *testing.T) {
+	frags := [][]byte{
+		bytes.Repeat([]byte("A"), 4096),
+		bytes.Repeat([]byte("B"), 4096),
+		bytes.Repeat([]byte("C"), 4096),
+	}
+	movie, initR, idxR, ranges := buildMultiFragmentDASH(frags, 4000)
+	spec := func(i int) string { return fmt.Sprintf("bytes=%d-%d", ranges[i].First, ranges[i].Last) }
+	transport := &stickyCancelTransport{
+		data:         movie,
+		blockRange:   spec(0),
+		enteredBlock: make(chan struct{}),
+		releaseBlock: make(chan struct{}),
+	}
+	video := provider.PlaybackTrack{
+		Resource:  provider.PlaybackResource{URLs: []string{"https://cdn1.example.com/v.m4s"}},
+		Bandwidth: 8_000_000, Width: 1920, Height: 1080, Codec: "avc1.640028",
+		Init: &initR, Index: &idxR,
+	}
+	media, err := OpenMedia(context.Background(), provider.Playback{
+		Transport: transport,
+		Plan:      provider.PlaybackPlan{Streams: []provider.PlaybackStream{{Format: provider.PlaybackDASH, Video: video}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := strings.TrimSuffix(media.URL, "stream.m3u8")
+	go func() {
+		req, _ := http.NewRequest(http.MethodGet, base+"video.mp4", nil)
+		req.Header.Set("Range", spec(0))
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+	}()
+
+	select {
+	case <-transport.enteredBlock:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not enter blocked upstream request")
+	}
+
+	started := time.Now()
+	media.CloseAsync()
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("CloseAsync blocked caller for %s while upstream worker was stalled", elapsed)
+	}
+	if err := media.ctx.Err(); err == nil {
+		t.Fatal("CloseAsync did not cancel media context synchronously")
+	}
+	close(transport.releaseBlock)
+	media.wg.Wait()
 }

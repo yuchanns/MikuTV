@@ -284,6 +284,7 @@ type playbackLabels struct {
 
 type playbackAccessLabels struct {
 	DeviceTitle, DeviceBody, DeviceGeneric, DeviceGenericBody, UseSDR, Keep, UseBest, SourceTitle, SourceBody, SourceGeneric      string
+	SourceUnavailableTitle, SourceUnavailableBody                                                                                 string
 	RegionTitle, RegionBody, SeeRelated, VIPTitle, VIPBody, VIPNoPreview, MembershipHelp, MembershipInstructions, Refresh, Return string
 	PurchaseTitle, PurchaseBody, TrialMinutes, TrialState, TrialLeft                                                              string
 	TrialEndedTitle, TrialEndedBody, PurchaseTrialEndedBody, QualityVIPTitle, QualityVIPBody                                      string

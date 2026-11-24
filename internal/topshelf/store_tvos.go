@@ -187,6 +187,11 @@ func (s *SharedStore) Save(snapshot Snapshot) error {
 }
 
 func (s *SharedStore) NotifyChanged() {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	pool := objc.ID(objc.GetClass("NSAutoreleasePool")).Send(objc.RegisterName("new"))
+	defer pool.Send(objc.RegisterName("drain"))
+
 	s.tvServicesOnce.Do(func() {
 		if _, err := purego.Dlopen("/System/Library/Frameworks/TVServices.framework/TVServices", purego.RTLD_GLOBAL|purego.RTLD_NOW); err == nil {
 			s.tvServicesOK = true

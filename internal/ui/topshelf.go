@@ -12,18 +12,14 @@ import (
 	"github.com/yuchanns/MikuTV/internal/topshelf"
 )
 
+type topShelfWrite struct {
+	snapshot topshelf.Snapshot
+	hash     [32]byte
+}
+
 func (v *View) SyncTopShelf() {
 	if v.TopShelf == nil || v.State == nil {
 		return
-	}
-	if !v.hasTopShelfHash {
-		if existing, err := v.TopShelf.Load(); err == nil {
-			v.topShelfSnapshot = existing
-			if encoded, encErr := topshelf.Encode(existing); encErr == nil {
-				v.lastTopShelfHash = sha256.Sum256(encoded)
-				v.hasTopShelfHash = true
-			}
-		}
 	}
 	entry, ok := v.State.Current()
 	if !ok || entry.ID == "" {
@@ -42,30 +38,107 @@ func (v *View) SyncTopShelf() {
 }
 
 func (v *View) publishTopShelf(snapshot topshelf.Snapshot) {
+	if v.TopShelf == nil {
+		return
+	}
 	sanitized := topshelf.SanitizeSnapshot(snapshot)
 	encoded, err := topshelf.Encode(sanitized)
 	if err != nil {
 		return
 	}
 	hash := sha256.Sum256(encoded)
-	if v.hasTopShelfHash && hash == v.lastTopShelfHash {
-		return
-	}
-	sanitized.UpdatedAt = time.Now().Unix()
-	if err := v.TopShelf.Save(sanitized); err != nil {
-		if !v.hasTopShelfErrHash || hash != v.lastTopShelfErrHash {
-			log.Printf("topshelf: save failed: %v", err)
-			v.lastTopShelfErrHash = hash
-			v.hasTopShelfErrHash = true
-		}
-		return
-	}
-	v.lastTopShelfHash = hash
-	v.hasTopShelfHash = true
-	v.hasTopShelfErrHash = false
 	v.topShelfSnapshot = sanitized
-	v.TopShelf.NotifyChanged()
-	log.Printf("topshelf: published entry=%s sections=%d items=%d", sanitized.EntryID, len(sanitized.Sections), sanitized.ItemCount())
+	v.topShelfMu.Lock()
+	if v.hasTopShelfHash && hash == v.lastTopShelfHash && !v.topShelfInflight && v.topShelfPending == nil {
+		v.topShelfMu.Unlock()
+		return
+	}
+	v.topShelfPending = &topShelfWrite{snapshot: sanitized, hash: hash}
+	if !v.topShelfInflight {
+		v.topShelfInflight = true
+		v.topShelfDone = make(chan struct{})
+		go v.drainTopShelfSaves()
+	}
+	v.topShelfMu.Unlock()
+}
+
+func (v *View) flushTopShelf() {
+	v.topShelfMu.Lock()
+	done := v.topShelfDone
+	inflight := v.topShelfInflight
+	v.topShelfMu.Unlock()
+	if inflight && done != nil {
+		<-done
+	}
+}
+
+func (v *View) drainTopShelfSaves() {
+	for {
+		v.topShelfMu.Lock()
+		needLoad := !v.topShelfLoaded
+		if needLoad {
+			v.topShelfLoaded = true
+		}
+		req := v.topShelfPending
+		if req == nil {
+			done := v.topShelfDone
+			v.topShelfInflight = false
+			v.topShelfDone = nil
+			v.topShelfMu.Unlock()
+			if done != nil {
+				close(done)
+			}
+			return
+		}
+		v.topShelfPending = nil
+		hasHash := v.hasTopShelfHash
+		lastHash := v.lastTopShelfHash
+		hasErrHash := v.hasTopShelfErrHash
+		lastErrHash := v.lastTopShelfErrHash
+		v.topShelfMu.Unlock()
+
+		if needLoad && !hasHash {
+			if existing, err := v.TopShelf.Load(); err == nil {
+				if encoded, encErr := topshelf.Encode(existing); encErr == nil {
+					lastHash = sha256.Sum256(encoded)
+					hasHash = true
+					v.topShelfMu.Lock()
+					v.lastTopShelfHash = lastHash
+					v.hasTopShelfHash = true
+					v.topShelfMu.Unlock()
+				}
+			}
+		}
+		if hasHash && req.hash == lastHash {
+			continue
+		}
+		sanitized := req.snapshot
+		sanitized.UpdatedAt = time.Now().Unix()
+		started := time.Now()
+		if err := v.TopShelf.Save(sanitized); err != nil {
+			if !hasErrHash || req.hash != lastErrHash {
+				log.Printf("topshelf: save failed: %v", err)
+				v.topShelfMu.Lock()
+				v.lastTopShelfErrHash = req.hash
+				v.hasTopShelfErrHash = true
+				v.topShelfMu.Unlock()
+			}
+			continue
+		}
+		v.topShelfMu.Lock()
+		v.lastTopShelfHash = req.hash
+		v.hasTopShelfHash = true
+		v.hasTopShelfErrHash = false
+		v.topShelfMu.Unlock()
+		v.TopShelf.NotifyChanged()
+		if v.Trace {
+			log.Printf("topshelf: published entry=%s sections=%d items=%d elapsed=%s",
+				sanitized.EntryID, len(sanitized.Sections), sanitized.ItemCount(), time.Since(started).Round(time.Microsecond))
+		} else {
+			log.Printf("topshelf: published entry=%s sections=%d items=%d",
+				sanitized.EntryID, len(sanitized.Sections), sanitized.ItemCount())
+		}
+	}
 }
 
 func (v *View) buildTopShelfSnapshot(entry app.Entry) topshelf.Snapshot {

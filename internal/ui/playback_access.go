@@ -179,6 +179,15 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 			{labels.UseBest, "", fallback(state.Fallback)}, {labels.Keep, "", closeDialog},
 		}}
 	case provider.PlaybackSource:
+		if plan.Access == provider.VideoAccessRestricted && len(plan.Qualities) == 0 && state.Fallback == "" {
+			return playbackAccessDialog{
+				title: labels.SourceUnavailableTitle,
+				body:  labels.SourceUnavailableBody,
+				actions: []playbackAccessAction{
+					{labels.Return, "back", closeDialog},
+				},
+			}
+		}
 		title, body := text.SourceLimit, labels.SourceGeneric
 		if state.Fallback != "" {
 			for _, quality := range plan.Qualities {

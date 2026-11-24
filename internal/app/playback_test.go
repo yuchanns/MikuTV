@@ -573,3 +573,107 @@ func TestPlaybackInlinePreviewLifecycleAndFullscreenHandoff(t *testing.T) {
 		t.Fatal("inline preview started while fullscreen playback was active")
 	}
 }
+
+type orderedPlaybackStore struct {
+	blockFirst chan struct{}
+	firstDone  chan struct{}
+	saved      []float64
+	calls      int
+}
+
+func (s *orderedPlaybackStore) PlaybackPosition(string, provider.PlaybackTarget) (float64, bool) {
+	return 0, false
+}
+
+func (s *orderedPlaybackStore) SavePlaybackPosition(_ string, _ provider.PlaybackTarget, seconds float64) error {
+	s.calls++
+	if s.calls == 1 && s.blockFirst != nil {
+		close(s.firstDone)
+		<-s.blockFirst
+	}
+	s.saved = append(s.saved, seconds)
+	return nil
+}
+
+func TestPlaybackAutoQualityIgnoresSeeksAndPeriodicSaveIsOrderedOffMain(t *testing.T) {
+	deliveries := make(chan func(), 8)
+	deliver := func() {
+		t.Helper()
+		select {
+		case fn := <-deliveries:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for playback delivery")
+		}
+	}
+	source := &autoQualitySession{requests: make(chan provider.PlaybackRequest, 8)}
+	clock := player.Status{HasFrame: true, Duration: 300, Position: 10, BufferEnd: 40}
+	store := &orderedPlaybackStore{
+		blockFirst: make(chan struct{}),
+		firstDone:  make(chan struct{}),
+	}
+	pb := NewPlayback(&Catalog{session: source}, player.Engine{
+		Open:         func(string, float64) bool { return true },
+		Seek:         func(sec float64) { clock.Position = sec; clock.Seeking = true; clock.Buffering = true },
+		Snapshot:     func() player.Status { return clock },
+		SetRate:      func(float64) {},
+		Capabilities: func() player.Capabilities { return player.Capabilities{HDR: false, HEVC: true} },
+	}, store, func(fn func()) { deliveries <- fn }, func() {})
+	defer pb.Close()
+
+	target := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "entry", Kind: provider.Video, ID: "seek1"}}
+	pb.Start(target, "user", false, nil)
+	deliver()
+	<-source.requests
+
+	// Two seeks within 30s (each setting Seeking+Buffering, plus brief post-seek rebuffer)
+	// must NEVER trigger an Auto quality downgrade.
+	t0 := time.Now()
+	pb.Tick(t0)
+	pb.Seek(60)
+	pb.Tick(t0.Add(500 * time.Millisecond))
+	clock.Seeking = false
+	pb.Tick(t0.Add(1200 * time.Millisecond)) // within 2s post-seek grace
+	clock.Buffering = false
+	pb.Tick(t0.Add(5 * time.Second))
+
+	pb.Seek(120)
+	pb.Tick(t0.Add(5500 * time.Millisecond))
+	clock.Seeking = false
+	pb.Tick(t0.Add(6200 * time.Millisecond)) // within 2s post-seek grace
+	clock.Buffering = false
+	pb.Tick(t0.Add(8 * time.Second))
+
+	if pb.State().Switching || pb.State().Resolution.Plan.Quality != "120" {
+		t.Fatalf("seeking triggered unexpected auto-quality downgrade: switching=%t quality=%q",
+			pb.State().Switching, pb.State().Resolution.Plan.Quality)
+	}
+
+	// 30s periodic save must return immediately (off main thread) even when the store blocks,
+	// and a subsequent Close() must serialize after it so the final position lands last.
+	clock.Position = 150
+	pb.Tick(t0.Add(35 * time.Second))
+	select {
+	case <-store.firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("periodic 30s save did not run asynchronously")
+	}
+
+	clock.Position = 188
+	pb.Tick(t0.Add(36 * time.Second))
+	closed := make(chan struct{})
+	go func() {
+		pb.Close()
+		close(closed)
+	}()
+	time.Sleep(30 * time.Millisecond)
+	close(store.blockFirst)
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not finish flushing saves")
+	}
+	if len(store.saved) != 2 || store.saved[0] != 150 || store.saved[1] != 188 {
+		t.Fatalf("saved position order = %v, want [150 188]", store.saved)
+	}
+}

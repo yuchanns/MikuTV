@@ -27,6 +27,8 @@
       "SourceTitle": "Available Up to %s",
       "SourceBody": "This video streams up to %s. Keeping the highest available quality.",
       "SourceGeneric": "The selected quality isn't available for this video.",
+      "SourceUnavailableTitle": "Not Currently Available",
+      "SourceUnavailableBody": "This title may not have premiered yet, or no playable episodes are currently available.",
       "DeviceGeneric": "Selected Quality Not Supported",
       "DeviceGenericBody": "Choose a quality supported by this device.",
       "VIPNoPreview": "The full title is available to members.\nActivate membership on your phone, then return to refresh.",

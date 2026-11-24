@@ -31,6 +31,7 @@ type Status struct {
 	BufferEnd           float64
 	HasFrame            bool
 	Buffering           bool
+	Seeking             bool
 	Ended               bool
 	Failed              bool
 	DisplayIncompatible bool

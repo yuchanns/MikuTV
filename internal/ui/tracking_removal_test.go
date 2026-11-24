@@ -3,6 +3,7 @@ package tvui
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/yuchanns/MikuTV/internal/app"
@@ -100,6 +101,7 @@ func TestRemoveLibraryTrackingPreservesSourceMediaRef(t *testing.T) {
 }
 
 type flakyTopShelfStore struct {
+	mu       sync.Mutex
 	failNext bool
 	saves    int
 	notifies int
@@ -107,10 +109,14 @@ type flakyTopShelfStore struct {
 }
 
 func (f *flakyTopShelfStore) Load() (topshelf.Snapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.snapshot, errors.New("not initialized")
 }
 
 func (f *flakyTopShelfStore) Save(s topshelf.Snapshot) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.saves++
 	if f.failNext {
 		f.failNext = false
@@ -121,7 +127,9 @@ func (f *flakyTopShelfStore) Save(s topshelf.Snapshot) error {
 }
 
 func (f *flakyTopShelfStore) NotifyChanged() {
+	f.mu.Lock()
 	f.notifies++
+	f.mu.Unlock()
 }
 
 func TestTopShelfRetriesAfterTransientSaveFailure(t *testing.T) {
@@ -144,18 +152,21 @@ func TestTopShelfRetriesAfterTransientSaveFailure(t *testing.T) {
 
 	// 1st save fails temporarily -> must NOT cache hash as published.
 	view.publishTopShelf(snap)
+	view.flushTopShelf()
 	if store.saves != 1 || store.notifies != 0 {
 		t.Fatalf("after failed save: saves=%d notifies=%d, want 1/0", store.saves, store.notifies)
 	}
 
 	// 2nd save with identical content retries and succeeds.
 	view.publishTopShelf(snap)
+	view.flushTopShelf()
 	if store.saves != 2 || store.notifies != 1 {
 		t.Fatalf("after retry save: saves=%d notifies=%d, want 2/1", store.saves, store.notifies)
 	}
 
 	// 3rd call with identical content is deduplicated once successfully saved.
 	view.publishTopShelf(snap)
+	view.flushTopShelf()
 	if store.saves != 2 || store.notifies != 1 {
 		t.Fatalf("after cached sync: saves=%d notifies=%d, want 2/1", store.saves, store.notifies)
 	}

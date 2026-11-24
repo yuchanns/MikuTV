@@ -3,6 +3,7 @@ package tvui
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,23 +15,30 @@ import (
 )
 
 type stubTopShelfStore struct {
+	mu       sync.Mutex
 	snapshot topshelf.Snapshot
 	saves    int
 	notifies int
 }
 
 func (s *stubTopShelfStore) Load() (topshelf.Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return topshelf.SanitizeSnapshot(s.snapshot), nil
 }
 
 func (s *stubTopShelfStore) Save(snap topshelf.Snapshot) error {
+	s.mu.Lock()
 	s.snapshot = topshelf.SanitizeSnapshot(snap)
 	s.saves++
+	s.mu.Unlock()
 	return nil
 }
 
 func (s *stubTopShelfStore) NotifyChanged() {
+	s.mu.Lock()
 	s.notifies++
+	s.mu.Unlock()
 }
 
 type topShelfTestSession struct {
@@ -209,6 +217,7 @@ func TestTopShelfPublishingAndEntryRecovery(t *testing.T) {
 	tester := ui.NewTester(view.Render, 1920, 1080)
 	tester.Frame()
 	tester.Frame()
+	view.flushTopShelf()
 
 	// 1. Verify TopShelf snapshot contains Continue Watching section + Home Recommendations section, attributed to src-a.
 	snap, _ := store.Load()
@@ -239,6 +248,7 @@ func TestTopShelfPublishingAndEntryRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	view.SyncTopShelf()
+	view.flushTopShelf()
 	snap, _ = store.Load()
 	if len(snap.Sections) != 1 || snap.Sections[0].ID != "recommended" || len(snap.Sections[0].Items) != 1 || snap.Sections[0].Items[0].ID != "v-feat-1" {
 		t.Fatalf("expected only recommended section when history sync off, got %+v", snap.Sections)
@@ -301,5 +311,87 @@ func TestTopShelfPublishingAndEntryRecovery(t *testing.T) {
 	}
 	if view.notice == "" {
 		t.Fatal("expected user-visible notice for unavailable TopShelf entry")
+	}
+}
+
+type blockingTopShelfStore struct {
+	mu      sync.Mutex
+	started chan struct{}
+	release chan struct{}
+	saved   []string
+	notifies int
+}
+
+func (b *blockingTopShelfStore) Load() (topshelf.Snapshot, error) {
+	return topshelf.Snapshot{}, nil
+}
+
+func (b *blockingTopShelfStore) Save(s topshelf.Snapshot) error {
+	b.mu.Lock()
+	started := b.started
+	release := b.release
+	b.started = nil
+	b.release = nil
+	b.mu.Unlock()
+	if started != nil {
+		close(started)
+	}
+	if release != nil {
+		<-release
+	}
+	b.mu.Lock()
+	b.saved = append(b.saved, s.EntryID)
+	b.mu.Unlock()
+	return nil
+}
+
+func (b *blockingTopShelfStore) NotifyChanged() {
+	b.mu.Lock()
+	b.notifies++
+	b.mu.Unlock()
+}
+
+func TestSyncTopShelfRunsOffMainThreadAndCoalescesWrites(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	store := &blockingTopShelfStore{started: started, release: release}
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default(), TopShelf: store})
+
+	t0 := time.Now()
+	view.publishTopShelf(topshelf.Snapshot{EntryID: "first"})
+	if elapsed := time.Since(t0); elapsed > 100*time.Millisecond {
+		t.Fatalf("publishTopShelf blocked caller for %s", elapsed)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background TopShelf writer did not start")
+	}
+
+	// Enqueue multiple updates while first save is blocked; only the latest should land next.
+	view.publishTopShelf(topshelf.Snapshot{EntryID: "second"})
+	view.publishTopShelf(topshelf.Snapshot{EntryID: "third"})
+	close(release)
+	view.flushTopShelf()
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.saved) != 2 || store.saved[0] != "first" || store.saved[1] != "third" {
+		t.Fatalf("saved order = %v, want [first third]", store.saved)
+	}
+	if store.notifies != 2 {
+		t.Fatalf("notifies = %d, want 2", store.notifies)
 	}
 }

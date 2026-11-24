@@ -3,9 +3,12 @@ package topshelf
 import (
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strings"
 )
+
+var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
 const (
 	URLScheme          = "mikutv"
@@ -204,7 +207,7 @@ func sanitizeItem(item Item, fallbackEntryID, fallbackEntryName string) (Item, b
 	item.Kind = strings.TrimSpace(item.Kind)
 	item.ID = strings.TrimSpace(item.ID)
 	item.Title = clampRunes(item.Title, maxTitleRunes)
-	item.ImageURL = sanitizeHTTPSURL(item.ImageURL)
+	item.ImageURL = sanitizeImageURL(item.ImageURL)
 	if item.EntryID == "" || !ValidMediaKind(item.Kind) || item.ID == "" || item.Title == "" || item.ImageURL == "" {
 		return Item{}, false
 	}
@@ -220,16 +223,89 @@ func sanitizeItem(item Item, fallbackEntryID, fallbackEntryName string) (Item, b
 	return item, true
 }
 
-func sanitizeHTTPSURL(raw string) string {
+func sanitizeImageURL(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" || len(trimmed) > maxURLBytes {
 		return ""
 	}
 	parsed, err := url.Parse(trimmed)
-	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Host == "" {
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.Opaque != "" {
 		return ""
 	}
-	return parsed.String()
+	switch {
+	case strings.EqualFold(parsed.Scheme, "https"):
+		return parsed.String()
+	case strings.EqualFold(parsed.Scheme, "http") && isLocalNetworkHost(parsed.Hostname()):
+		return parsed.String()
+	default:
+		return ""
+	}
+}
+
+func isLocalNetworkHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return false
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		ip = ip.Unmap()
+		if !ip.IsValid() || ip.Zone() != "" || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalMulticast() {
+			return false
+		}
+		return ip.IsPrivate() || ip.IsLinkLocalUnicast() || cgnatPrefix.Contains(ip)
+	}
+	if !strings.Contains(host, ".") {
+		return isSingleLabelLANHost(host)
+	}
+	for _, suffix := range []string{".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain"} {
+		if strings.HasSuffix(host, suffix) && len(host) > len(suffix) {
+			return isValidHostnameLabels(host)
+		}
+	}
+	return false
+}
+
+func isValidHostnameLabels(host string) bool {
+	if len(host) == 0 || len(host) > 253 {
+		return false
+	}
+	for label := range strings.SplitSeq(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := range len(label) {
+			c := label[i]
+			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isSingleLabelLANHost(label string) bool {
+	if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+		return false
+	}
+	hasAlpha := false
+	allHex := strings.HasPrefix(label, "0x") && len(label) > 2
+	for i := range len(label) {
+		c := label[i]
+		switch {
+		case c >= 'a' && c <= 'z':
+			hasAlpha = true
+			if i >= 2 && c > 'f' {
+				allHex = false
+			}
+		case c >= '0' && c <= '9':
+		case c == '-':
+			allHex = false
+		default:
+			return false
+		}
+	}
+	// Reject purely numeric or 0x-hex integer IP forms such as 2130706433 or 0x7f000001.
+	return hasAlpha && !allHex
 }
 
 func clampRunes(s string, limit int) string {
