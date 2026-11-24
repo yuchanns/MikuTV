@@ -643,6 +643,113 @@ func TestDASHPrefetchDoesNotEvictNextSegmentWhenBudgetFull(t *testing.T) {
 	}
 }
 
+type countingBlockingDASHTransport struct {
+	countingDASHTransport
+	blockRange   string
+	enteredBlock chan struct{}
+	releaseBlock chan struct{}
+}
+
+func (t *countingBlockingDASHTransport) OpenResource(ctx context.Context, resource provider.PlaybackResource, method, byteRange string) (*http.Response, error) {
+	t.mu.Lock()
+	if t.requests == nil {
+		t.requests = make(map[string]int)
+	}
+	t.requests[byteRange]++
+	t.mu.Unlock()
+	if byteRange == t.blockRange {
+		rng, _ := parseSingleByteRange(byteRange)
+		slice := t.data[rng.First : rng.Last+1]
+		req, _ := http.NewRequestWithContext(ctx, method, resource.URLs[0], nil)
+		hdr := http.Header{
+			"Accept-Ranges":  {"bytes"},
+			"Content-Type":   {"video/mp4"},
+			"Content-Length": {fmt.Sprint(len(slice))},
+			"Content-Range":  {fmt.Sprintf("bytes %d-%d/%d", rng.First, rng.Last, len(t.data))},
+		}
+		pr, pw := io.Pipe()
+		go func() {
+			close(t.enteredBlock)
+			select {
+			case <-t.releaseBlock:
+				_, _ = pw.Write(slice)
+				_ = pw.Close()
+			case <-ctx.Done():
+				_ = pw.CloseWithError(ctx.Err())
+			}
+		}()
+		return &http.Response{StatusCode: http.StatusPartialContent, Header: hdr, Body: pr, Request: req}, nil
+	}
+	return testResource(t.data).OpenResource(ctx, resource, method, byteRange)
+}
+
+func TestDASHPrefetchReservesInFlightForegroundBudget(t *testing.T) {
+	frags := make([][]byte, 6)
+	for i := range frags {
+		frags[i] = bytes.Repeat([]byte{byte('a' + i)}, 8192)
+	}
+	movie, initR, idxR, ranges := buildMultiFragmentDASH(frags, 4000)
+	spec := func(i int) string { return fmt.Sprintf("bytes=%d-%d", ranges[i].First, ranges[i].Last) }
+	transport := &countingBlockingDASHTransport{
+		countingDASHTransport: countingDASHTransport{data: movie},
+		blockRange:            spec(0),
+		enteredBlock:          make(chan struct{}),
+		releaseBlock:          make(chan struct{}),
+	}
+	video := provider.PlaybackTrack{
+		Resource:  provider.PlaybackResource{URLs: []string{"https://cdn1.example.com/v.m4s"}},
+		Bandwidth: 16_000_000, Width: 3840, Height: 2160, Codec: "hvc1.1.6.L150.90",
+		Init: &initR, Index: &idxR,
+	}
+	media, err := OpenMedia(context.Background(), provider.Playback{
+		Transport: transport,
+		Plan:      provider.PlaybackPlan{Streams: []provider.PlaybackStream{{Format: provider.PlaybackDASH, Video: video}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer media.Close()
+
+	// Budget holds init + frag 0 (in-flight) + frag 1 + frag 2, leaving no room for frag 3.
+	media.cache.mu.Lock()
+	media.cache.budget = int64(initR.Last-initR.First+1) + 3*8192 + 512
+	media.cache.activeBudget = media.cache.budget
+	media.cache.mu.Unlock()
+
+	base := strings.TrimSuffix(media.URL, "stream.m3u8")
+	done0 := make(chan string, 1)
+	go func() {
+		done0 <- readFixture(t, base+"video.mp4", spec(0))
+	}()
+	<-transport.enteredBlock
+
+	// While frag 0 has delivered 0 bytes, prefetch must still account for its
+	// reserved size and stop after frag 1 and frag 2 without fetching frag 3.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && transport.count(spec(2)) == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(60 * time.Millisecond)
+	if got1, got2, got3 := transport.count(spec(1)), transport.count(spec(2)), transport.count(spec(3)); got1 != 1 || got2 != 1 || got3 != 0 {
+		close(transport.releaseBlock)
+		t.Fatalf("prefetch overshot budget while frag 0 in flight: counts frag1=%d frag2=%d frag3=%d, want 1, 1, 0", got1, got2, got3)
+	}
+
+	close(transport.releaseBlock)
+	if got0 := <-done0; got0 != string(frags[0]) {
+		t.Fatalf("frag 0 mismatch")
+	}
+	if got3 := transport.count(spec(3)); got3 != 0 {
+		t.Fatalf("frag 3 fetched %d times after frag 0 finished, want 0", got3)
+	}
+	if got1 := readFixture(t, base+"video.mp4", spec(1)); got1 != string(frags[1]) {
+		t.Fatalf("frag 1 mismatch")
+	}
+	if got := transport.count(spec(1)); got != 1 {
+		t.Fatalf("frag 1 fetched %d times, want 1 (cache hit)", got)
+	}
+}
+
 type blockingFragTransport struct {
 	data         []byte
 	blockRange   string
