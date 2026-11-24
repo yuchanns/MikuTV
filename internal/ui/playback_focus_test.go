@@ -574,3 +574,84 @@ func TestPlaybackQualityMenuAutoVsLockedAndPreloadNextTrigger(t *testing.T) {
 			view.player.index, view.Playback.State())
 	}
 }
+
+func TestPlaybackQualityButtonAutoSizesSingleLineForLongLabels(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default()})
+	view.Playback = app.NewPlayback(view.Catalog, player.Engine{}, nil, func(func()) {}, func() {})
+	view.player.visible = true
+	state.Focus = playerQuality
+	longLabel := "1080p \u00b7 Original / Auto"
+	clock := app.PlaybackState{
+		Clock: player.Status{HasFrame: true}, Position: 12, Duration: 120,
+		Resolution: provider.Playback{Plan: provider.PlaybackPlan{
+			Quality: "auto",
+			Qualities: []provider.PlaybackQuality{
+				{ID: "auto", Label: longLabel, Badge: "1080p"},
+			},
+		}},
+	}
+
+	var frame *ui.Context
+	tester := ui.NewTester(func(c *ui.Context) {
+		frame = c
+		view.focus.begin(c)
+		page := view.context(state.Location, true, 1920, 1080)
+		page.playbackControls(c, clock, playbackItem{})
+	}, 1920, 1080)
+	tester.Frame()
+
+	bounds := frame.CommittedBounds(view.focus.item(playerQuality).elementID)
+	if bounds.W <= 110 || bounds.W > 260 {
+		t.Fatalf("quality button width = %.1f, expected auto-sized width in (110, 260]", bounds.W)
+	}
+	if bounds.H != 54 {
+		t.Fatalf("quality button height = %.1f, want 54", bounds.H)
+	}
+}
+
+func TestPlaybackSourceUnavailableDialogDoesNotShowQualityMessage(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := app.NewState(testEntries(), "test-source", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default()})
+	page := view.context(state.Location, true, 1920, 1080)
+
+	dialog := page.playbackAccessDialogFor(app.PlaybackState{
+		Limit: provider.PlaybackSource,
+		Resolution: provider.Playback{
+			Plan: provider.PlaybackPlan{
+				Access: provider.VideoAccessRestricted,
+			},
+		},
+	}, playbackItem{})
+	if dialog.title != assets.Text.Playback.Access.SourceUnavailableTitle {
+		t.Fatalf("title = %q, want %q", dialog.title, assets.Text.Playback.Access.SourceUnavailableTitle)
+	}
+	if dialog.body != assets.Text.Playback.Access.SourceUnavailableBody {
+		t.Fatalf("body = %q, want %q", dialog.body, assets.Text.Playback.Access.SourceUnavailableBody)
+	}
+	if len(dialog.actions) != 1 || dialog.actions[0].label != assets.Text.Playback.Access.Return {
+		t.Fatalf("actions = %+v, want single return action", dialog.actions)
+	}
+}

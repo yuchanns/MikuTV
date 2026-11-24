@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -97,13 +98,15 @@ func (t *dashTrack) currentEpoch() (context.Context, int, bool) {
 
 func (t *dashTrack) updateCursor(parent context.Context, fragIdx int) (context.Context, bool) {
 	t.mu.Lock()
-	jumped := t.hasCursor && (fragIdx < t.cursor || fragIdx-t.cursor > seekCancelDistance)
+	jumped := t.hasCursor && (fragIdx < t.cursor-1 || fragIdx-t.cursor > seekCancelDistance)
 	if jumped && t.epochCancel != nil {
 		t.epochCancel()
 		t.epochCtx, t.epochCancel = context.WithCancel(parent)
 	}
-	t.cursor = fragIdx
-	t.hasCursor = true
+	if jumped || !t.hasCursor || fragIdx > t.cursor {
+		t.cursor = fragIdx
+		t.hasCursor = true
+	}
 	ectx := t.epochCtx
 	t.mu.Unlock()
 	select {
@@ -319,7 +322,28 @@ func (c *segmentCache) dropEntry(seg *cachedSegment) {
 	c.mu.Unlock()
 }
 
+func (c *segmentCache) hasEntry(track *dashTrack, r provider.PlaybackRange) bool {
+	key := rangeKey{track: track.name, first: r.First, last: r.Last}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
+	existing, ok := c.entries[key]
+	if !ok {
+		return false
+	}
+	existing.mu.Lock()
+	usable := !existing.done || existing.err == nil
+	existing.mu.Unlock()
+	return usable
+}
+
 func (c *segmentCache) hasRoomFor(size int64) bool {
+	return c.hasRoomForAhead(nil, -1, size)
+}
+
+func (c *segmentCache) hasRoomForAhead(track *dashTrack, incomingIdx int, size int64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -328,7 +352,7 @@ func (c *segmentCache) hasRoomFor(size int64) bool {
 	if c.used+size <= c.budget {
 		return true
 	}
-	c.evictToLocked(c.budget - size)
+	c.evictToLocked(c.budget-size, track, incomingIdx)
 	return c.used+size <= c.budget
 }
 
@@ -351,16 +375,24 @@ func (c *segmentCache) evictBehind(track *dashTrack, cursor int) {
 }
 
 func (c *segmentCache) evictLocked() {
-	c.evictToLocked(c.budget)
+	c.evictToLocked(c.budget, nil, -1)
 }
 
-func (c *segmentCache) evictToLocked(target int64) {
+// evictToLocked frees completed idle entries until c.used <= target.
+// Behind-cursor segments are always evicted first (oldest lastUse first).
+// Ahead-of-cursor segments are evicted farthest-from-cursor first so the
+// imminent next segment (cursor+1) is preserved. When called by a prefetch
+// worker (protectTrack != nil), ahead segments at or before protectMaxAhead
+// on that track (and ahead segments on other tracks) are never evicted to
+// make room for a farther prefetch.
+func (c *segmentCache) evictToLocked(target int64, protectTrack *dashTrack, protectMaxAhead int) {
 	if target < 0 {
 		target = 0
 	}
 	for c.used > target {
 		var victim *cachedSegment
 		victimBehind := false
+		victimAheadDist := -1
 		var victimSeq int64
 		for _, seg := range c.entries {
 			if seg.pinned {
@@ -375,9 +407,36 @@ func (c *segmentCache) evictToLocked(target int64) {
 			}
 			_, cur, hasCur := seg.track.currentEpoch()
 			behind := hasCur && seg.fragIdx >= 0 && seg.fragIdx < cur
-			if victim == nil || (behind && !victimBehind) || (behind == victimBehind && seq < victimSeq) {
+			if !behind && protectTrack != nil {
+				if seg.track != protectTrack || seg.fragIdx < 0 || seg.fragIdx <= protectMaxAhead {
+					continue
+				}
+			}
+			aheadDist := 0
+			if !behind && seg.fragIdx >= 0 {
+				if hasCur {
+					aheadDist = seg.fragIdx - cur
+				} else {
+					aheadDist = seg.fragIdx
+				}
+			}
+			better := false
+			switch {
+			case victim == nil:
+				better = true
+			case behind != victimBehind:
+				better = behind
+			case behind:
+				better = seq < victimSeq
+			case aheadDist != victimAheadDist:
+				better = aheadDist > victimAheadDist
+			default:
+				better = seq < victimSeq
+			}
+			if better {
 				victim = seg
 				victimBehind = behind
+				victimAheadDist = aheadDist
 				victimSeq = seq
 			}
 		}
@@ -462,7 +521,10 @@ func (m *Media) runPrefetchWorker(track *dashTrack) {
 				if segSize > maxCachedSegmentBytes {
 					break
 				}
-				if !m.cache.hasRoomFor(segSize) {
+				if m.cache.hasEntry(track, frag.PlaybackRange) {
+					continue
+				}
+				if !m.cache.hasRoomForAhead(track, idx, segSize) {
 					break
 				}
 				seg, start := m.cache.lookupOrCreate(track, frag.PlaybackRange, idx, false)
@@ -526,11 +588,9 @@ func (m *Media) serveDashTrack(w http.ResponseWriter, r *http.Request, track *da
 		}
 	}
 
-	fetchCtx := m.ctx
 	if fragIdx >= 0 {
 		m.ensurePrefetchWorker(track)
-		ectx, jumped := track.updateCursor(m.ctx, fragIdx)
-		fetchCtx = ectx
+		_, jumped := track.updateCursor(m.ctx, fragIdx)
 		if jumped {
 			m.cache.evictBehind(track, fragIdx)
 		} else {
@@ -557,7 +617,7 @@ func (m *Media) serveDashTrack(w http.ResponseWriter, r *http.Request, track *da
 		}
 		go func() {
 			defer m.wg.Done()
-			m.fetchSegment(fetchCtx, track, seg, true)
+			m.fetchSegment(m.ctx, track, seg, true)
 		}()
 	}
 
@@ -616,17 +676,24 @@ func (m *Media) streamCachedSegment(w http.ResponseWriter, r *http.Request, seg 
 		}
 		avail := len(seg.buf)
 		done := seg.done
-		out = out[:0]
+		var chunk []byte
 		if avail > sent {
-			out = append(out, seg.buf[sent:avail]...)
+			if done {
+				// seg.buf is immutable once done; write directly without copying.
+				chunk = seg.buf[sent:avail]
+			} else {
+				limit := min(avail, sent+256*1024)
+				out = append(out[:0], seg.buf[sent:limit]...)
+				chunk = out
+			}
 		}
 		seg.mu.Unlock()
 
-		if len(out) > 0 {
-			if _, err := w.Write(out); err != nil {
+		if len(chunk) > 0 {
+			if _, err := w.Write(chunk); err != nil {
 				return
 			}
-			sent += len(out)
+			sent += len(chunk)
 		}
 		if done && sent >= avail {
 			return
@@ -690,6 +757,9 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 			if seg.status == 0 {
 				seg.status = resp.StatusCode
 				seg.headers = hdr
+				if seg.buf == nil && total > 0 && total <= maxCachedSegmentBytes {
+					seg.buf = make([]byte, 0, total)
+				}
 				seg.cond.Broadcast()
 			}
 			seg.mu.Unlock()
@@ -722,8 +792,9 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 			}()
 		}
 
-		buf := make([]byte, 32*1024)
+		buf := make([]byte, 128*1024)
 		var attemptBytes int64
+		var pendingAccounted int64
 		var readErr error
 		for offset < total {
 			n, rerr := resp.Body.Read(buf)
@@ -738,7 +809,11 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 				seg.buf = append(seg.buf, buf[:n]...)
 				seg.cond.Broadcast()
 				seg.mu.Unlock()
-				m.cache.addBytes(seg, int64(n))
+				pendingAccounted += int64(n)
+				if pendingAccounted >= 256*1024 {
+					m.cache.addBytes(seg, pendingAccounted)
+					pendingAccounted = 0
+				}
 				attemptBytes += int64(n)
 				offset += int64(n)
 			}
@@ -762,6 +837,9 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 				break
 			}
 		}
+		if pendingAccounted > 0 {
+			m.cache.addBytes(seg, pendingAccounted)
+		}
 
 		close(watchDone)
 		resp.Body.Close()
@@ -773,12 +851,19 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 		}
 
 		if slowAborted.Load() && ctx.Err() == nil && failovers == 0 {
+			if mediaTrace {
+				log.Printf("player-media: dash slow failover track=%s frag=%d offset=%d/%d elapsed=%s",
+					track.name, seg.fragIdx, offset, total, elapsed.Round(time.Millisecond))
+			}
 			reporter.ReportSlow(respURL)
 			failovers++
 			continue
 		}
 		if readErr != nil {
 			if ctx.Err() == nil && failovers == 0 && len(track.resource.URLs) > 1 && reporter != nil && reporter.HasHealthyAlternative(track.resource.URLs, respURL) {
+				if mediaTrace {
+					log.Printf("player-media: dash read failover track=%s frag=%d err=%v", track.name, seg.fragIdx, readErr)
+				}
 				reporter.ReportSlow(respURL)
 				failovers++
 				continue
@@ -794,6 +879,9 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 
 	if finalErr != nil {
 		if foreground && ctx.Err() == nil {
+			if mediaTrace {
+				log.Printf("player-media: dash foreground fetch failed track=%s frag=%d err=%v", track.name, seg.fragIdx, finalErr)
+			}
 			m.recordFailure(finalErr)
 		}
 		seg.mu.Lock()
@@ -850,11 +938,16 @@ func (m *Media) Warmup(ctx context.Context) error {
 			}
 			frag := track.fragments[i]
 			segSize := frag.Last - frag.First + 1
-			if segSize > maxCachedSegmentBytes || !m.cache.hasRoomFor(segSize) {
+			if segSize > maxCachedSegmentBytes {
 				break
 			}
-			if seg, start := m.cache.lookupOrCreate(track, frag.PlaybackRange, i, false); seg != nil && start {
-				m.fetchSegment(warmCtx, track, seg, false)
+			if !m.cache.hasEntry(track, frag.PlaybackRange) {
+				if !m.cache.hasRoomForAhead(track, i, segSize) {
+					break
+				}
+				if seg, start := m.cache.lookupOrCreate(track, frag.PlaybackRange, i, false); seg != nil && start {
+					m.fetchSegment(warmCtx, track, seg, false)
+				}
 			}
 			dur += frag.duration
 		}

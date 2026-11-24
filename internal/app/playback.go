@@ -2,8 +2,11 @@ package app
 
 import (
 	"context"
+	"log"
 	"math"
+	"os"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/yuchanns/MikuTV/internal/player"
@@ -30,7 +33,15 @@ const (
 	autoCDNGraceExtra         = 2 * time.Second
 	preloadExpiryMarginSec    = 10
 	inlinePreviewStallTimeout = 12 * time.Second
+	seekAutoQualityGrace      = 2 * time.Second
 )
+
+var playbackTrace = os.Getenv("MIKUTV_NAV_TRACE") == "1"
+
+type savedPositionKey struct {
+	owner  string
+	target provider.PlaybackTarget
+}
 
 type InlinePreviewState struct {
 	Target   provider.PlaybackTarget
@@ -122,6 +133,12 @@ type Playback struct {
 	autoStallActive bool
 	autoLastSwitch  time.Time
 	autoHealthyAt   time.Time
+	seekSettledAt   time.Time
+
+	saveMu       sync.Mutex
+	savePending  map[savedPositionKey]float64
+	saveInflight bool
+	saveDone     chan struct{}
 
 	preloadCancel  context.CancelFunc
 	preloadRequest uint64
@@ -269,7 +286,7 @@ func (p *Playback) clearStream() {
 		p.engine.Stop()
 	}
 	if p.media != nil {
-		p.media.Close()
+		p.media.CloseAsync()
 		p.media = nil
 	}
 }
@@ -284,7 +301,7 @@ func (p *Playback) clearPreload() {
 	p.preloadOwner = ""
 	if p.preloaded != nil {
 		if p.preloaded.media != nil {
-			p.preloaded.media.Close()
+			p.preloaded.media.CloseAsync()
 		}
 		p.preloaded = nil
 	}
@@ -351,7 +368,7 @@ func (p *Playback) PreloadNext(target provider.PlaybackTarget, owner string) {
 		}
 		p.post(func() {
 			if !p.active || p.preloadRequest != request || ctx.Err() != nil || p.owner != owner {
-				media.Close()
+				media.CloseAsync()
 				return
 			}
 			cancel()
@@ -371,6 +388,7 @@ func (p *Playback) resetAutoQuality(clearHDRCooldown bool) {
 	p.autoStallActive = false
 	p.autoLastSwitch = time.Time{}
 	p.autoHealthyAt = time.Time{}
+	p.seekSettledAt = time.Time{}
 }
 
 func (p *Playback) effectiveQuality() string {
@@ -434,7 +452,7 @@ func (p *Playback) resolveMode(selected, requestQuality, selectedLine string, pr
 		p.post(func() {
 			if !p.active || p.request != request || ctx.Err() != nil {
 				if media != nil {
-					media.Close()
+					media.CloseAsync()
 				}
 				return
 			}
@@ -477,7 +495,7 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	plan := result.Plan
 	if plan.Live && plan.LiveEnded {
 		if media != nil {
-			media.Close()
+			media.CloseAsync()
 		}
 		p.clearStream()
 		p.state.Resolution = result
@@ -501,7 +519,7 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	}
 	if endedPreview && (plan.Access == provider.VideoAccessPreview || plan.Access == provider.VideoAccessRestricted) {
 		if media != nil {
-			media.Close()
+			media.CloseAsync()
 		}
 		// An unchanged entitlement keeps the finished preview and its last frame.
 		p.state.Limit = ""
@@ -533,6 +551,7 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 			position = plan.ResumeSeconds
 		}
 		if p.store != nil {
+			p.flushPositionSaves()
 			if saved, ok := p.store.PlaybackPosition(p.owner, target); ok {
 				position = saved
 			}
@@ -551,13 +570,13 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	}
 	if p.engine.Open == nil || media == nil || !p.engine.Open(media.URL, position) {
 		if media != nil {
-			media.Close()
+			media.CloseAsync()
 		}
 		p.state.Failure = provider.Unsupported
 		return
 	}
 	if p.media != nil {
-		p.media.Close()
+		p.media.CloseAsync()
 	}
 	p.media = media
 	p.liveEndChecked = false
@@ -709,7 +728,7 @@ func (p *Playback) Tick(now time.Time) {
 	if p.positionAt.IsZero() {
 		p.positionAt = now
 	} else if p.state.Playing && now.Sub(p.positionAt) >= 30*time.Second {
-		p.save()
+		p.saveAsync()
 		p.positionAt = now
 	}
 }
@@ -739,7 +758,14 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 	if p.state.Selected != "" || p.preferredQuality() != "" || !p.state.Playing || p.media == nil {
 		return false
 	}
-	isRebuffering := clock.Buffering && clock.HasFrame
+	if clock.Seeking {
+		p.seekSettledAt = now
+		p.autoStallActive = false
+		p.autoHealthyAt = time.Time{}
+		return false
+	}
+	seekGrace := !p.seekSettledAt.IsZero() && now.Sub(p.seekSettledAt) < seekAutoQualityGrace
+	isRebuffering := clock.Buffering && clock.HasFrame && !seekGrace
 	if isRebuffering && !p.autoStallActive {
 		if p.autoStallSince.IsZero() || now.Sub(p.autoStallSince) > autoStallWindow {
 			p.autoStallSince = now
@@ -790,11 +816,19 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 			speed = p.media.TransferBps()
 		}
 		underfed := reqBps <= 0 || speed < reqBps*0.8
-		longRebuffer := isRebuffering && !p.bufferedAt.IsZero() && now.Sub(p.bufferedAt) >= rebufNeed
+		rebufStart := p.bufferedAt
+		if !p.seekSettledAt.IsZero() && p.seekSettledAt.After(rebufStart) {
+			rebufStart = p.seekSettledAt
+		}
+		longRebuffer := isRebuffering && !rebufStart.IsZero() && now.Sub(rebufStart) >= rebufNeed
 		repeatedStalls := isRebuffering && p.autoStallCount >= 2 && !p.autoStallSince.IsZero() &&
 			now.Sub(p.autoStallSince) <= autoStallWindow && (!crossingHDR || underfed)
 		slowStartup := !clock.HasFrame && now.Sub(p.startedAt) >= startupNeed && underfed
 		if longRebuffer || repeatedStalls || slowStartup {
+			if playbackTrace {
+				log.Printf("player-auto: downgrade %s->%s long=%t repeated=%t(%d) startup=%t speed=%.0f req=%.0f",
+					cur.ID, next.ID, longRebuffer, repeatedStalls, p.autoStallCount, slowStartup, speed, reqBps)
+			}
 			if crossingHDR {
 				p.autoHDRBlocked = true
 			}
@@ -832,6 +866,10 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 			return false
 		}
 		if now.Sub(p.autoHealthyAt) >= autoUpgradeHealthyWindow {
+			if playbackTrace {
+				log.Printf("player-auto: upgrade %s->%s bufAhead=%.1fs transfer=%.0f req=%.0f",
+					cur.ID, higher.ID, bufferAhead, transferBps, higherReqBps)
+			}
 			nextAuto := higher.ID
 			if curIdx-1 == 0 {
 				nextAuto = ""
@@ -926,6 +964,7 @@ func (p *Playback) Seek(seconds float64) {
 	}
 	p.autoHealthyAt = time.Time{}
 	p.autoStallActive = false
+	p.seekSettledAt = time.Now()
 	if expires := p.state.Resolution.Plan.ExpiresAt; expires > 0 && time.Now().Unix() >= expires {
 		p.refreshed = false
 		p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, false, false)
@@ -996,7 +1035,7 @@ func (p *Playback) ChooseAudioTrack(trackID string) bool {
 		p.post(func() {
 			if !p.active || p.audioRequest != reqID {
 				if media != nil {
-					media.Close()
+					media.CloseAsync()
 				}
 				return
 			}
@@ -1006,19 +1045,19 @@ func (p *Playback) ChooseAudioTrack(trackID string) bool {
 			p.state.Switching = false
 			if err != nil || media == nil || ctxErr != nil {
 				if media != nil {
-					media.Close()
+					media.CloseAsync()
 				}
 				p.changed()
 				return
 			}
 			position := p.state.Position
 			if p.engine.Open == nil || !p.engine.Open(media.URL, position) {
-				media.Close()
+				media.CloseAsync()
 				p.changed()
 				return
 			}
 			if p.media != nil {
-				p.media.Close()
+				p.media.CloseAsync()
 			}
 			p.media = media
 			p.selectedAudio = trackID
@@ -1219,7 +1258,7 @@ func (p *Playback) StartInlinePreview(target provider.PlaybackTarget) {
 		p.post(func() {
 			if !p.inlineActive || p.active || p.inlineRequest != reqID {
 				if media != nil {
-					media.Close()
+					media.CloseAsync()
 				}
 				return
 			}
@@ -1230,7 +1269,7 @@ func (p *Playback) StartInlinePreview(target provider.PlaybackTarget) {
 			}
 			if err != nil || media == nil {
 				if media != nil {
-					media.Close()
+					media.CloseAsync()
 				}
 				p.inlineActive = false
 				p.inlineState = InlinePreviewState{Target: target, Failed: true}
@@ -1243,7 +1282,7 @@ func (p *Playback) StartInlinePreview(target provider.PlaybackTarget) {
 				p.engine.Preview(true)
 			}
 			if p.engine.Open == nil || !p.engine.Open(media.URL, 0) {
-				media.Close()
+				media.CloseAsync()
 				if p.engine.Preview != nil {
 					p.engine.Preview(false)
 				}
@@ -1271,6 +1310,7 @@ func (p *Playback) StopInlinePreview() {
 	if p == nil {
 		return
 	}
+	started := time.Now()
 	if p.inlineCancel != nil {
 		p.inlineCancel()
 		p.inlineCancel = nil
@@ -1280,17 +1320,29 @@ func (p *Playback) StopInlinePreview() {
 	p.inlineActive = false
 	p.inlineStartedAt = time.Time{}
 	p.inlineState = InlinePreviewState{}
+	var stopDur, previewDur, closeDur time.Duration
 	if !p.active && wasActive {
 		if p.engine.Stop != nil {
+			t0 := time.Now()
 			p.engine.Stop()
+			stopDur = time.Since(t0)
 		}
 		if p.engine.Preview != nil {
+			t0 := time.Now()
 			p.engine.Preview(false)
+			previewDur = time.Since(t0)
 		}
 	}
-	if p.inlineMedia != nil {
-		p.inlineMedia.Close()
+	if media := p.inlineMedia; media != nil {
+		t0 := time.Now()
 		p.inlineMedia = nil
+		media.CloseAsync()
+		closeDur = time.Since(t0)
+	}
+	if playbackTrace && wasActive {
+		log.Printf("hero-preview: stop-timing stop=%s preview=%s close=%s total=%s",
+			stopDur.Round(time.Microsecond), previewDur.Round(time.Microsecond),
+			closeDur.Round(time.Microsecond), time.Since(started).Round(time.Microsecond))
 	}
 }
 
@@ -1330,9 +1382,21 @@ func (p *Playback) ClearLocalPositions(entryID, owner string) {
 	if p == nil {
 		return
 	}
+	p.saveMu.Lock()
+	for key := range p.savePending {
+		if key.target.Ref.EntryID == entryID && key.owner == owner {
+			delete(p.savePending, key)
+		}
+	}
+	done := p.saveDone
+	inflight := p.saveInflight
+	p.saveMu.Unlock()
+	if inflight && done != nil {
+		<-done
+	}
 	if p.preloaded != nil && p.preloaded.target.Ref.EntryID == entryID && p.preloaded.owner == owner {
 		if p.preloaded.media != nil {
-			p.preloaded.media.Close()
+			p.preloaded.media.CloseAsync()
 		}
 		p.preloaded = nil
 	}
@@ -1346,7 +1410,74 @@ func (p *Playback) ClearLocalPositions(entryID, owner string) {
 	}
 }
 
+func (p *Playback) enqueuePositionSave(owner string, target provider.PlaybackTarget, seconds float64, syncWait bool) {
+	if p.store == nil {
+		return
+	}
+	key := savedPositionKey{owner: owner, target: target}
+	p.saveMu.Lock()
+	if p.savePending == nil {
+		p.savePending = make(map[savedPositionKey]float64)
+	}
+	p.savePending[key] = seconds
+	if !p.saveInflight {
+		p.saveInflight = true
+		p.saveDone = make(chan struct{})
+		go p.drainPositionSaves()
+	}
+	done := p.saveDone
+	p.saveMu.Unlock()
+	if syncWait {
+		<-done
+	}
+}
+
+func (p *Playback) flushPositionSaves() {
+	p.saveMu.Lock()
+	done := p.saveDone
+	inflight := p.saveInflight
+	p.saveMu.Unlock()
+	if inflight && done != nil {
+		<-done
+	}
+}
+
+func (p *Playback) drainPositionSaves() {
+	for {
+		p.saveMu.Lock()
+		if len(p.savePending) == 0 {
+			done := p.saveDone
+			p.saveInflight = false
+			p.saveDone = nil
+			p.saveMu.Unlock()
+			if done != nil {
+				close(done)
+			}
+			return
+		}
+		batch := p.savePending
+		p.savePending = make(map[savedPositionKey]float64)
+		p.saveMu.Unlock()
+		for key, seconds := range batch {
+			started := time.Now()
+			_ = p.store.SavePlaybackPosition(key.owner, key.target, seconds)
+			if playbackTrace {
+				log.Printf("player-save: id=%s part=%s sec=%.0f elapsed=%s",
+					key.target.Ref.ID, key.target.PartID, seconds, time.Since(started).Round(time.Microsecond))
+			}
+		}
+	}
+}
+
 func (p *Playback) save() {
+	p.savePosition(true)
+}
+
+func (p *Playback) saveAsync() {
+	p.savePosition(false)
+}
+
+func (p *Playback) savePosition(syncWait bool) {
 	if !p.loaded || p.isLive() || p.state.PreviewPending || p.state.Target.Ref.ID == "" ||
 		p.state.Resolution.Plan.Branch != nil || p.state.BranchHistory > 0 {
 		return
@@ -1358,12 +1489,13 @@ func (p *Playback) save() {
 		seconds = 0
 	}
 	if p.lastSaved == seconds && p.savedAsEnd == finished {
+		if syncWait {
+			p.flushPositionSaves()
+		}
 		return
 	}
 	p.lastSaved, p.savedAsEnd = seconds, finished
-	if p.store != nil {
-		_ = p.store.SavePlaybackPosition(p.owner, target, float64(seconds))
-	}
+	p.enqueuePositionSave(p.owner, target, float64(seconds), syncWait)
 	reporter, _ := p.catalog.session.(provider.PlaybackReporter)
 	if !p.syncSource || p.owner == "" || reporter == nil || !p.catalog.CanReportPlayback() {
 		return

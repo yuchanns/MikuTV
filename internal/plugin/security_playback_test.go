@@ -102,8 +102,11 @@ export function resolvePlayback() {
 		t.Fatalf("ResolvePlayback non-video kind: %v", err)
 	}
 	pt := resolved.Transport.(*playbackTransport)
-	if tr, ok := pt.client.Transport.(*http.Transport); !ok || tr.ResponseHeaderTimeout <= 0 {
-		t.Fatalf("mediaClient missing ResponseHeaderTimeout for backup CDN failover")
+	if tr, ok := pt.client.Transport.(*http.Transport); !ok || tr.ResponseHeaderTimeout != 5*time.Second {
+		t.Fatalf("mediaClient missing 5s ResponseHeaderTimeout for backup CDN failover")
+	}
+	if tr, ok := pt.singleClient.Transport.(*http.Transport); !ok || tr.ResponseHeaderTimeout < 15*time.Second {
+		t.Fatalf("singleClient should allow longer ResponseHeaderTimeout for single-origin streams, got %v", tr)
 	}
 
 	// Verify authorized cross-host CDN redirect keeps Referer/UA/Range and strips Cookie/Authorization.

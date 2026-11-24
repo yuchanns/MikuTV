@@ -162,6 +162,9 @@ def bundle_topshelf(build_env, app_version, number):
             "NSExtensionPointIdentifier": "com.apple.tv-top-shelf",
             "NSExtensionPrincipalClass": "MikuTVTopShelfProvider",
         },
+        "NSAppTransportSecurity": {
+            "NSAllowsLocalNetworking": True,
+        },
     }
     (ext / "Info.plist").write_bytes(plistlib.dumps(ext_info))
 

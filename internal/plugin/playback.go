@@ -53,15 +53,24 @@ func (s *Session) ResolvePlayback(ctx context.Context, request provider.Playback
 	}
 	mediaClient := *client
 	mediaClient.Timeout = 0
+	singleClient := *client
+	singleClient.Timeout = 0
 	if transport, ok := client.Transport.(*http.Transport); ok && transport != nil {
 		cloned := transport.Clone()
 		cloned.ResponseHeaderTimeout = 5 * time.Second
-		if cloned.MaxIdleConnsPerHost < 6 {
-			cloned.MaxIdleConnsPerHost = 6
+		if cloned.MaxIdleConnsPerHost < 8 {
+			cloned.MaxIdleConnsPerHost = 8
 		}
 		mediaClient.Transport = cloned
+
+		singleCloned := transport.Clone()
+		singleCloned.ResponseHeaderTimeout = 20 * time.Second
+		if singleCloned.MaxIdleConnsPerHost < 8 {
+			singleCloned.MaxIdleConnsPerHost = 8
+		}
+		singleClient.Transport = singleCloned
 	}
-	mediaClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+	checkRedirect := func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return errors.New("media redirect limit exceeded")
 		}
@@ -87,11 +96,13 @@ func (s *Session) ResolvePlayback(ctx context.Context, request provider.Playback
 		}
 		return nil
 	}
+	mediaClient.CheckRedirect = checkRedirect
+	singleClient.CheckRedirect = checkRedirect
 	cdn := s.cdn
 	if cdn == nil {
 		cdn = newCDNTracker()
 	}
-	result.Transport = &playbackTransport{session: s, client: &mediaClient, scope: scope, allow: allowed, cdn: cdn}
+	result.Transport = &playbackTransport{session: s, client: &mediaClient, singleClient: &singleClient, scope: scope, allow: allowed, cdn: cdn}
 	return result, nil
 }
 
@@ -515,11 +526,12 @@ func (c *cdnTracker) hasHealthyAlternative(urls []string, currentURL string, now
 }
 
 type playbackTransport struct {
-	session *Session
-	client  *http.Client
-	scope   context.Context
-	allow   func(*http.Request) error
-	cdn     *cdnTracker
+	session      *Session
+	client       *http.Client
+	singleClient *http.Client
+	scope        context.Context
+	allow        func(*http.Request) error
+	cdn          *cdnTracker
 }
 
 func (t *playbackTransport) ReportSlow(rawURL string) {
@@ -539,6 +551,10 @@ func (t *playbackTransport) OpenResource(ctx context.Context, resource provider.
 	closeRequest := func() { stop(); cancel() }
 	code := provider.Network
 	candidates := t.cdn.order(resource.URLs, time.Now())
+	httpClient := t.client
+	if len(candidates) <= 1 && t.singleClient != nil {
+		httpClient = t.singleClient
+	}
 	for _, address := range candidates {
 		if err := t.scope.Err(); err != nil {
 			closeRequest()
@@ -555,7 +571,7 @@ func (t *playbackTransport) OpenResource(ctx context.Context, resource provider.
 			request.Header.Set("Range", byteRange)
 		}
 		started := time.Now()
-		response, err := t.client.Do(request)
+		response, err := httpClient.Do(request)
 		if err != nil {
 			if ctx.Err() != nil {
 				closeRequest()

@@ -3,6 +3,7 @@ package tvui
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/plugins/glass"
@@ -101,7 +102,12 @@ type View struct {
 	hasTopShelfHash     bool
 	lastTopShelfErrHash [32]byte
 	hasTopShelfErrHash  bool
-	topShelfSnapshot   topshelf.Snapshot
+	topShelfMu          sync.Mutex
+	topShelfLoaded      bool
+	topShelfInflight    bool
+	topShelfPending     *topShelfWrite
+	topShelfDone        chan struct{}
+	topShelfSnapshot    topshelf.Snapshot
 	pendingTopShelfURL string
 	lastOpenedURL      string
 	lastOpenedAt       time.Time

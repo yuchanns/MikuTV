@@ -117,3 +117,63 @@ func TestSanitizeSnapshotLegacyFlatItemsMigratedToSection(t *testing.T) {
 		t.Fatalf("legacy flat items not migrated cleanly: %+v", got)
 	}
 }
+
+func TestSanitizeImageURLAllowsLocalNetworkHTTPAndRejectsPublicOrLoopbackHTTP(t *testing.T) {
+	allowed := []string{
+		"https://img.example.com/poster.jpg",
+		"http://192.168.1.50:8096/Items/abc/Images/Backdrop/0?maxWidth=1920",
+		"http://10.9.60.10:8096/Items/abc/Images/Primary",
+		"http://172.16.0.5:8096/Items/abc/Images/Primary",
+		"http://100.64.0.10:8096/Items/abc/Images/Primary",
+		"http://169.254.1.2:8096/Items/abc/Images/Primary",
+		"http://[fd00::1]:8096/Items/abc/Images/Primary",
+		"http://nas.local:8096/Items/abc/Images/Primary",
+		"http://media.lan:8096/Items/abc/Images/Primary",
+		"http://server.home.arpa:8096/Items/abc/Images/Primary",
+		"http://media-box:8096/Items/abc/Images/Primary",
+	}
+	for _, raw := range allowed {
+		snap := SanitizeSnapshot(Snapshot{
+			EntryID: "media-server",
+			Sections: []Section{{
+				ID:    "rec",
+				Title: "Recommended",
+				Items: []Item{{EntryID: "media-server", Kind: "movie", ID: "m1", Title: "Movie", ImageURL: raw}},
+			}},
+		})
+		if snap.ItemCount() != 1 {
+			t.Errorf("expected image URL %q to be allowed, got %+v", raw, snap)
+		}
+	}
+
+	rejected := []string{
+		"",
+		"https://:443/poster.jpg",
+		"http://img.example.com/bad.jpg",
+		"http://1.1.1.1/bad.jpg",
+		"http://127.0.0.1:8096/Items/abc/Images/Primary",
+		"http://localhost:8096/Items/abc/Images/Primary",
+		"http://[::1]:8096/Items/abc/Images/Primary",
+		"http://[::ffff:127.0.0.1]:8096/Items/abc/Images/Primary",
+		"http://0.0.0.0:8096/Items/abc/Images/Primary",
+		"http://2130706433:8096/Items/abc/Images/Primary",
+		"http://0x7f000001:8096/Items/abc/Images/Primary",
+		"http://user:pass@192.168.1.50:8096/Items/abc/Images/Primary",
+		"https://user:pass@img.example.com/poster.jpg",
+		"file:///var/mobile/poster.jpg",
+		"javascript:alert(1)",
+	}
+	for _, raw := range rejected {
+		snap := SanitizeSnapshot(Snapshot{
+			EntryID: "media-server",
+			Sections: []Section{{
+				ID:    "rec",
+				Title: "Recommended",
+				Items: []Item{{EntryID: "media-server", Kind: "movie", ID: "m1", Title: "Movie", ImageURL: raw}},
+			}},
+		})
+		if snap.ItemCount() != 0 {
+			t.Errorf("expected image URL %q to be rejected, got %+v", raw, snap)
+		}
+	}
+}

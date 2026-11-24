@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"regexp"
 	"slices"
@@ -30,6 +32,8 @@ const (
 	speedMinWindow   = 250 * time.Millisecond
 	hlsMaxChildren   = 4096
 )
+
+var mediaTrace = os.Getenv("MIKUTV_NAV_TRACE") == "1"
 
 type hlsChildEntry struct {
 	resource provider.PlaybackResource
@@ -225,7 +229,7 @@ func OpenMediaWithAudio(ctx context.Context, playback provider.Playback, selecte
 		m.failure.Store(nil)
 		m.server = &http.Server{
 			ReadHeaderTimeout: 5 * time.Second,
-			IdleTimeout:       30 * time.Second,
+			IdleTimeout:       120 * time.Second,
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Host != listener.Addr().String() || r.Method != http.MethodGet && r.Method != http.MethodHead {
 					http.NotFound(w, r)
@@ -263,6 +267,20 @@ func (m *Media) Close() {
 	if m == nil {
 		return
 	}
+	m.closeResources(true)
+}
+
+// CloseAsync cancels in-flight upstream requests immediately and shuts down
+// the loopback server and prefetch workers in the background so UI-thread
+// transitions (such as moving focus away from an inline preview) never stall.
+func (m *Media) CloseAsync() {
+	if m == nil {
+		return
+	}
+	m.closeResources(false)
+}
+
+func (m *Media) closeResources(wait bool) {
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
@@ -275,16 +293,23 @@ func (m *Media) Close() {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	for _, track := range tracks {
-		track.close()
+	cleanup := func() {
+		for _, track := range tracks {
+			track.close()
+		}
+		if cache != nil {
+			cache.close()
+		}
+		if m.server != nil {
+			_ = m.server.Close()
+		}
+		m.wg.Wait()
 	}
-	if cache != nil {
-		cache.close()
+	if wait {
+		cleanup()
+		return
 	}
-	if m.server != nil {
-		_ = m.server.Close()
-	}
-	m.wg.Wait()
+	go cleanup()
 }
 
 // BytesPerSecond returns the recent downstream transfer rate observed by this
@@ -724,13 +749,24 @@ func (m *Media) registerResource(name string, resource provider.PlaybackResource
 
 func (m *Media) serveDirectResource(w http.ResponseWriter, request *http.Request, resource provider.PlaybackResource, mediaType string) {
 	started := time.Now()
-	response, err := m.transport.OpenResource(request.Context(), resource, request.Method, request.Header.Get("Range"))
+	byteRange := request.Header.Get("Range")
+	response, err := m.transport.OpenResource(request.Context(), resource, request.Method, byteRange)
 	if err != nil {
+		if mediaTrace && request.Context().Err() == nil {
+			log.Printf("player-media: direct open failed method=%s range=%q elapsed=%s err=%v",
+				request.Method, byteRange, time.Since(started).Round(time.Millisecond), err)
+		}
 		m.recordFailure(err)
 		http.Error(w, "Media unavailable", http.StatusBadGateway)
 		return
 	}
 	defer response.Body.Close()
+	if mediaTrace {
+		if hdrWait := time.Since(started); hdrWait >= time.Second {
+			log.Printf("player-media: slow direct header status=%d range=%q wait=%s",
+				response.StatusCode, byteRange, hdrWait.Round(time.Millisecond))
+		}
+	}
 	if response.Request != nil && response.Request.URL != nil {
 		u := response.Request.URL.String()
 		m.lastURL.Store(&u)
@@ -745,8 +781,13 @@ func (m *Media) serveDirectResource(w http.ResponseWriter, request *http.Request
 	}
 	w.WriteHeader(response.StatusCode)
 	if request.Method == http.MethodGet {
-		n, _ := io.Copy(w, &countingReader{r: response.Body, meter: &m.speed})
+		buf := make([]byte, 128*1024)
+		n, copyErr := io.CopyBuffer(w, &countingReader{r: response.Body, meter: &m.speed}, buf)
 		m.speed.recordTransfer(n, time.Since(started))
+		if mediaTrace && copyErr != nil && request.Context().Err() == nil {
+			log.Printf("player-media: direct copy ended early bytes=%d range=%q elapsed=%s err=%v",
+				n, byteRange, time.Since(started).Round(time.Millisecond), copyErr)
+		}
 	}
 }
 

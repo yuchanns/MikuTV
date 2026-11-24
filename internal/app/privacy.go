@@ -28,6 +28,11 @@ func ClearLocalWatchHistory(cleaner LocalPlaybackCleaner, activity *AccountActiv
 	if entryID == "" {
 		return nil
 	}
+	// Drain any in-flight asynchronous periodic position save before clearing
+	// persistent storage so a background write cannot resurrect cleared history.
+	if playback != nil {
+		playback.flushPositionSaves()
+	}
 	if cleaner != nil {
 		if err := cleaner.ClearPlaybackPositions(entryID, owner); err != nil {
 			return err

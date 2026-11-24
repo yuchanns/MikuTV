@@ -4,17 +4,22 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/yuchanns/MikuTV/internal/player"
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
 type privacyTestStore struct {
-	searches  map[string][]string
-	positions map[string]map[provider.PlaybackTarget]float64
-	sync      map[string]bool
-	failNext  error
+	mu          sync.Mutex
+	searches    map[string][]string
+	positions   map[string]map[provider.PlaybackTarget]float64
+	sync        map[string]bool
+	failNext    error
+	saveStarted chan struct{}
+	blockSave   chan struct{}
 }
 
 func newPrivacyTestStore() *privacyTestStore {
@@ -46,6 +51,8 @@ func (s *privacyTestStore) SaveSearchHistory(entryID, owner string, queries []st
 }
 
 func (s *privacyTestStore) PlaybackPosition(owner string, target provider.PlaybackTarget) (float64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	bucket := s.positions[privacyKey(target.Ref.EntryID, owner)]
 	if bucket == nil {
 		return 0, false
@@ -55,6 +62,20 @@ func (s *privacyTestStore) PlaybackPosition(owner string, target provider.Playba
 }
 
 func (s *privacyTestStore) SavePlaybackPosition(owner string, target provider.PlaybackTarget, seconds float64) error {
+	s.mu.Lock()
+	started := s.saveStarted
+	block := s.blockSave
+	s.saveStarted = nil
+	s.blockSave = nil
+	s.mu.Unlock()
+	if started != nil {
+		close(started)
+	}
+	if block != nil {
+		<-block
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	key := privacyKey(target.Ref.EntryID, owner)
 	if s.positions[key] == nil {
 		s.positions[key] = make(map[provider.PlaybackTarget]float64)
@@ -64,6 +85,8 @@ func (s *privacyTestStore) SavePlaybackPosition(owner string, target provider.Pl
 }
 
 func (s *privacyTestStore) ClearPlaybackPositions(entryID, owner string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.failNext != nil {
 		err := s.failNext
 		s.failNext = nil
@@ -177,7 +200,7 @@ func TestClearLocalWatchHistoryIsolatesScopesClearsCachesAndPreservesOtherData(t
 		t.Fatalf("expected cached history row, got %+v", snap)
 	}
 
-	pb := NewPlayback(nil, player.Engine{}, store, func(fn func()) { fn() }, func() {})
+	pb := NewPlayback(&Catalog{}, player.Engine{}, store, func(fn func()) { fn() }, func() {})
 	pb.preloaded = &preloadedPlayback{target: targetA1, owner: "user-1"}
 
 	// Failure must leave caches and persisted positions untouched.
@@ -219,5 +242,62 @@ func TestClearLocalWatchHistoryIsolatesScopesClearsCachesAndPreservesOtherData(t
 	}
 	if !activity.HistorySync() {
 		t.Fatal("history sync preference unexpectedly toggled off")
+	}
+}
+
+func TestClearLocalWatchHistoryDrainsInflightPositionSaveBeforeClearing(t *testing.T) {
+	store := newPrivacyTestStore()
+	target := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "entry-a", Kind: provider.Video, ID: "v1"}, PartID: "p1"}
+	otherTarget := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "entry-b", Kind: provider.Video, ID: "v2"}, PartID: "p1"}
+	_ = store.SavePlaybackPosition("user-1", otherTarget, 77)
+	saveStarted := make(chan struct{})
+	blockSave := make(chan struct{})
+	store.mu.Lock()
+	store.saveStarted = saveStarted
+	store.blockSave = blockSave
+	store.mu.Unlock()
+
+	pb := NewPlayback(&Catalog{}, player.Engine{}, store, func(fn func()) { fn() }, func() {})
+	pb.loaded = true
+	pb.active = true
+	pb.owner = "user-1"
+	pb.state.Target = target
+	pb.state.Position = 123
+	pb.saveAsync()
+
+	select {
+	case <-saveStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("in-flight periodic save did not start")
+	}
+
+	clearDone := make(chan error, 1)
+	go func() {
+		clearDone <- ClearLocalWatchHistory(store, nil, pb, "entry-a", "user-1")
+	}()
+
+	// Clear must wait for the in-flight save rather than clearing before it lands.
+	select {
+	case err := <-clearDone:
+		t.Fatalf("ClearLocalWatchHistory returned before in-flight save finished: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(blockSave)
+
+	select {
+	case err := <-clearDone:
+		if err != nil {
+			t.Fatalf("ClearLocalWatchHistory: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ClearLocalWatchHistory did not complete after releasing in-flight save")
+	}
+
+	if sec, ok := store.PlaybackPosition("user-1", target); ok {
+		t.Fatalf("in-flight periodic save resurrected cleared resume position: sec=%v", sec)
+	}
+	if sec, ok := store.PlaybackPosition("user-1", otherTarget); !ok || sec != 77 {
+		t.Fatalf("unrelated scope position damaged: (%v, %v)", sec, ok)
 	}
 }

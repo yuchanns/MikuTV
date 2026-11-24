@@ -7,8 +7,10 @@ import (
 	"log"
 	"math"
 	"os"
+	"runtime"
 	"structs"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -154,9 +156,11 @@ var (
 		kCMFmtTransferHLG                     uintptr
 		uiAppWillResignActiveNotification     objc.ID
 		uiAppDidBecomeActiveNotification      objc.ID
-		avPlayerItemDidPlayToEndNotification  objc.ID
-		avPlayerItemFailedToPlayNotification  objc.ID
-		avPlayerItemFailedErrorKey            objc.ID
+		avPlayerItemDidPlayToEndNotification      objc.ID
+		avPlayerItemFailedToPlayNotification      objc.ID
+		avPlayerItemFailedErrorKey                objc.ID
+		avPlayerItemPlaybackStalledNotification   objc.ID
+		avPlayerItemNewAccessLogEntryNotification objc.ID
 		avDisplayModeSwitchStartNotification    objc.ID
 		avDisplayModeSwitchEndNotification      objc.ID
 		avDisplayModeSwitchSettingsNotification objc.ID
@@ -200,11 +204,15 @@ var (
 		selIsEqual, selIsEqualToString                              objc.SEL
 		selLoadValuesAsynchronously, selStatusOfValueForKey         objc.SEL
 		selCancelLoading, selIsPlayable                             objc.SEL
-		selInitWithPixelBufferAttrs, selAddOutput                   objc.SEL
-		selPause, selSetRate, selSeekToTime, selCancelPendingSeeks  objc.SEL
-		selCurrentTime, selDuration, selLoadedTimeRanges            objc.SEL
-		selCMTimeRangeValue, selStatus, selError, selCode           objc.SEL
-		selTimeControlStatus, selIsReadyForDisplay                  objc.SEL
+		selInitWithPixelBufferAttrs, selAddOutput, selRemoveOutput objc.SEL
+		selPause, selSetRate, selSeekToTime, selCancelPendingSeeks objc.SEL
+		selCurrentTime, selDuration, selLoadedTimeRanges           objc.SEL
+		selCMTimeRangeValue, selStatus, selError, selCode          objc.SEL
+		selTimeControlStatus, selReasonForWaitingToPlay            objc.SEL
+		selIsReadyForDisplay                                       objc.SEL
+		selAccessLog, selEvents, selLastObject                     objc.SEL
+		selNumberOfStalls, selNumberOfDroppedVideoFrames           objc.SEL
+		selIndicatedBitrate, selObservedBitrate, selDurationWatched objc.SEL
 		selTracks, selIsEnabled, selAssetTrack, selMediaType        objc.SEL
 		selMediaSelectionGroup, selOptions, selDisplayName          objc.SEL
 		selSelectMediaOption                                        objc.SEL
@@ -224,6 +232,7 @@ var (
 		selAddKVO, selRemoveKVO                                     objc.SEL
 		selHandleResignActive, selHandleBecomeActive                objc.SEL
 		selHandleItemEnded, selHandleItemFailed                     objc.SEL
+		selHandleItemStalled, selHandleAccessLog                    objc.SEL
 		selHandleModeSwitchStart, selHandleModeSwitchEnd            objc.SEL
 		selHandleModeSwitchSettings, selHandleAudioInterruption     objc.SEL
 
@@ -379,6 +388,8 @@ func loadTVOSPlayer() error {
 			{avLib, "AVPlayerItemDidPlayToEndTimeNotification", &n.avPlayerItemDidPlayToEndNotification},
 			{avLib, "AVPlayerItemFailedToPlayToEndTimeNotification", &n.avPlayerItemFailedToPlayNotification},
 			{avLib, "AVPlayerItemFailedToPlayToEndTimeErrorKey", &n.avPlayerItemFailedErrorKey},
+			{avLib, "AVPlayerItemPlaybackStalledNotification", &n.avPlayerItemPlaybackStalledNotification},
+			{avLib, "AVPlayerItemNewAccessLogEntryNotification", &n.avPlayerItemNewAccessLogEntryNotification},
 			{avKitLib, "AVDisplayManagerModeSwitchStartNotification", &n.avDisplayModeSwitchStartNotification},
 			{avKitLib, "AVDisplayManagerModeSwitchEndNotification", &n.avDisplayModeSwitchEndNotification},
 			{avKitLib, "AVDisplayManagerModeSwitchSettingsChangedNotification", &n.avDisplayModeSwitchSettingsNotification},
@@ -470,6 +481,7 @@ func loadTVOSPlayer() error {
 		n.selIsPlayable = sel("isPlayable")
 		n.selInitWithPixelBufferAttrs = sel("initWithPixelBufferAttributes:")
 		n.selAddOutput = sel("addOutput:")
+		n.selRemoveOutput = sel("removeOutput:")
 		n.selPause = sel("pause")
 		n.selSetRate = sel("setRate:")
 		n.selSeekToTime = sel("seekToTime:toleranceBefore:toleranceAfter:completionHandler:")
@@ -482,7 +494,16 @@ func loadTVOSPlayer() error {
 		n.selError = sel("error")
 		n.selCode = sel("code")
 		n.selTimeControlStatus = sel("timeControlStatus")
+		n.selReasonForWaitingToPlay = sel("reasonForWaitingToPlay")
 		n.selIsReadyForDisplay = sel("isReadyForDisplay")
+		n.selAccessLog = sel("accessLog")
+		n.selEvents = sel("events")
+		n.selLastObject = sel("lastObject")
+		n.selNumberOfStalls = sel("numberOfStalls")
+		n.selNumberOfDroppedVideoFrames = sel("numberOfDroppedVideoFrames")
+		n.selIndicatedBitrate = sel("indicatedBitrate")
+		n.selObservedBitrate = sel("observedBitrate")
+		n.selDurationWatched = sel("durationWatched")
 		n.selTracks = sel("tracks")
 		n.selIsEnabled = sel("isEnabled")
 		n.selAssetTrack = sel("assetTrack")
@@ -525,6 +546,8 @@ func loadTVOSPlayer() error {
 		n.selHandleBecomeActive = sel("handleBecomeActive:")
 		n.selHandleItemEnded = sel("handleItemEnded:")
 		n.selHandleItemFailed = sel("handleItemFailed:")
+		n.selHandleItemStalled = sel("handleItemStalled:")
+		n.selHandleAccessLog = sel("handleAccessLog:")
 		n.selHandleModeSwitchStart = sel("handleModeSwitchStart:")
 		n.selHandleModeSwitchEnd = sel("handleModeSwitchEnd:")
 		n.selHandleModeSwitchSettings = sel("handleModeSwitchSettings:")
@@ -576,6 +599,16 @@ func loadTVOSPlayer() error {
 			{Cmd: n.selHandleItemFailed, Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
 				if p := lookupObserver(self); p != nil {
 					p.onItemFailed(note)
+				}
+			}},
+			{Cmd: n.selHandleItemStalled, Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
+				if p := lookupObserver(self); p != nil {
+					p.onItemStalled(note)
+				}
+			}},
+			{Cmd: n.selHandleAccessLog, Fn: func(self objc.ID, _ objc.SEL, note objc.ID) {
+				if p := lookupObserver(self); p != nil {
+					p.onAccessLog(note)
 				}
 			}},
 			{Cmd: n.selHandleModeSwitchStart, Fn: func(self objc.ID, _ objc.SEL, _ objc.ID) {
@@ -750,6 +783,9 @@ type tvosPlayer struct {
 	cachedDuration         float64
 	cachedBuffer           float64
 	cachedItemStatus       int64
+	appliedForwardBuffer   float64
+	lastTimeControlStatus  int64
+	lastWaitingReason      string
 	generation             uint64
 	seekGeneration         uint64
 	idleGeneration         uint64
@@ -773,6 +809,15 @@ type tvosPlayer struct {
 	destroyed              bool
 	trace                  bool
 	errorCode              int64
+
+	audioMu         sync.Mutex
+	audioWorking    bool
+	audioDirty      bool
+	audioDesired    bool
+	audioForce      bool
+	audioSessionSet bool
+	audioSessionOn  bool
+	audioClosed     bool
 }
 
 // NewNative is owned by the UIKit main thread, including its disposal.
@@ -820,8 +865,9 @@ func tvosHEVCSupported() bool {
 func newTVOSPlayer(window objc.ID) *tvosPlayer {
 	n := &tvosNative
 	p := &tvosPlayer{
-		window: window,
-		trace:  os.Getenv("MIKUTV_NAV_TRACE") == "1",
+		window:                window,
+		trace:                 os.Getenv("MIKUTV_NAV_TRACE") == "1",
+		lastTimeControlStatus: -1,
 	}
 
 	pl := n.withObj(objc.ID(objc.GetClass("AVPlayer")), n.selPlayerWithItem, 0)
@@ -876,6 +922,8 @@ func newTVOSPlayer(window objc.ID) *tvosPlayer {
 	n.addObserverSel(center, n.selAddObserver, p.observer, n.selHandleBecomeActive, n.uiAppDidBecomeActiveNotification, 0)
 	n.addObserverSel(center, n.selAddObserver, p.observer, n.selHandleItemEnded, n.avPlayerItemDidPlayToEndNotification, 0)
 	n.addObserverSel(center, n.selAddObserver, p.observer, n.selHandleItemFailed, n.avPlayerItemFailedToPlayNotification, 0)
+	n.addObserverSel(center, n.selAddObserver, p.observer, n.selHandleItemStalled, n.avPlayerItemPlaybackStalledNotification, 0)
+	n.addObserverSel(center, n.selAddObserver, p.observer, n.selHandleAccessLog, n.avPlayerItemNewAccessLogEntryNotification, 0)
 	n.addObserverSel(center, n.selAddObserver, p.observer, n.selHandleModeSwitchStart, n.avDisplayModeSwitchStartNotification, 0)
 	n.addObserverSel(center, n.selAddObserver, p.observer, n.selHandleModeSwitchEnd, n.avDisplayModeSwitchEndNotification, 0)
 	n.addObserverSel(center, n.selAddObserver, p.observer, n.selHandleModeSwitchSettings, n.avDisplayModeSwitchSettingsNotification, 0)
@@ -890,6 +938,9 @@ func (p *tvosPlayer) destroy() {
 	}
 	n := &tvosNative
 	p.destroyed = true
+	p.audioMu.Lock()
+	p.audioClosed = true
+	p.audioMu.Unlock()
 	if p.idleHeld {
 		p.idleGeneration++
 		p.idleHeld = false
@@ -930,13 +981,71 @@ func (p *tvosPlayer) refreshMatchDisplay() {
 }
 
 func (p *tvosPlayer) activateAudioSession() {
-	n := &tvosNative
-	audio := n.getObj(objc.ID(objc.GetClass("AVAudioSession")), n.selSharedInstance)
-	if audio == 0 {
+	p.setAudioSessionActive(true, false)
+}
+
+func (p *tvosPlayer) setAudioSessionActive(active, force bool) {
+	p.audioMu.Lock()
+	if p.audioClosed {
+		p.audioMu.Unlock()
 		return
 	}
-	n.setAudioCategory(audio, n.selSetCategoryMode, n.avAudioSessionCategoryPlayback, n.avAudioSessionModeMoviePlayback, 0, 0)
-	n.setAudioActive(audio, n.selSetActive, true, 0)
+	if !force && !p.audioWorking && ((!p.audioSessionSet && !active) || (p.audioSessionSet && p.audioSessionOn == active)) {
+		p.audioMu.Unlock()
+		return
+	}
+	p.audioDesired = active
+	if force {
+		p.audioForce = true
+	}
+	p.audioDirty = true
+	if !p.audioWorking {
+		p.audioWorking = true
+		go p.drainAudioSession()
+	}
+	p.audioMu.Unlock()
+}
+
+func (p *tvosPlayer) drainAudioSession() {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	n := &tvosNative
+	for {
+		p.audioMu.Lock()
+		if p.audioClosed || !p.audioDirty {
+			p.audioWorking = false
+			p.audioMu.Unlock()
+			return
+		}
+		want := p.audioDesired
+		force := p.audioForce
+		alreadySame := !force && ((!p.audioSessionSet && !want) || (p.audioSessionSet && p.audioSessionOn == want))
+		p.audioDirty = false
+		p.audioForce = false
+		p.audioMu.Unlock()
+		if alreadySame {
+			continue
+		}
+		started := time.Now()
+		pool := n.poolPush()
+		audio := n.getObj(objc.ID(objc.GetClass("AVAudioSession")), n.selSharedInstance)
+		if audio != 0 {
+			if want {
+				n.setAudioCategory(audio, n.selSetCategoryMode, n.avAudioSessionCategoryPlayback, n.avAudioSessionModeMoviePlayback, 0, 0)
+				n.setAudioActive(audio, n.selSetActive, true, 0)
+			} else {
+				n.setAudioActiveOpts(audio, n.selSetActiveWithOptions, false, avAudioSessionDeactivateNotify, 0)
+			}
+		}
+		n.poolPop(pool)
+		p.audioMu.Lock()
+		p.audioSessionSet = true
+		p.audioSessionOn = want
+		p.audioMu.Unlock()
+		if p.trace {
+			log.Printf("player-audio-session: active=%t elapsed=%s", want, time.Since(started).Round(time.Microsecond))
+		}
+	}
 }
 
 func (p *tvosPlayer) onResignActive() {
@@ -959,7 +1068,7 @@ func (p *tvosPlayer) onBecomeActive() {
 		p.foreground = true
 		p.refreshMatchDisplay()
 		if p.fullscreen || p.preview {
-			p.activateAudioSession()
+			p.setAudioSessionActive(true, true)
 		}
 		p.applyDisplayCriteria()
 		p.applyIdle()
@@ -1013,6 +1122,67 @@ func (p *tvosPlayer) onItemFailed(note objc.ID) {
 		p.errorCode = code
 		p.cachedItemStatus = avPlayerItemStatusFailed
 		p.clearDisplayCriteria()
+	})
+}
+
+func (p *tvosPlayer) onItemStalled(note objc.ID) {
+	if !p.trace {
+		return
+	}
+	n := &tvosNative
+	item := n.getObj(note, n.selObject)
+	if item != 0 {
+		n.getObj(item, n.selRetain)
+	}
+	runOnMain(func() {
+		if item != 0 {
+			defer n.getObj(item, n.selRelease)
+		}
+		if p.destroyed || item != n.getObj(p.player, n.selCurrentItem) {
+			return
+		}
+		pos := secondsAt(n.getCMTime(p.player, n.selCurrentTime))
+		reason := goString(n.getObj(p.player, n.selReasonForWaitingToPlay))
+		log.Printf("player-stall: pos=%.2f bufEnd=%.2f bufAhead=%.2f prefBuf=%.1f reason=%q",
+			pos, p.cachedBuffer, max(0, p.cachedBuffer-pos), p.appliedForwardBuffer, reason)
+	})
+}
+
+func (p *tvosPlayer) onAccessLog(note objc.ID) {
+	if !p.trace {
+		return
+	}
+	n := &tvosNative
+	item := n.getObj(note, n.selObject)
+	if item != 0 {
+		n.getObj(item, n.selRetain)
+	}
+	runOnMain(func() {
+		if item != 0 {
+			defer n.getObj(item, n.selRelease)
+		}
+		if p.destroyed || item != n.getObj(p.player, n.selCurrentItem) {
+			return
+		}
+		accessLog := n.getObj(item, n.selAccessLog)
+		if accessLog == 0 {
+			return
+		}
+		events := n.getObj(accessLog, n.selEvents)
+		if events == 0 {
+			return
+		}
+		ev := n.getObj(events, n.selLastObject)
+		if ev == 0 {
+			return
+		}
+		log.Printf("player-access: stalls=%d droppedFrames=%d observedBps=%.0f indicatedBps=%.0f watched=%.1fs",
+			n.getInt64(ev, n.selNumberOfStalls),
+			n.getInt64(ev, n.selNumberOfDroppedVideoFrames),
+			n.getFloat64(ev, n.selObservedBitrate),
+			n.getFloat64(ev, n.selIndicatedBitrate),
+			n.getFloat64(ev, n.selDurationWatched),
+		)
 	})
 }
 
@@ -1072,7 +1242,7 @@ func (p *tvosPlayer) onAudioInterruption(note objc.ID) {
 		case avAudioSessionInterruptEnded:
 			p.audioInterrupted = false
 			if (p.fullscreen || p.preview) && p.foreground {
-				p.activateAudioSession()
+				p.setAudioSessionActive(true, true)
 				if options&avAudioSessionOptShouldResume != 0 {
 					p.applyRate()
 				}
@@ -1294,9 +1464,6 @@ func (p *tvosPlayer) inspectTracksAndDisplayCriteria() {
 		p.resolvedVideoFormat = true
 		p.applyForwardBuffer(item)
 		p.applyDisplayCriteria()
-		if p.fullscreen && !p.hdrVideo {
-			p.attachBackdropOutputIfSafe()
-		}
 	}
 }
 
@@ -1306,8 +1473,15 @@ func (p *tvosPlayer) applyForwardBuffer(item objc.ID) {
 	}
 	// Live HLS streams have an indefinite duration; let AVPlayer pick its
 	// native low-latency live window instead of forcing a 30s VOD buffer.
-	if !cmTimeIsNumeric(tvosNative.getCMTime(item, tvosNative.selDuration)) {
-		tvosNative.setFloat64(item, tvosNative.selSetPrefForwardBuffer, 0)
+	dur := secondsAt(tvosNative.getCMTime(item, tvosNative.selDuration))
+	if dur <= 0 {
+		dur = p.cachedDuration
+	}
+	if dur <= 0 {
+		if p.appliedForwardBuffer != 0 {
+			tvosNative.setFloat64(item, tvosNative.selSetPrefForwardBuffer, 0)
+			p.appliedForwardBuffer = 0
+		}
 		return
 	}
 	seconds := 30.0
@@ -1316,7 +1490,15 @@ func (p *tvosPlayer) applyForwardBuffer(item objc.ID) {
 	} else if p.hdrVideo {
 		seconds = 45.0
 	}
+	if p.appliedForwardBuffer == seconds {
+		return
+	}
 	tvosNative.setFloat64(item, tvosNative.selSetPrefForwardBuffer, seconds)
+	p.appliedForwardBuffer = seconds
+	if p.trace {
+		log.Printf("player-buffer: preferredForwardBufferDuration=%.1fs dur=%.2f hdr=%t preview=%t",
+			seconds, dur, p.hdrVideo, p.preview && !p.fullscreen)
+	}
 }
 
 func (p *tvosPlayer) attachBackdropOutputIfSafe() {
@@ -1325,14 +1507,38 @@ func (p *tvosPlayer) attachBackdropOutputIfSafe() {
 	if item == 0 || p.videoOutput != 0 || p.hdrVideo {
 		return
 	}
-	// Only attach 8-bit BGRA frame sampling to SDR items. Attaching an 8-bit
-	// AVPlayerItemVideoOutput to an HDR item forces SDR conversion and blocks
-	// tvOS hardware HDR display mode switching.
+	// Only attach 8-bit BGRA frame sampling to SDR items on demand (pause,
+	// blur overlay, or final seconds before end). Keeping it attached during
+	// active SDR playback forces continuous BGRA conversion, and attaching it
+	// to HDR items forces SDR conversion and blocks HDR display mode switching.
 	num := n.withUint32(objc.ID(objc.GetClass("NSNumber")), n.selNumberWithUnsignedInt, cvPixelFormat32BGRA)
 	attrs := n.withObj2(objc.ID(objc.GetClass("NSDictionary")), n.selDictWithObjectForKey, num, n.kCVPixelBufferPixelFormatTypeKey)
 	out := n.withObj(n.getObj(objc.ID(objc.GetClass("AVPlayerItemVideoOutput")), n.selAlloc), n.selInitWithPixelBufferAttrs, attrs)
 	setOwned(&p.videoOutput, out)
 	n.setObj(item, n.selAddOutput, p.videoOutput)
+}
+
+func (p *tvosPlayer) detachBackdropOutput() {
+	if p.videoOutput == 0 {
+		return
+	}
+	n := &tvosNative
+	if item := n.getObj(p.player, n.selCurrentItem); item != 0 {
+		n.setObj(item, n.selRemoveOutput, p.videoOutput)
+	}
+	setOwned(&p.videoOutput, 0)
+}
+
+func (p *tvosPlayer) isNearEnd() bool {
+	if p.cachedDuration <= 0 {
+		return false
+	}
+	n := &tvosNative
+	pos := p.target
+	if !p.seeking && n.getObj(p.player, n.selCurrentItem) != 0 {
+		pos = secondsAt(n.getCMTime(p.player, n.selCurrentTime))
+	}
+	return p.cachedDuration-pos <= 5.0
 }
 
 func (p *tvosPlayer) applyRate() {
@@ -1344,6 +1550,9 @@ func (p *tvosPlayer) applyRate() {
 			p.sampleBackdropAt(n.caCurrentMediaTime())
 		}
 	} else if n.getObj(p.player, n.selCurrentItem) != 0 {
+		if p.backdropRadius == 0 && !p.isNearEnd() {
+			p.detachBackdropOutput()
+		}
 		n.setFloat32(p.player, n.selSetRate, p.rate)
 	}
 }
@@ -1397,23 +1606,26 @@ func (p *tvosPlayer) clearItem() {
 	p.cachedDuration = 0
 	p.cachedBuffer = 0
 	p.cachedItemStatus = avPlayerItemStatusUnknown
+	p.appliedForwardBuffer = 0
+	p.lastTimeControlStatus = -1
+	p.lastWaitingReason = ""
 	p.nextBufferSample = 0
 	setRetained(&p.displayCriteria, 0)
+	n.setBool(p.view, n.selSetHidden, true)
+	n.getObj(p.player, n.selPause)
 	if p.asset != 0 {
 		n.getObj(p.asset, n.selCancelLoading)
 		setRetained(&p.asset, 0)
 	}
 	p.observeItem(0)
-	n.getObj(p.player, n.selPause)
+	p.detachBackdropOutput()
 	if item := n.getObj(p.player, n.selCurrentItem); item != 0 {
 		n.getObj(item, n.selCancelPendingSeeks)
 	}
 	n.setObj(p.player, n.selReplaceCurrentItem, 0)
-	setOwned(&p.videoOutput, 0)
 	p.nextBackdropSample = 0
 	setRetained(&p.backdropFrame, 0)
 	p.blurBackdrop(0)
-	n.setBool(p.view, n.selSetHidden, true)
 }
 
 func (p *tvosPlayer) sampleBackdropAt(hostTime float64) {
@@ -1441,10 +1653,13 @@ func (p *tvosPlayer) blurBackdrop(radius float64) bool {
 			n.setObj(p.backdropView, n.selSetImage, 0)
 		}
 		p.backdropRadius = 0
+		if p.rate > 0 && !p.isNearEnd() {
+			p.detachBackdropOutput()
+		}
 		return false
 	}
-	if p.backdropRadius == radius {
-		return !n.getBool(p.backdropView, n.selIsHidden)
+	if p.backdropRadius == radius && !n.getBool(p.backdropView, n.selIsHidden) {
+		return true
 	}
 	if !p.hdrVideo {
 		p.attachBackdropOutputIfSafe()
@@ -1660,6 +1875,9 @@ func (p *tvosPlayer) snapshot() Status {
 		if p.cachedDuration == 0 {
 			p.cachedDuration = secondsAt(n.getCMTime(item, n.selDuration))
 		}
+		if p.cachedDuration > 0 && p.appliedForwardBuffer == 0 {
+			p.applyForwardBuffer(item)
+		}
 		if p.errorCode == 0 {
 			if errObj := n.getObj(item, n.selError); errObj != 0 {
 				p.errorCode = n.getInt64(errObj, n.selCode)
@@ -1673,12 +1891,20 @@ func (p *tvosPlayer) snapshot() Status {
 		p.inspectTracksAndDisplayCriteria()
 	}
 	readyForDisplay := n.getBool(p.layer, n.selIsReadyForDisplay)
-	if readyForDisplay && !p.seeking && p.resolvedVideoFormat && !p.hdrVideo && p.videoOutput != 0 {
-		nearEnd := p.cachedDuration > 0 && p.cachedDuration-position <= 3.0
-		if p.backdropFrame == 0 || nearEnd {
-			if hostTime >= p.nextBackdropSample {
-				p.sampleBackdropAt(hostTime)
-				p.nextBackdropSample = hostTime + 0.5
+	nearEnd := p.cachedDuration > 0 && p.cachedDuration-position <= 5.0
+	if readyForDisplay && !p.seeking && p.resolvedVideoFormat && !p.hdrVideo {
+		needOutput := nearEnd || p.backdropRadius > 0
+		if needOutput && p.fullscreen && p.videoOutput == 0 {
+			p.attachBackdropOutputIfSafe()
+		}
+		if p.videoOutput != 0 {
+			if needOutput || p.rate == 0 {
+				if hostTime >= p.nextBackdropSample {
+					p.sampleBackdropAt(hostTime)
+					p.nextBackdropSample = hostTime + 0.5
+				}
+			} else if p.rate > 0 {
+				p.detachBackdropOutput()
 			}
 		}
 	}
@@ -1686,12 +1912,26 @@ func (p *tvosPlayer) snapshot() Status {
 	if item != 0 {
 		itemStatus = p.cachedItemStatus
 	}
+	tcs := n.getInt64(p.player, n.selTimeControlStatus)
+	if p.trace {
+		reason := ""
+		if tcs == avPlayerTimeControlWaiting {
+			reason = goString(n.getObj(p.player, n.selReasonForWaitingToPlay))
+		}
+		if tcs != p.lastTimeControlStatus || reason != p.lastWaitingReason {
+			p.lastTimeControlStatus = tcs
+			p.lastWaitingReason = reason
+			log.Printf("player-tcs: status=%d reason=%q pos=%.2f bufAhead=%.2f seeking=%t rate=%.2f prefBuf=%.1f",
+				tcs, reason, position, max(0, p.cachedBuffer-position), p.seeking, p.rate, p.appliedForwardBuffer)
+		}
+	}
 	return Status{
 		Position:            position,
 		Duration:            p.cachedDuration,
 		BufferEnd:           p.cachedBuffer,
 		HasFrame:            readyForDisplay,
-		Buffering:           item == 0 || itemStatus == avPlayerItemStatusUnknown || p.seeking || (p.rate > 0 && n.getInt64(p.player, n.selTimeControlStatus) == avPlayerTimeControlWaiting),
+		Buffering:           item == 0 || itemStatus == avPlayerItemStatusUnknown || p.seeking || (p.rate > 0 && tcs == avPlayerTimeControlWaiting),
+		Seeking:             p.seeking,
 		Ended:               p.ended,
 		Failed:              p.errorCode != 0 || (item != 0 && itemStatus == avPlayerItemStatusFailed),
 		DisplayIncompatible: p.errorCode == avErrorNoCompatibleAlternates,
@@ -1725,10 +1965,9 @@ func (p *tvosPlayer) setFullscreen(active bool) {
 	p.applyIdle()
 	p.applyRate()
 	if p.fullscreen {
-		p.activateAudioSession()
+		p.setAudioSessionActive(true, false)
 	} else if !p.preview {
-		audio := n.getObj(objc.ID(objc.GetClass("AVAudioSession")), n.selSharedInstance)
-		n.setAudioActiveOpts(audio, n.selSetActiveWithOptions, false, avAudioSessionDeactivateNotify, 0)
+		p.setAudioSessionActive(false, false)
 	}
 }
 
@@ -1737,7 +1976,7 @@ func (p *tvosPlayer) setPreview(active bool) {
 	p.preview = active
 	if !p.fullscreen {
 		if active {
-			p.activateAudioSession()
+			p.setAudioSessionActive(true, false)
 		} else {
 			n.setObj(p.layer, n.selSetVideoGravity, n.avLayerVideoGravityResizeAspect)
 			if super := n.getObj(p.view, n.selSuperview); super != 0 {
@@ -1746,8 +1985,7 @@ func (p *tvosPlayer) setPreview(active bool) {
 					n.setRect(p.view, n.selSetFrame, bounds)
 				}
 			}
-			audio := n.getObj(objc.ID(objc.GetClass("AVAudioSession")), n.selSharedInstance)
-			n.setAudioActiveOpts(audio, n.selSetActiveWithOptions, false, avAudioSessionDeactivateNotify, 0)
+			p.setAudioSessionActive(false, false)
 		}
 	}
 	p.applyRate()

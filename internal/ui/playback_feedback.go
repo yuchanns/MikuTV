@@ -112,7 +112,7 @@ func (s *playbackView) feedbackFor(c *ui.Context, state app.PlaybackState) playb
 	if s.bufferSince.IsZero() {
 		s.bufferSince = c.Now()
 	}
-	if remaining := 250*time.Millisecond - c.Now().Sub(s.bufferSince); remaining > 0 {
+	if remaining := 500*time.Millisecond - c.Now().Sub(s.bufferSince); remaining > 0 {
 		c.After(remaining)
 		return playbackFeedbackNone
 	}
