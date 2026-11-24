@@ -329,21 +329,32 @@ func syncPlayback(v *View) {
 }
 
 func (v *View) togglePlayback() {
+	if v.player.scrubbing {
+		v.player.scrubWasPlaying = true
+		v.player.finishScrub(v, true)
+		return
+	}
 	v.player.show(v)
 	v.Playback.Toggle()
 }
 
 func (s *playbackView) show(v *View) {
+	s.showAt(v, playerToggle)
+}
+
+func (s *playbackView) showAt(v *View, focus app.FocusID) {
 	if s.trick.active() {
-		v.exitPlaybackTrick(false)
+		v.exitPlaybackTrick(s.trick.wasPlaying)
 	}
 	s.trick.clearFeedback()
+	s.trick.clearScrubTap()
 	if !s.visible || v.State.Focus == playerWake {
-		v.State.Focus = playerToggle
+		s.controlFocus = focus
+		v.State.Focus = focus
 		v.reveal = true
 	}
 	s.visible = true
-	s.hideAt = time.Now().Add(playerIdle)
+	s.hideAt = s.trickNow().Add(playerIdle)
 }
 
 func (s *playbackView) restoreControl(v *View, focus app.FocusID) {
@@ -362,7 +373,7 @@ func (v *View) backFromPlayback() bool {
 		return true
 	}
 	if s.trick.active() {
-		v.exitPlaybackTrick(false)
+		v.exitPlaybackTrick(s.trick.wasPlaying)
 		return true
 	}
 	if s.feedback != playbackFeedbackNone {
@@ -370,6 +381,7 @@ func (v *View) backFromPlayback() bool {
 	}
 	if s.selectingChapter {
 		s.selectingChapter = false
+		s.trick.clearScrubTap()
 		v.State.Focus, v.reveal = playerTimeline, true
 		return true
 	}
@@ -397,6 +409,7 @@ func (v *View) backFromPlayback() bool {
 		return false
 	}
 	if s.visible && state.Clock.HasFrame && !state.Clock.Ended && state.Failure == "" {
+		s.trick.clearScrubTap()
 		s.visible = false
 		v.State.Focus, v.reveal = playerWake, true
 		return true
@@ -1001,28 +1014,23 @@ func (p *PageContext) playbackTimeline(c *ui.Context, state app.PlaybackState, t
 			if state.Duration <= 0 || state.Loading || state.Resolution.Plan.Access == provider.VideoAccessRestricted {
 				return true
 			}
-			if !s.scrubbing {
-				s.scrubbing, s.scrubWasPlaying = true, state.Playing
-				s.scrubPosition = state.Position
-				if state.Playing {
-					v.Playback.Toggle()
-				}
-			}
-			step := float64(10)
+			dir := 1
 			if direction == app.Left {
-				step = -step
+				dir = -1
 			}
-			s.scrubPosition = min(max(s.scrubPosition+step, 0), state.Duration)
+			v.stepTimelineScrub(state, dir)
 			return true
 		case app.Up:
 			chapters := state.Resolution.Plan.Chapters
 			if len(chapters) > 0 {
+				s.trick.clearScrubTap()
 				s.chapterIndex = currentPlaybackChapter(chapters, position)
 				s.selectingChapter = true
 				p.State.Focus, v.reveal = playerChapterID(s.chapterIndex), true
 			}
 			return true
 		case app.Down:
+			s.trick.clearScrubTap()
 			if s.scrubbing {
 				s.finishScrub(v, false)
 			}
@@ -1061,10 +1069,12 @@ func (p *PageContext) playbackTimeline(c *ui.Context, state app.PlaybackState, t
 }
 
 func (s *playbackView) finishScrub(v *View, confirm bool) {
+	s.trick.clearScrubTap()
 	if confirm {
 		v.Playback.Seek(s.scrubPosition)
 	}
 	s.scrubbing = false
+	s.selectingChapter = false
 	if s.scrubWasPlaying && !v.Playback.State().Playing {
 		v.Playback.Toggle()
 	}
@@ -1079,7 +1089,11 @@ func (p *PageContext) playbackWake(c *ui.Context) {
 	button := ui.Button(c.Key(string(playerWake)), "").Label(p.Assets.Text.Playback.ShowControls).
 		Absolute().Left(0).Top(0).Fill().Background(ui.Transparent).Border(0, ui.Transparent).
 		OnClick(func() { p.dispatch(func() { v.player.show(v) }) })
-	p.bindDirection(button, playerWake, playerControls, func(app.Direction) bool {
+	p.bindDirection(button, playerWake, playerControls, func(direction app.Direction) bool {
+		if direction == app.Up && !isLivePlayback(v.Playback.State(), v.player.current()) {
+			v.player.showAt(v, playerTimeline)
+			return true
+		}
 		v.player.show(v)
 		return true
 	})

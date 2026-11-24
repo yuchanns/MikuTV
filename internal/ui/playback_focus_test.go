@@ -705,7 +705,15 @@ func TestPlaybackQuickSkipAndMultiSpeedTrickPlay(t *testing.T) {
 		Ref:   provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "BV1trick"},
 		Title: "Trick Play Test",
 	}
-	source.plans <- provider.PlaybackPlan{PartID: "p1", Duration: 300, Access: provider.VideoAccessGranted}
+	source.plans <- provider.PlaybackPlan{
+		PartID:   "p1",
+		Duration: 300,
+		Access:   provider.VideoAccessGranted,
+		Chapters: []provider.PlaybackChapter{
+			{Title: "Opening", Start: 0},
+			{Title: "Main", Start: 120},
+		},
+	}
 	startAt := 60.0
 	view.context(state.Location, true, 1920, 1080).openPlayback([]playbackItem{{item: item, partID: "p1"}}, 0, true, &startAt)
 	deliver()
@@ -825,6 +833,136 @@ func TestPlaybackQuickSkipAndMultiSpeedTrickPlay(t *testing.T) {
 	if state.Page != app.Player || view.player.trick.rate != 0 || engineRate != 1.25 {
 		t.Fatalf("Escape during trick play should stay in Player at 1.25x: page=%s trick=%.1f engine=%.2f",
 			state.Page, view.player.trick.rate, engineRate)
+	}
+
+	// 9. Long-press (Repeat) from hidden controls enters slow timeline scrub instead of 2x.
+	tester.Advance(1600 * time.Millisecond)
+	posBeforeHold := clock.Position
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if !view.handlePlaybackTrickKey(ui.InputEvent{Key: ui.KeyRight, Repeat: true}) {
+		t.Fatal("expected hidden hold Right repeat to be handled")
+	}
+	tester.Frame()
+	if !view.player.visible || !view.player.scrubbing || state.Focus != playerTimeline || view.player.trick.rate != 0 || engineRate != 0 {
+		t.Fatalf("hidden hold Right should enter slow scrub on timeline: visible=%t scrubbing=%t focus=%s trick=%.1f engine=%.2f",
+			view.player.visible, view.player.scrubbing, state.Focus, view.player.trick.rate, engineRate)
+	}
+	if math.Abs(view.player.scrubPosition-(posBeforeHold+20)) > 0.2 {
+		t.Fatalf("hidden hold Right scrub position = %.1f, want %.1f", view.player.scrubPosition, posBeforeHold+20)
+	}
+	// Further repeat keeps scrubbing slowly without triggering 2x.
+	if !view.handlePlaybackTrickKey(ui.InputEvent{Key: ui.KeyRight, Repeat: true}) {
+		t.Fatal("expected timeline hold Right repeat to be handled")
+	}
+	tester.Frame()
+	if view.player.trick.rate != 0 || !view.player.scrubbing || math.Abs(view.player.scrubPosition-(posBeforeHold+30)) > 0.2 {
+		t.Fatalf("timeline hold Right should stay in slow scrub: trick=%.1f scrubbing=%t scrubPos=%.1f",
+			view.player.trick.rate, view.player.scrubbing, view.player.scrubPosition)
+	}
+	// A single tap immediately after releasing a hold does not falsely trigger 2x.
+	tester.Advance(150 * time.Millisecond)
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if view.player.trick.rate != 0 || !view.player.scrubbing {
+		t.Fatalf("single tap right after hold should not enter 2x: trick=%.1f scrubbing=%t",
+			view.player.trick.rate, view.player.scrubbing)
+	}
+	// Space confirms slow scrub and resumes normal 1.25x playback.
+	tester.Key(0, ui.KeySpace)
+	tester.Frame()
+	if view.player.scrubbing || !view.Playback.State().Playing || engineRate != 1.25 {
+		t.Fatalf("Space should commit slow scrub and resume 1.25x: scrubbing=%t playing=%t engine=%.2f",
+			view.player.scrubbing, view.Playback.State().Playing, engineRate)
+	}
+
+	// 10. Spaced taps (>550ms) on visible playerTimeline stay in slow scrub (no 2x).
+	tester.Advance(700 * time.Millisecond)
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	tester.Advance(700 * time.Millisecond)
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if !view.player.scrubbing || view.player.trick.rate != 0 {
+		t.Fatalf("spaced taps on timeline should stay in slow scrub: scrubbing=%t trick=%.1f",
+			view.player.scrubbing, view.player.trick.rate)
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+
+	// 11. Double-tap Right on visible playerTimeline cancels scrub, hides full controls, enters +2x -> +4x, Escape resumes 1.25x.
+	tester.Advance(700 * time.Millisecond)
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if !view.player.scrubbing || view.player.trick.rate != 0 {
+		t.Fatalf("first timeline Right tap should start scrub: scrubbing=%t trick=%.1f", view.player.scrubbing, view.player.trick.rate)
+	}
+	tester.Advance(200 * time.Millisecond)
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if view.player.visible || view.player.scrubbing || state.Focus != playerWake || view.player.trick.rate != 2 || engineRate != 2 {
+		t.Fatalf("double-tap Right on timeline should enter +2x with hidden controls: visible=%t scrubbing=%t focus=%s trick=%.1f engine=%.2f",
+			view.player.visible, view.player.scrubbing, state.Focus, view.player.trick.rate, engineRate)
+	}
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	if view.player.trick.rate != 4 || engineRate != 0 {
+		t.Fatalf("third Right tap from timeline +2x should step to +4x: trick=%.1f engine=%.2f", view.player.trick.rate, engineRate)
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if view.player.trick.rate != 0 || !view.Playback.State().Playing || engineRate != 1.25 {
+		t.Fatalf("Escape after timeline +4x should resume 1.25x: trick=%.1f playing=%t engine=%.2f",
+			view.player.trick.rate, view.Playback.State().Playing, engineRate)
+	}
+
+	// 12. KeyUp from hidden controls jumps directly to playerTimeline (exposing chapters);
+	//     a second KeyUp enters chapter selection, Escape returns to timeline, and double-tap Left enters -2x rewind.
+	tester.Key(0, ui.KeyUp)
+	tester.Frame()
+	if !view.player.visible || state.Focus != playerTimeline {
+		t.Fatalf("KeyUp from hidden controls should focus playerTimeline: visible=%t focus=%s", view.player.visible, state.Focus)
+	}
+	tester.Key(0, ui.KeyUp)
+	tester.Frame()
+	if !view.player.selectingChapter {
+		t.Fatalf("second KeyUp from playerTimeline should enter chapter selection: focus=%s", state.Focus)
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if view.player.selectingChapter || state.Focus != playerTimeline {
+		t.Fatalf("Escape from chapters should return to playerTimeline: selecting=%t focus=%s", view.player.selectingChapter, state.Focus)
+	}
+	// Scrub -> Up into chapter selection -> Space commits scrub AND clears selectingChapter so timeline double-tap works immediately.
+	tester.Advance(700 * time.Millisecond)
+	tester.Key(0, ui.KeyRight)
+	tester.Frame()
+	tester.Key(0, ui.KeyUp)
+	tester.Frame()
+	if !view.player.scrubbing || !view.player.selectingChapter {
+		t.Fatalf("expected scrubbing + selectingChapter before Space: scrubbing=%t selecting=%t", view.player.scrubbing, view.player.selectingChapter)
+	}
+	tester.Key(0, ui.KeySpace)
+	tester.Frame()
+	if view.player.scrubbing || view.player.selectingChapter || state.Focus != playerTimeline || !view.Playback.State().Playing {
+		t.Fatalf("Space during scrub+chapters should clear both and resume on timeline: scrubbing=%t selecting=%t focus=%s playing=%t",
+			view.player.scrubbing, view.player.selectingChapter, state.Focus, view.Playback.State().Playing)
+	}
+	tester.Advance(700 * time.Millisecond)
+	tester.Key(0, ui.KeyLeft)
+	tester.Frame()
+	tester.Advance(200 * time.Millisecond)
+	tester.Key(0, ui.KeyLeft)
+	tester.Frame()
+	if view.player.visible || view.player.scrubbing || state.Focus != playerWake || view.player.trick.rate != -2 || engineRate != 0 {
+		t.Fatalf("double-tap Left on timeline should enter -2x rewind: visible=%t scrubbing=%t focus=%s trick=%.1f engine=%.2f",
+			view.player.visible, view.player.scrubbing, state.Focus, view.player.trick.rate, engineRate)
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if view.player.trick.rate != 0 || !view.Playback.State().Playing || engineRate != 1.25 {
+		t.Fatalf("Escape after timeline -2x rewind should resume 1.25x: trick=%.1f playing=%t engine=%.2f",
+			view.player.trick.rate, view.Playback.State().Playing, engineRate)
 	}
 }
 
