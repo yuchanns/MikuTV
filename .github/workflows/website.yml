@@ -6,11 +6,13 @@ on:
       - main
     paths:
       - 'website/**'
+      - '.github/workflows/website.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'website/**'
+      - '.github/workflows/website.yml'
   workflow_dispatch:
 
 permissions:
@@ -57,10 +59,14 @@ jobs:
             fi
             sleep 1
           done
-          curl --fail --silent http://127.0.0.1:8789/ | grep -q "MikuTV"
-          curl --fail --silent http://127.0.0.1:8789/plugins/ | grep -q "mikutv-plugin"
-          curl --fail --silent http://127.0.0.1:8789/develop/ | grep -q "plugin.json"
-          curl --fail --silent http://127.0.0.1:8789/api/plugins | grep -q '"topic":"mikutv-plugin"'
+          home_html="$(curl --fail --silent http://127.0.0.1:8789/)"
+          grep -q "MikuTV" <<<"$home_html"
+          plugins_html="$(curl --fail --silent http://127.0.0.1:8789/plugins/)"
+          grep -q "mikutv-plugin" <<<"$plugins_html"
+          develop_html="$(curl --fail --silent http://127.0.0.1:8789/develop/)"
+          grep -q "plugin.json" <<<"$develop_html"
+          api_json="$(curl --fail --silent http://127.0.0.1:8789/api/plugins)"
+          grep -q '"topic":"mikutv-plugin"' <<<"$api_json"
 
       - uses: actions/upload-artifact@v7
         with:
