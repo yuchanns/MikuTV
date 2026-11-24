@@ -49,7 +49,7 @@ const softwareLd =
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#080b11" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     {page !== '404' && (
       <>
@@ -69,12 +69,6 @@ const softwareLd =
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content="https://mikutv.yuchanns.dev/images/appearance-day-night.jpg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
     {softwareLd && <script type="application/ld+json" set:html={softwareLd} />}
     <ClientRouter />
   </head>

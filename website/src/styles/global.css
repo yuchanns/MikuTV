@@ -1,25 +1,38 @@
 /* ==========================================================================
-   MikuTV — Black Living Room System
-   The room is dark. The screen is the only light source.
-   Zero rounded cards, zero box-shadows, zero decorative glow, zero backdrop-filter.
+   MikuTV — Native tvOS Design System (Aligned with MikuTV Prototype & Theme)
+   Canvas #080B11 · Panel #111723 · Focus #F4F6FA / #111722 · Accent #39C5BB
    ========================================================================== */
 
 :root {
-  --dusk: #16130f;
-  --room: #000000;
-  --shelf: #0c0c0d;
-  --line: rgb(255 255 255 / 0.1);
-  --line-strong: rgb(255 255 255 / 0.22);
-  --ink: #edeae4;
-  --ink-2: #8a8782;
+  color-scheme: dark;
+  --canvas: #080b11;
+  --rail: #07090e;
+  --panel: #111723;
+  --raised: #192332;
+  --input: #101620;
+  --line: rgb(255 255 255 / 0.09);
+  --line-strong: rgb(255 255 255 / 0.18);
+  --ink: #f4f5f8;
+  --ink-2: #a7b2c1;
+  --muted: #8e99aa;
+  --focus-bg: #f4f5f8;
+  --focus-ring: #f4f6fa;
+  --focus-ink: #111722;
+  --glass: rgb(255 255 255 / 0.075);
+  --glass-hover: rgb(255 255 255 / 0.13);
+  --glass-border: rgb(255 255 255 / 0.14);
   --leek: #39c5bb;
+  --accent-soft: #96e2d9;
+  --accent-strong: #299e95;
 
-  --font-display: 'Hanken Grotesk', 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-body: 'Hanken Grotesk', 'PingFang SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Exact MikuTV tvOS & prototype system font stack (SF Pro + PingFang SC) */
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   --gutter: clamp(20px, 4vw, 56px);
-  --nav-h: 64px;
+  --nav-h: 68px;
 }
 
 *,
@@ -29,7 +42,7 @@
 }
 
 html {
-  background: var(--dusk);
+  background-color: var(--canvas);
   color: var(--ink);
   font-family: var(--font-body);
   font-size: 16px;
@@ -39,46 +52,24 @@ html {
   text-rendering: optimizeLegibility;
 }
 
-/* The living room darkens from warm dusk (#16130F) to pure black (#000000) as evening deepens */
-@keyframes darken-room {
-  0% {
-    background-color: var(--dusk);
-  }
-  38% {
-    background-color: #080706;
-  }
-  52%,
-  100% {
-    background-color: var(--room);
-  }
-}
-
 body {
   margin: 0;
   min-height: 100vh;
-  background-color: var(--room);
+  background-color: var(--canvas);
+  background-image: radial-gradient(ellipse 80% 55% at 72% 8%, rgb(19 54 80 / 0.16), transparent 72%);
+  background-attachment: fixed;
   color: var(--ink);
   overflow-x: clip;
   line-height: 1.68;
+  font-variant-numeric: tabular-nums;
 }
 
 main {
   overflow-x: clip;
 }
 
-body.page-home {
-  background-color: var(--dusk);
-}
-
-@supports (animation-timeline: scroll()) {
-  body.page-home {
-    animation: darken-room linear both;
-    animation-timeline: scroll(root block);
-  }
-}
-
 html[lang='zh-Hans'] body {
-  line-height: 1.9;
+  line-height: 1.88;
 }
 
 a {
@@ -93,6 +84,7 @@ button {
   border: none;
   padding: 0;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 img,
@@ -106,17 +98,82 @@ pre {
   font-family: var(--font-mono);
 }
 
-/* Monospace label voice — timecodes, spec plates, metadata */
+/* MikuTV tvOS metadata & eyebrow voice (app.css .eyebrow / .mini-label) */
 .mono {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9aa9bb;
+  font-variant-numeric: tabular-nums;
+}
+
+.moment__rule .mono:first-child,
+.spec-plate > .mono,
+.install-left > .mono:first-child,
+.manual-sec > .mono,
+.moment-fullbleed__head .rule-top .mono:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 13px;
+  color: #aebccd;
+  letter-spacing: 0.2em;
+}
+
+.moment__rule .mono:first-child::before,
+.spec-plate > .mono::before,
+.install-left > .mono:first-child::before,
+.manual-sec > .mono::before,
+.moment-fullbleed__head .rule-top .mono:first-child::before {
+  content: '';
+  width: 22px;
+  height: 1px;
+  background: var(--accent-soft);
+  flex: none;
+}
+
+.code-block__head .mono,
+.site-footer > .mono {
   font-family: var(--font-mono);
   font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-2);
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
+.site-footer > .mono {
+  color: #8e99aa;
+}
+
+.cat-status .mono,
+.cat-empty.mono,
+.install-left p.mono,
+.nameplate-pair figcaption.mono,
+.manual-figure figcaption.mono {
+  text-transform: none;
+  letter-spacing: 0.03em;
+  font-size: 0.85rem;
+  font-weight: 450;
+  color: #8e99aa;
+}
+
+.cat-status a.mono {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+  color: var(--accent-soft);
+  border-bottom: 1px solid rgb(150 226 217 / 0.45);
+  padding-bottom: 2px;
+  transition: color 0.18s var(--ease), border-color 0.18s var(--ease);
+}
+
+.cat-status a.mono:hover {
+  color: #ffffff;
+  border-bottom-color: #ffffff;
 }
 
 /* ==========================================================================
-   Navigation — Sparse Left Wordmark, Right Monospace Index
+   Navigation — Frosted tvOS Top Bar & Rounded Tab Pills
    ========================================================================== */
 
 .site-nav {
@@ -129,56 +186,85 @@ pre {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  background: rgb(12 10 9 / 0.92);
-  border-bottom: 1px solid var(--line);
-}
-
-body:not(.page-home) .site-nav {
-  background: rgb(0 0 0 / 0.94);
+  background: rgb(7 9 14 / 0.82);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
 }
 
 .brand-mark {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 1rem;
-  letter-spacing: -0.02em;
+  font-size: 1.04rem;
+  letter-spacing: 0.04em;
   color: var(--ink);
   white-space: nowrap;
 }
 
 .brand-mark img {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
 }
 
 .nav-rail {
   display: flex;
   align-items: center;
-  gap: clamp(16px, 2.4vw, 30px);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
 }
 
 .nav-rail a {
-  color: var(--ink-2);
-  padding: 4px 0;
-  border-bottom: 1px solid transparent;
+  position: relative;
+  color: #a4a9b4;
+  padding: 8px 15px;
+  border-radius: 999px;
   white-space: nowrap;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition: color 0.18s var(--ease), background-color 0.18s var(--ease);
 }
 
 .nav-rail a:hover {
   color: var(--ink);
+  background: rgb(255 255 255 / 0.09);
 }
 
 .nav-rail a.is-active {
-  color: var(--ink);
-  border-bottom-color: var(--leek);
+  color: #ffffff;
+  background: rgb(255 255 255 / 0.09);
+}
+
+.nav-rail a.is-active::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 3px;
+  width: 16px;
+  height: 2.5px;
+  border-radius: 4px;
+  background: var(--leek);
+}
+
+.nav-rail a[aria-label='Switch language'] {
+  margin-left: 4px;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  background: rgb(8 11 17 / 0.65);
+  padding: 6px 14px;
+  font-family: var(--font-body);
+  font-size: 0.84rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #bbc4ce;
+}
+
+.nav-rail a[aria-label='Switch language']:hover {
+  background: var(--focus-bg);
+  border-color: var(--focus-bg);
+  color: var(--focus-ink);
 }
 
 /* ==========================================================================
@@ -222,8 +308,8 @@ body:not(.page-home) .site-nav {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  filter: blur(84px) saturate(1.22);
-  opacity: 0.34;
+  filter: blur(84px) saturate(1.2);
+  opacity: 0.3;
   transform: scale(1.18);
 }
 
@@ -233,7 +319,7 @@ body:not(.page-home) .site-nav {
 }
 
 .hero-spill video.is-ready {
-  opacity: 0.34;
+  opacity: 0.3;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -247,9 +333,11 @@ body:not(.page-home) .site-nav {
   z-index: 1;
   aspect-ratio: 16 / 9;
   width: 100%;
-  background: #000000;
-  outline: 1px solid var(--line);
-  border-radius: 0;
+  background: #0b0f17;
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-right: none;
+  border-radius: 18px 0 0 18px;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.52);
   overflow: hidden;
 }
 
@@ -274,7 +362,7 @@ body:not(.page-home) .site-nav {
 .hero-tv-caption {
   position: relative;
   z-index: 2;
-  margin-top: 12px;
+  margin-top: 14px;
   padding-right: 6vw;
   display: flex;
   align-items: center;
@@ -283,20 +371,30 @@ body:not(.page-home) .site-nav {
 }
 
 .sound-toggle {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-  border-bottom: 1px solid var(--line-strong);
-  padding-bottom: 2px;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: #d2dae4;
+  padding: 7px 16px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(255 255 255 / 0.15);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transition: color 0.18s var(--ease), border-color 0.18s var(--ease), background-color 0.18s var(--ease);
 }
 
-.sound-toggle:hover,
+.sound-toggle:hover {
+  color: var(--focus-ink);
+  background: var(--focus-bg);
+  border-color: var(--focus-bg);
+}
+
 .sound-toggle[aria-pressed='true'] {
-  color: var(--ink);
-  border-bottom-color: var(--leek);
+  color: var(--accent-soft);
+  border-color: rgb(57 197 187 / 0.45);
+  background: rgb(57 197 187 / 0.14);
 }
 
 .hero-copy-col {
@@ -310,71 +408,95 @@ body:not(.page-home) .site-nav {
 }
 
 .display-title {
-  margin: 0 0 26px;
+  margin: 0 0 24px;
   font-family: var(--font-display);
-  font-weight: 600;
-  font-size: clamp(2.6rem, 6.2vw, 6rem);
-  line-height: 1.02;
-  letter-spacing: -0.035em;
+  font-weight: 650;
+  font-size: clamp(2.6rem, 6vw, 5.5rem);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
   color: var(--ink);
+  text-shadow: 0 2px 36px rgb(0 0 0 / 0.35);
 }
 
 html[lang='zh-Hans'] .display-title {
-  font-size: clamp(2.3rem, 5.4vw, 5.2rem);
-  letter-spacing: -0.025em;
-  line-height: 1.12;
+  font-size: clamp(2.3rem, 5vw, 4.75rem);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1.18;
 }
 
 .hero-lead {
-  margin: 0 0 34px;
-  max-width: 31em;
+  margin: 0 0 32px;
+  max-width: 32em;
   font-size: 1.0625rem;
-  color: var(--ink);
-  opacity: 0.88;
+  color: #aeb5c2;
 }
 
 .hero-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 28px;
+  gap: 14px;
 }
 
-/* Primary focus-invert action (square, 0px radius — pure tvOS focus language) */
+/* Exact MikuTV tvOS Hero Actions (Radius 12, frosted glass + crisp #F4F5F8 focus state) */
 .action-solid {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  padding: 13px 24px;
-  border-radius: 0;
-  background: var(--ink);
-  color: #000000;
-  font-size: 0.94rem;
+  height: 48px;
+  padding: 0 24px;
+  border-radius: 12px;
+  background: var(--focus-bg);
+  color: var(--focus-ink);
+  font-size: 0.95rem;
   font-weight: 600;
-  letter-spacing: -0.01em;
-  border: 1px solid var(--ink);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  letter-spacing: 0.01em;
+  border: 1px solid var(--focus-bg);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.36);
+  transition: transform 0.22s var(--ease), background-color 0.18s var(--ease), box-shadow 0.22s var(--ease);
 }
 
 .action-solid:hover {
   background: #ffffff;
   border-color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 3px rgb(244 246 250 / 0.24), 0 12px 34px rgb(0 0 0 / 0.48);
+}
+
+.action-solid:active {
+  transform: scale(0.97);
 }
 
 .action-link {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding-bottom: 4px;
-  font-size: 0.94rem;
-  font-weight: 500;
-  color: var(--ink);
-  border-bottom: 1px solid var(--leek);
-  transition: opacity 0.15s ease;
+  justify-content: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 22px;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-weight: 550;
+  color: #dce2e9;
+  background: rgb(255 255 255 / 0.08);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transition: transform 0.22s var(--ease), background-color 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.22s var(--ease);
 }
 
 .action-link:hover {
-  opacity: 0.78;
+  background: var(--focus-bg);
+  border-color: var(--focus-bg);
+  color: var(--focus-ink);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.42);
+}
+
+.action-link:active {
+  transform: scale(0.97);
 }
 
 /* ==========================================================================
@@ -382,7 +504,7 @@ html[lang='zh-Hans'] .display-title {
    ========================================================================== */
 
 .band {
-  padding: clamp(96px, 16vh, 180px) var(--gutter) 0;
+  padding: clamp(92px, 15vh, 170px) var(--gutter) 0;
 }
 
 .band-tight {
@@ -401,7 +523,7 @@ html[lang='zh-Hans'] .display-title {
   align-items: start;
 }
 
-/* 01 Statement — H2 scale directly as quiet prose */
+/* Statement prose */
 .statement-prose {
   grid-column: 1 / 9;
 }
@@ -409,11 +531,16 @@ html[lang='zh-Hans'] .display-title {
 .statement-prose p {
   margin: 0 0 1.15em;
   font-family: var(--font-display);
-  font-weight: 500;
-  font-size: clamp(1.65rem, 3.1vw, 2.9rem);
-  line-height: 1.24;
-  letter-spacing: -0.025em;
+  font-weight: 550;
+  font-size: clamp(1.55rem, 2.9vw, 2.65rem);
+  line-height: 1.32;
+  letter-spacing: -0.015em;
   color: var(--ink);
+}
+
+html[lang='zh-Hans'] .statement-prose p {
+  letter-spacing: 0.02em;
+  line-height: 1.42;
 }
 
 .statement-prose p:last-child {
@@ -422,11 +549,11 @@ html[lang='zh-Hans'] .display-title {
 }
 
 /* ==========================================================================
-   02 One Evening — Four Timecoded Moments
+   Feature Moments (Real Apple TV 4K Captures)
    ========================================================================== */
 
 .moment {
-  padding: clamp(88px, 15vh, 170px) 0 0 var(--gutter);
+  padding: clamp(84px, 14vh, 160px) 0 0 var(--gutter);
   overflow-x: clip;
 }
 
@@ -456,21 +583,22 @@ html[lang='zh-Hans'] .display-title {
   margin: 0 0 18px;
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: clamp(1.85rem, 3.6vw, 3.4rem);
-  line-height: 1.08;
-  letter-spacing: -0.03em;
+  font-size: clamp(1.85rem, 3.3vw, 3.1rem);
+  line-height: 1.16;
+  letter-spacing: -0.018em;
   color: var(--ink);
 }
 
 html[lang='zh-Hans'] .moment__title {
-  line-height: 1.16;
-  letter-spacing: -0.02em;
+  font-weight: 550;
+  line-height: 1.25;
+  letter-spacing: 0.025em;
 }
 
 .moment__body {
   margin: 0;
   max-width: 34em;
-  font-size: 1.0625rem;
+  font-size: 1.04rem;
   color: var(--ink-2);
 }
 
@@ -482,8 +610,11 @@ html[lang='zh-Hans'] .moment__title {
   grid-column: 5 / -1;
   position: relative;
   margin-right: -4vw;
-  outline: 1px solid var(--line);
-  background: #000000;
+  border: 1px solid rgb(255 255 255 / 0.11);
+  border-right: none;
+  border-radius: 16px 0 0 16px;
+  background: #111723;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.42);
   overflow: hidden;
 }
 
@@ -493,12 +624,12 @@ html[lang='zh-Hans'] .moment__title {
   display: block;
 }
 
-/* 18:47 Sunset Diagonal Wipe (theme-picker-light -> theme-picker-dark) */
+/* Day / Night Diagonal Wipe (theme-picker-light -> theme-picker-dark) */
 .sunset-wipe {
   position: relative;
   aspect-ratio: 16 / 9;
   width: 100%;
-  background: #000000;
+  background: #080b11;
   overflow: hidden;
   cursor: ew-resize;
   user-select: none;
@@ -535,7 +666,7 @@ html[lang='zh-Hans'] .moment__title {
   }
 }
 
-/* 19:30 Offset Layered Pair (sidebar/home + movie wall) */
+/* Offset Layered Pair (sidebar/home + movie wall) */
 .screen-overlap {
   grid-column: 5 / -1;
   position: relative;
@@ -545,8 +676,11 @@ html[lang='zh-Hans'] .moment__title {
 
 .screen-overlap__back {
   width: 82%;
-  outline: 1px solid var(--line);
-  background: #000000;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 16px;
+  overflow: hidden;
+  background: #111723;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
 }
 
 .screen-overlap__front {
@@ -554,13 +688,17 @@ html[lang='zh-Hans'] .moment__title {
   right: 0;
   bottom: 0;
   width: 68%;
-  outline: 1px solid var(--line-strong);
-  background: #000000;
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-right: none;
+  border-radius: 16px 0 0 16px;
+  overflow: hidden;
+  background: #111723;
+  box-shadow: -16px -8px 48px rgb(0 0 0 / 0.6);
 }
 
-/* 21:04 Full-bleed 100vw Playback Frame */
+/* Full-bleed Playback Frame */
 .moment-fullbleed {
-  padding-top: clamp(88px, 15vh, 170px);
+  padding-top: clamp(84px, 14vh, 160px);
 }
 
 .moment-fullbleed__head {
@@ -569,14 +707,14 @@ html[lang='zh-Hans'] .moment__title {
 }
 
 .moment-fullbleed__copy {
-  max-width: 34em;
+  max-width: 36em;
 }
 
 .fullbleed-frame {
   width: 100%;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  background: #000000;
+  background: #010306;
 }
 
 .fullbleed-frame img {
@@ -587,52 +725,56 @@ html[lang='zh-Hans'] .moment__title {
 }
 
 /* ==========================================================================
-   Focus = Hover Interactive Ledger (Pure tvOS Focus Inversion)
+   MikuTV tvOS Settings / Option Rows (.setting-row + .focusable:focus feel)
    ========================================================================== */
 
 .ledger {
-  margin-top: 28px;
-  border-top: 1px solid var(--line);
+  margin-top: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .ledger-row {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);
   gap: 18px;
-  padding: 14px 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 15px 18px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 13px;
+  background: rgb(255 255 255 / 0.035);
   align-items: baseline;
-  transition: background-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
+  transition: background-color 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.22s var(--ease);
 }
 
 .ledger-row__k {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-2);
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  font-weight: 550;
+  letter-spacing: 0.03em;
+  color: var(--accent-soft);
+  transition: color 0.18s var(--ease);
 }
 
 .ledger-row__v {
   color: var(--ink);
-  font-size: 0.96rem;
-}
-
-.ledger--interactive:has(.ledger-row:hover) .ledger-row:not(:hover) {
-  opacity: 0.42;
+  font-size: 0.95rem;
+  transition: color 0.18s var(--ease);
 }
 
 .ledger--interactive .ledger-row:hover {
-  background: var(--ink);
-  color: #000000;
+  background: var(--focus-bg);
+  border-color: var(--focus-bg);
+  color: var(--focus-ink);
+  box-shadow: 0 8px 34px rgb(0 0 0 / 0.42);
 }
 
 .ledger--interactive .ledger-row:hover .ledger-row__k,
 .ledger--interactive .ledger-row:hover .ledger-row__v {
-  color: #000000;
+  color: var(--focus-ink);
 }
 
-/* 03 Plugins Fill-In Band */
+/* 05 Plugins Band */
 .fill-left {
   grid-column: 1 / 6;
 }
@@ -640,16 +782,21 @@ html[lang='zh-Hans'] .moment__title {
 .fill-right {
   grid-column: 6 / -1;
   margin-right: -4vw;
-  outline: 1px solid var(--line);
-  background: #000000;
+  border: 1px solid rgb(255 255 255 / 0.11);
+  border-right: none;
+  border-radius: 16px 0 0 16px;
+  overflow: hidden;
+  background: #111723;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.42);
 }
 
-/* 04 Hardware Nameplate */
+/* 06 Architecture Spec Card (Exact app.css .stat-card glass surface) */
 .spec-plate {
   grid-column: 1 / 7;
-  background: var(--shelf);
-  border: 1px solid var(--line);
-  padding: 28px 28px 18px;
+  background: linear-gradient(140deg, rgb(255 255 255 / 0.055), rgb(255 255 255 / 0.015));
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 18px;
+  padding: 30px 30px 20px;
 }
 
 .spec-plate__list {
@@ -661,9 +808,9 @@ html[lang='zh-Hans'] .moment__title {
   display: grid;
   grid-template-columns: 112px minmax(0, 1fr);
   gap: 16px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 0.92rem;
+  padding: 13px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
+  font-size: 0.93rem;
 }
 
 .spec-plate__row:last-child {
@@ -671,11 +818,11 @@ html[lang='zh-Hans'] .moment__title {
 }
 
 .spec-plate__row dt {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-2);
+  font-family: var(--font-body);
+  font-size: 0.86rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #8e99aa;
 }
 
 .spec-plate__row dd {
@@ -687,7 +834,7 @@ html[lang='zh-Hans'] .moment__title {
   grid-column: 8 / 13;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
   align-self: end;
 }
 
@@ -699,14 +846,16 @@ html[lang='zh-Hans'] .moment__title {
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: cover;
-  outline: 1px solid var(--line);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 13px;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.35);
 }
 
 .nameplate-pair figcaption {
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
-/* 05 Install Honest Ledger */
+/* 07 Installation Ledger */
 .install-left {
   grid-column: 1 / 6;
 }
@@ -716,50 +865,54 @@ html[lang='zh-Hans'] .moment__title {
 }
 
 .file-ledger {
-  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .file-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 18px 14px;
-  border-bottom: 1px solid var(--line);
-  transition: background-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
+  padding: 18px 20px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 13px;
+  background: rgb(255 255 255 / 0.035);
+  transition: background-color 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.22s var(--ease);
 }
 
 .file-row__name {
   font-family: var(--font-mono);
   font-size: 0.94rem;
   color: var(--ink);
+  transition: color 0.18s var(--ease);
 }
 
 .file-row__note {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  color: var(--ink-2);
+  font-family: var(--font-body);
+  font-size: 0.84rem;
+  letter-spacing: 0.01em;
+  color: var(--muted);
   text-align: right;
-}
-
-.file-ledger:has(.file-row:hover) .file-row:not(:hover) {
-  opacity: 0.42;
+  transition: color 0.18s var(--ease);
 }
 
 .file-row:hover {
-  background: var(--ink);
-  color: #000000;
+  background: var(--focus-bg);
+  border-color: var(--focus-bg);
+  color: var(--focus-ink);
+  box-shadow: 0 8px 34px rgb(0 0 0 / 0.42);
 }
 
 .file-row:hover .file-row__name,
 .file-row:hover .file-row__note {
-  color: #000000;
+  color: var(--focus-ink);
 }
 
-/* 06 Closing */
+/* Closing */
 .closing {
-  padding: clamp(120px, 22vh, 220px) var(--gutter) clamp(120px, 22vh, 240px);
+  padding: clamp(110px, 20vh, 200px) var(--gutter) clamp(110px, 20vh, 210px);
 }
 
 .closing .display-title {
@@ -767,59 +920,73 @@ html[lang='zh-Hans'] .moment__title {
 }
 
 /* ==========================================================================
-   /plugins/ — Printed Specimen Catalogue (Rows, Never Cards)
+   /plugins/ — MikuTV Discover Catalogue (tvOS Category Chips + Setting Rows)
    ========================================================================== */
 
 .page-header {
-  padding: clamp(64px, 10vh, 110px) var(--gutter) 36px;
+  padding: clamp(64px, 10vh, 104px) var(--gutter) 32px;
 }
 
 .page-header h1 {
   margin: 0 0 14px;
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: clamp(2.4rem, 5.2vw, 4.6rem);
-  line-height: 1.06;
-  letter-spacing: -0.03em;
+  font-size: clamp(2.25rem, 4.5vw, 4rem);
+  line-height: 1.14;
+  letter-spacing: -0.018em;
+}
+
+html[lang='zh-Hans'] .page-header h1 {
+  font-weight: 550;
+  letter-spacing: 0.03em;
 }
 
 .page-header__lead {
   margin: 0;
   max-width: 52em;
-  font-size: 1rem;
+  font-size: 1.02rem;
   color: var(--ink-2);
 }
 
 .catalogue-controls {
-  padding: 0 var(--gutter) 20px;
+  padding: 0 var(--gutter) 22px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
 }
 
+/* Exact app.css .category-chips & .chip */
 .cat-filters {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 24px;
-  font-size: 0.96rem;
+  gap: 10px;
+  font-size: 0.92rem;
 }
 
 .cat-filter {
-  padding: 6px 0;
-  color: var(--ink-2);
-  border-bottom: 1.5px solid transparent;
-  transition: color 0.14s ease, border-color 0.14s ease;
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 999px;
+  color: #aab4c3;
+  background: rgb(255 255 255 / 0.04);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  transition: color 0.18s var(--ease), background-color 0.18s var(--ease), border-color 0.18s var(--ease);
 }
 
 .cat-filter:hover {
   color: var(--ink);
+  background: rgb(255 255 255 / 0.11);
+  border-color: rgb(255 255 255 / 0.22);
 }
 
 .cat-filter.is-active {
-  color: var(--ink);
-  border-bottom-color: var(--leek);
+  color: #111824;
+  background: #e4eaf2;
+  border-color: #e4eaf2;
+  font-weight: 600;
 }
 
 .cat-search-group {
@@ -829,24 +996,27 @@ html[lang='zh-Hans'] .moment__title {
 }
 
 .cat-search {
-  width: 240px;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--line-strong);
-  padding: 6px 2px;
+  width: 268px;
+  height: 42px;
+  background: var(--input);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  padding: 0 16px;
   color: var(--ink);
   font: inherit;
   font-size: 0.9rem;
   outline: none;
-  border-radius: 0;
+  border-radius: 12px;
+  transition: border-color 0.18s var(--ease), box-shadow 0.18s var(--ease), background-color 0.18s var(--ease);
 }
 
 .cat-search:focus {
-  border-bottom-color: var(--leek);
+  border-color: var(--focus-ring);
+  background: #141c29;
+  box-shadow: 0 0 0 3px rgb(244 246 250 / 0.18);
 }
 
 .cat-search::placeholder {
-  color: var(--ink-2);
+  color: var(--muted);
 }
 
 .cat-status {
@@ -863,58 +1033,65 @@ html[lang='zh-Hans'] .moment__title {
 }
 
 .cat-list {
-  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .cat-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1.15fr) minmax(220px, 2.2fr) minmax(130px, 0.9fr) 96px 112px;
+  grid-template-columns: minmax(160px, 1.15fr) minmax(220px, 2.2fr) minmax(130px, 0.9fr) 96px 116px;
   gap: 20px;
-  padding: 18px 14px;
-  border-bottom: 1px solid var(--line);
+  padding: 18px 20px;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.035);
   align-items: center;
-  transition: background-color 0.14s ease, color 0.14s ease, opacity 0.14s ease;
-}
-
-.cat-list:has(.cat-row:hover) .cat-row:not(:hover) {
-  opacity: 0.42;
+  transition: background-color 0.18s var(--ease), color 0.18s var(--ease), border-color 0.18s var(--ease), box-shadow 0.22s var(--ease);
 }
 
 .cat-row:hover {
-  background: var(--ink);
-  color: #000000;
+  background: var(--focus-bg);
+  border-color: var(--focus-bg);
+  color: var(--focus-ink);
+  box-shadow: 0 10px 36px rgb(0 0 0 / 0.45);
 }
 
 .cat-row__name {
   font-weight: 600;
   font-size: 1rem;
   color: var(--ink);
+  transition: color 0.18s var(--ease);
 }
 
 .cat-row__repo {
   display: block;
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.04em;
-  color: var(--ink-2);
-  margin-top: 2px;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin-top: 3px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: color 0.18s var(--ease);
 }
 
 .cat-row__desc {
   font-size: 0.92rem;
   color: var(--ink-2);
   line-height: 1.5;
+  transition: color 0.18s var(--ease);
 }
 
 .cat-row__owner,
 .cat-row__date {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--ink-2);
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
   white-space: nowrap;
+  transition: color 0.18s var(--ease);
 }
 
 .cat-row__end {
@@ -924,84 +1101,110 @@ html[lang='zh-Hans'] .moment__title {
   gap: 10px;
 }
 
-/* 6 flat 14px square color chips — the ONLY color on /plugins/ */
+/* 6 rounded theme swatches matching MikuTV tvOS palette tiles */
 .swatch-strip {
   display: inline-flex;
-  gap: 2px;
+  gap: 4px;
 }
 
 .swatch-strip span {
-  width: 14px;
-  height: 14px;
-  border-radius: 0;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
   display: block;
-  outline: 1px solid rgb(255 255 255 / 0.14);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
 }
 
 .cat-row__kind {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  font-weight: 550;
+  letter-spacing: 0.04em;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.06);
+  border: 1px solid rgb(255 255 255 / 0.12);
   color: var(--ink-2);
+  transition: color 0.18s var(--ease), background-color 0.18s var(--ease), border-color 0.18s var(--ease);
 }
 
 .cat-row:hover .cat-row__name,
 .cat-row:hover .cat-row__repo,
 .cat-row:hover .cat-row__desc,
 .cat-row:hover .cat-row__owner,
-.cat-row:hover .cat-row__date,
+.cat-row:hover .cat-row__date {
+  color: var(--focus-ink);
+}
+
 .cat-row:hover .cat-row__kind {
-  color: #000000;
+  color: var(--focus-ink);
+  background: rgb(17 23 34 / 0.1);
+  border-color: rgb(17 23 34 / 0.18);
 }
 
 .cat-row:hover .swatch-strip span {
-  outline-color: rgb(0 0 0 / 0.28);
+  box-shadow: inset 0 0 0 1px rgb(17 23 34 / 0.25);
 }
 
 .cat-empty {
-  padding: 40px 0;
-  color: var(--ink-2);
-  border-bottom: 1px solid var(--line);
+  padding: 44px 20px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.025);
 }
 
 /* ==========================================================================
-   /develop/ — Owner's Technical Manual (Sticky Numbered Index + 68ch Prose)
+   /develop/ — MikuTV Developer Manual (tvOS Settings Rail + 68ch Prose)
    ========================================================================== */
 
 .manual-layout {
   padding: 16px var(--gutter) 120px;
   display: grid;
-  grid-template-columns: 200px minmax(0, 68ch);
-  gap: clamp(32px, 6vw, 96px);
+  grid-template-columns: 224px minmax(0, 68ch);
+  gap: clamp(32px, 6vw, 88px);
   align-items: start;
 }
 
 .manual-toc {
   position: sticky;
-  top: calc(var(--nav-h) + 32px);
-  border-top: 1px solid var(--line);
+  top: calc(var(--nav-h) + 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgb(17 23 35 / 0.55);
+  border: 1px solid rgb(255 255 255 / 0.07);
 }
 
 .manual-toc a {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: 0.88rem;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.89rem;
   color: var(--ink-2);
-  transition: color 0.14s ease;
+  transition: color 0.16s var(--ease), background-color 0.16s var(--ease);
 }
 
 .manual-toc a:hover {
-  color: var(--ink);
+  color: var(--focus-ink);
+  background: var(--focus-bg);
+}
+
+.manual-toc a:hover .manual-toc__num {
+  color: var(--focus-ink);
 }
 
 .manual-toc__num {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--ink-2);
+  font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--muted);
+  transition: color 0.16s var(--ease);
 }
 
 .manual-body {
@@ -1018,12 +1221,17 @@ html[lang='zh-Hans'] .moment__title {
 }
 
 .manual-sec h2 {
-  margin: 10px 0 18px;
+  margin: 12px 0 18px;
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: clamp(1.5rem, 2.6vw, 2.2rem);
-  line-height: 1.15;
-  letter-spacing: -0.025em;
+  font-size: clamp(1.5rem, 2.5vw, 2.15rem);
+  line-height: 1.22;
+  letter-spacing: -0.012em;
+}
+
+html[lang='zh-Hans'] .manual-sec h2 {
+  font-weight: 550;
+  letter-spacing: 0.02em;
 }
 
 .manual-sec p,
@@ -1038,27 +1246,30 @@ html[lang='zh-Hans'] .moment__title {
 }
 
 .manual-sec code:not(pre code) {
-  font-size: 0.86em;
+  font-size: 0.85em;
   color: var(--ink);
-  background: var(--shelf);
-  border: 1px solid var(--line);
-  padding: 1px 6px;
+  background: var(--panel);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 6px;
+  padding: 2px 7px;
 }
 
-/* Tokyo Night Official Palette Syntax Blocks on --shelf */
+/* Tokyo Night Syntax Blocks on MikuTV Panel Surface */
 .code-block {
   margin: 20px 0;
-  background: var(--shelf);
-  border: 1px solid var(--line);
-  border-radius: 0;
+  background: var(--panel);
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: 14px;
+  overflow: hidden;
 }
 
 .code-block__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 9px 16px;
-  border-bottom: 1px solid var(--line);
+  padding: 10px 18px;
+  background: rgb(255 255 255 / 0.025);
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
 }
 
 .code-block pre {
@@ -1073,7 +1284,7 @@ html[lang='zh-Hans'] .moment__title {
 .tn-k { color: #7aa2f7; }
 .tn-s { color: #9ece6a; }
 .tn-n { color: #ff9e64; }
-.tn-c { color: #565f89; }
+.tn-c { color: #67729b; }
 
 .manual-table {
   width: 100%;
@@ -1086,16 +1297,16 @@ html[lang='zh-Hans'] .moment__title {
   text-align: left;
   padding: 10px 12px 10px 0;
   border-bottom: 1px solid var(--line-strong);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-2);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--muted);
 }
 
 .manual-table td {
   padding: 12px 12px 12px 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
   color: var(--ink-2);
   vertical-align: top;
 }
@@ -1106,19 +1317,22 @@ html[lang='zh-Hans'] .moment__title {
 
 .manual-figure img {
   width: 100%;
-  outline: 1px solid var(--line);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  border-radius: 14px;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.42);
 }
 
 .manual-figure figcaption {
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 /* ==========================================================================
-   Footer — Sparse Monospace Line
+   Footer — Clean Native Bar
    ========================================================================== */
 
 .site-footer {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+  background: rgb(7 9 14 / 0.65);
   padding: 28px var(--gutter) 44px;
   display: flex;
   flex-wrap: wrap;
@@ -1131,12 +1345,12 @@ html[lang='zh-Hans'] .moment__title {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 18px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-2);
+  gap: 20px;
+  font-family: var(--font-body);
+  font-size: 0.86rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted);
 }
 
 .footer-nav a:hover {
@@ -1161,6 +1375,13 @@ html[lang='zh-Hans'] .moment__title {
     width: 100%;
     align-self: stretch;
     margin-right: 0;
+  }
+  .hero-tv-frame,
+  .moment__screen,
+  .screen-overlap__front,
+  .fill-right {
+    border-right: 1px solid rgb(255 255 255 / 0.12);
+    border-radius: 14px;
   }
   .hero-tv-caption {
     padding-right: 0;
@@ -1205,20 +1426,22 @@ html[lang='zh-Hans'] .moment__title {
   }
   .manual-toc {
     position: static;
-    display: flex;
+    flex-direction: row;
     flex-wrap: wrap;
-    gap: 4px 18px;
+    gap: 6px;
   }
   .manual-toc a {
-    border-bottom: none;
-    padding: 6px 0;
+    padding: 7px 11px;
   }
 }
 
 @media (max-width: 600px) {
   .nav-rail {
-    gap: 14px;
-    font-size: 11px;
+    gap: 2px;
+    font-size: 0.8rem;
+  }
+  .nav-rail a {
+    padding: 6px 9px;
   }
   .cat-search {
     width: 100%;
