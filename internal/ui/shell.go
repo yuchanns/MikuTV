@@ -56,7 +56,7 @@ func (navigationRail) Render(c *ui.Context, p *PageContext) {
 		}
 		ui.Box(c).Width(240).Height(103).Children(func() {
 			ui.Row(c).Width(240).Height(48).Gap(18).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(68, 48).Center().Children(func() { ui.Image(c, p.Assets.Brand).Size(48, 48) })
+				ui.Box(c).Size(68, 48).Center().Children(func() { ui.Image(c, p.Assets.BrandMark(p.Theme.Dark)).Size(48, 48) })
 				ui.Text(c, "MikuTV").FontSize(26).Bold().TextColor(paint(colors.Text.Primary)).Opacity(opacity)
 			})
 		})

@@ -367,13 +367,21 @@ type Assets struct {
 	Text         labels
 	LocaleTag    string
 	Brand        ui.ImageSource
-	AboutArtwork ui.ImageSource
+	BrandLight   ui.ImageSource
 	License      string
 	baseZH       []byte
 	baseEN       []byte
 	baseSections []section
 	icons        map[string]*ui.SVG
 	images       map[string]ui.ImageSource
+}
+
+// BrandMark returns the frameless brand mark tuned for the active dark or light appearance.
+func (a *Assets) BrandMark(dark bool) ui.ImageSource {
+	if !dark && a.BrandLight != nil {
+		return a.BrandLight
+	}
+	return a.Brand
 }
 
 func LoadAssets() (*Assets, error) {
@@ -418,7 +426,7 @@ func LoadAssets() (*Assets, error) {
 	for _, image := range []struct {
 		path string
 		dst  *ui.ImageSource
-	}{{"assets/brand.svg", &a.Brand}, {"assets/about-icon.svg", &a.AboutArtwork}} {
+	}{{"assets/brand.svg", &a.Brand}, {"assets/brand-light.svg", &a.BrandLight}} {
 		data, err := files.ReadFile(image.path)
 		if err != nil {
 			return nil, err

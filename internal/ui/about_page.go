@@ -54,12 +54,12 @@ func (aboutPage) Render(c *ui.Context, p *PageContext) {
 	info := p.resolvedAboutInfo()
 	ui.Row(c).FillWidth().Padding(24, 0, 0, 0).Gap(65).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Width(320).Shrink(0).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Size(280, 168).Radius(25).Clip().Children(func() {
-				ui.Image(c, p.Assets.AboutArtwork).Fill()
+			ui.Box(c).Size(176, 176).Center().Children(func() {
+				ui.Image(c, p.Assets.BrandMark(p.Theme.Dark)).Size(176, 176)
 			})
-			ui.Text(c, "MikuTV").FontSize(40).FontWeight(500).LetterSpacing(3).Margin(26, 0, 0, 0)
+			ui.Text(c, "MikuTV").FontSize(40).FontWeight(500).LetterSpacing(3).Margin(22, 0, 0, 0)
 			ui.Text(c, text.AboutNote).MaxWidth(300).TextAlign(ui.Center).FontSize(17).LineHeight(1.8).
-				Margin(30, 0, 0, 0).TextColor(paint(colors.Text.Muted))
+				Margin(26, 0, 0, 0).TextColor(paint(colors.Text.Muted))
 		})
 		ui.Column(c).Grow(1).Children(func() {
 			facts := [][2]string{

@@ -248,7 +248,13 @@ func TestPluginLicenseExtractionAndAboutPageAndModals(t *testing.T) {
 	})
 	tester := ui.NewTester(view.Render, 1920, 1080)
 
-	// 1. Navigate to Settings -> About and verify actual version, build, plugin summary, and action buttons.
+	// 1. Navigate to Settings -> About and verify adaptive brand marks, version, build, plugin summary, and action buttons.
+	if assets.Brand == nil || assets.BrandLight == nil || assets.Brand == assets.BrandLight {
+		t.Fatal("LoadAssets did not decode distinct dark and light frameless brand marks")
+	}
+	if assets.BrandMark(true) != assets.Brand || assets.BrandMark(false) != assets.BrandLight {
+		t.Fatal("BrandMark did not select matching dark/light brand variant")
+	}
 	state.Navigate(app.Route{Page: app.Settings, Section: "about"})
 	tester.Frame()
 	if !tester.HasText("0.1.0 (286)") {
@@ -260,6 +266,14 @@ func TestPluginLicenseExtractionAndAboutPageAndModals(t *testing.T) {
 	if view.focus.item(app.ShowLicenses) == nil || view.focus.item(app.ShowPrivacyDetails) == nil || view.focus.item(app.ShowProjectHome) == nil {
 		t.Fatal("About page missing one of Licenses / Privacy / Project action buttons")
 	}
+	// Verify light appearance renders About page cleanly with light brand variant.
+	view.Theme = theme.DefaultLight()
+	tester.Frame()
+	if !tester.HasText("MikuTV") {
+		t.Fatal("About page did not render cleanly under light appearance")
+	}
+	view.Theme = theme.Default()
+	tester.Frame()
 
 	// 2. Open Open Source Licenses drawer and verify build, plugin, plugin LICENSE text, and dynamic dependencies.
 	doc := buildLicenseDocument(about.Normalized(""), assets.License, assets.Text.About)
