@@ -96,7 +96,7 @@ func (t *dashTrack) currentEpoch() (context.Context, int, bool) {
 	return t.epochCtx, t.cursor, t.hasCursor
 }
 
-func (t *dashTrack) updateCursor(parent context.Context, fragIdx int) (context.Context, bool) {
+func (t *dashTrack) advanceCursor(parent context.Context, fragIdx int) (context.Context, bool) {
 	t.mu.Lock()
 	jumped := t.hasCursor && (fragIdx < t.cursor-1 || fragIdx-t.cursor > seekCancelDistance)
 	if jumped && t.epochCancel != nil {
@@ -109,10 +109,19 @@ func (t *dashTrack) updateCursor(parent context.Context, fragIdx int) (context.C
 	}
 	ectx := t.epochCtx
 	t.mu.Unlock()
+	return ectx, jumped
+}
+
+func (t *dashTrack) notifyWorker() {
 	select {
 	case t.wake <- struct{}{}:
 	default:
 	}
+}
+
+func (t *dashTrack) updateCursor(parent context.Context, fragIdx int) (context.Context, bool) {
+	ectx, jumped := t.advanceCursor(parent, fragIdx)
+	t.notifyWorker()
 	return ectx, jumped
 }
 
@@ -264,8 +273,14 @@ func (c *segmentCache) seedInit(track *dashTrack, r provider.PlaybackRange, data
 	c.mu.Unlock()
 }
 
-func (c *segmentCache) lookupOrCreate(track *dashTrack, r provider.PlaybackRange, fragIdx int, pinned bool) (seg *cachedSegment, startFetch bool) {
+// lookupOrCreate returns an existing live entry or inserts a new entry with its
+// full expected byte size reserved up front in c.used. When evictNow is true,
+// idle entries are evicted immediately to fit within c.budget; fragment reads in
+// serveDashTrack pass false and call evict() right after advancing the track
+// cursor so eviction reflects the new playback position.
+func (c *segmentCache) lookupOrCreate(track *dashTrack, r provider.PlaybackRange, fragIdx int, pinned, evictNow bool) (seg *cachedSegment, startFetch bool) {
 	key := rangeKey{track: track.name, first: r.First, last: r.Last}
+	expected := r.Last - r.First + 1
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -286,30 +301,22 @@ func (c *segmentCache) lookupOrCreate(track *dashTrack, r provider.PlaybackRange
 		delete(c.entries, key)
 	}
 	seg = &cachedSegment{
-		key:      key,
-		pinned:   pinned,
-		track:    track,
-		fragIdx:  fragIdx,
-		expected: r.Last - r.First + 1,
-		fetching: true,
-		lastUse:  seq,
+		key:       key,
+		pinned:    pinned,
+		track:     track,
+		fragIdx:   fragIdx,
+		expected:  expected,
+		accounted: expected,
+		fetching:  true,
+		lastUse:   seq,
 	}
 	seg.cond = sync.NewCond(&seg.mu)
 	c.entries[key] = seg
-	return seg, true
-}
-
-func (c *segmentCache) addBytes(seg *cachedSegment, delta int64) {
-	if delta <= 0 {
-		return
-	}
-	c.mu.Lock()
-	if cur, ok := c.entries[seg.key]; ok && cur == seg {
-		seg.accounted += delta
-		c.used += delta
+	c.used += expected
+	if evictNow {
 		c.evictLocked()
 	}
-	c.mu.Unlock()
+	return seg, true
 }
 
 func (c *segmentCache) dropEntry(seg *cachedSegment) {
@@ -322,38 +329,55 @@ func (c *segmentCache) dropEntry(seg *cachedSegment) {
 	c.mu.Unlock()
 }
 
-func (c *segmentCache) hasEntry(track *dashTrack, r provider.PlaybackRange) bool {
+// tryStartPrefetch atomically checks cache presence and budget headroom under
+// c.mu and reserves the segment's full expected size before starting a
+// background fetch.
+func (c *segmentCache) tryStartPrefetch(track *dashTrack, r provider.PlaybackRange, fragIdx int) (seg *cachedSegment, start bool, hasRoom bool) {
 	key := rangeKey{track: track.name, first: r.First, last: r.Last}
+	size := r.Last - r.First + 1
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-		return false
+		return nil, false, false
 	}
-	existing, ok := c.entries[key]
-	if !ok {
-		return false
+	if existing, ok := c.entries[key]; ok {
+		existing.mu.Lock()
+		usable := !existing.done || existing.err == nil
+		existing.mu.Unlock()
+		if usable {
+			return existing, false, true
+		}
+		c.used -= existing.accounted
+		existing.accounted = 0
+		delete(c.entries, key)
 	}
-	existing.mu.Lock()
-	usable := !existing.done || existing.err == nil
-	existing.mu.Unlock()
-	return usable
+	if c.used+size > c.budget {
+		c.evictToLocked(c.budget-size, track, fragIdx)
+		if c.used+size > c.budget {
+			return nil, false, false
+		}
+	}
+	c.seq++
+	seg = &cachedSegment{
+		key:       key,
+		pinned:    false,
+		track:     track,
+		fragIdx:   fragIdx,
+		expected:  size,
+		accounted: size,
+		fetching:  true,
+		lastUse:   c.seq,
+	}
+	seg.cond = sync.NewCond(&seg.mu)
+	c.entries[key] = seg
+	c.used += size
+	return seg, true, true
 }
 
-func (c *segmentCache) hasRoomFor(size int64) bool {
-	return c.hasRoomForAhead(nil, -1, size)
-}
-
-func (c *segmentCache) hasRoomForAhead(track *dashTrack, incomingIdx int, size int64) bool {
+func (c *segmentCache) evict() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return false
-	}
-	if c.used+size <= c.budget {
-		return true
-	}
-	c.evictToLocked(c.budget-size, track, incomingIdx)
-	return c.used+size <= c.budget
+	c.evictLocked()
+	c.mu.Unlock()
 }
 
 func (c *segmentCache) evictBehind(track *dashTrack, cursor int) {
@@ -521,15 +545,9 @@ func (m *Media) runPrefetchWorker(track *dashTrack) {
 				if segSize > maxCachedSegmentBytes {
 					break
 				}
-				if m.cache.hasEntry(track, frag.PlaybackRange) {
-					continue
-				}
-				if !m.cache.hasRoomForAhead(track, idx, segSize) {
+				seg, start, hasRoom := m.cache.tryStartPrefetch(track, frag.PlaybackRange, idx)
+				if !hasRoom {
 					break
-				}
-				seg, start := m.cache.lookupOrCreate(track, frag.PlaybackRange, idx, false)
-				if seg == nil {
-					return
 				}
 				if !start {
 					continue
@@ -588,20 +606,24 @@ func (m *Media) serveDashTrack(w http.ResponseWriter, r *http.Request, track *da
 		}
 	}
 
+	// Reserve the requested segment in cache before updating the track cursor or
+	// waking the background prefetch worker so in-flight foreground bytes are
+	// always counted against the cache budget.
+	seg, start := m.cache.lookupOrCreate(track, rng, fragIdx, isInit, fragIdx < 0)
+	if seg == nil {
+		http.Error(w, "Media unavailable", http.StatusBadGateway)
+		return
+	}
 	if fragIdx >= 0 {
-		m.ensurePrefetchWorker(track)
-		_, jumped := track.updateCursor(m.ctx, fragIdx)
+		_, jumped := track.advanceCursor(m.ctx, fragIdx)
 		if jumped {
 			m.cache.evictBehind(track, fragIdx)
 		} else {
 			m.cache.evictBehind(track, max(0, fragIdx-1))
 		}
-	}
-
-	seg, start := m.cache.lookupOrCreate(track, rng, fragIdx, isInit)
-	if seg == nil {
-		http.Error(w, "Media unavailable", http.StatusBadGateway)
-		return
+		if start {
+			m.cache.evict()
+		}
 	}
 	if start {
 		m.mu.Lock()
@@ -619,6 +641,10 @@ func (m *Media) serveDashTrack(w http.ResponseWriter, r *http.Request, track *da
 			defer m.wg.Done()
 			m.fetchSegment(m.ctx, track, seg, true)
 		}()
+	}
+	if fragIdx >= 0 {
+		m.ensurePrefetchWorker(track)
+		track.notifyWorker()
 	}
 
 	m.streamCachedSegment(w, r, seg)
@@ -794,7 +820,6 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 
 		buf := make([]byte, 128*1024)
 		var attemptBytes int64
-		var pendingAccounted int64
 		var readErr error
 		for offset < total {
 			n, rerr := resp.Body.Read(buf)
@@ -809,11 +834,6 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 				seg.buf = append(seg.buf, buf[:n]...)
 				seg.cond.Broadcast()
 				seg.mu.Unlock()
-				pendingAccounted += int64(n)
-				if pendingAccounted >= 256*1024 {
-					m.cache.addBytes(seg, pendingAccounted)
-					pendingAccounted = 0
-				}
 				attemptBytes += int64(n)
 				offset += int64(n)
 			}
@@ -836,9 +856,6 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 				}
 				break
 			}
-		}
-		if pendingAccounted > 0 {
-			m.cache.addBytes(seg, pendingAccounted)
 		}
 
 		close(watchDone)
@@ -924,7 +941,7 @@ func (m *Media) Warmup(ctx context.Context) error {
 		}
 		// Ensure init range is cached (video init is already seeded by OpenMedia).
 		if track.init.Last >= track.init.First && track.init.Last-track.init.First+1 <= maxCachedSegmentBytes {
-			if seg, start := m.cache.lookupOrCreate(track, track.init, -1, true); seg != nil && start {
+			if seg, start := m.cache.lookupOrCreate(track, track.init, -1, true, true); seg != nil && start {
 				m.fetchSegment(warmCtx, track, seg, false)
 			}
 		}
@@ -941,13 +958,12 @@ func (m *Media) Warmup(ctx context.Context) error {
 			if segSize > maxCachedSegmentBytes {
 				break
 			}
-			if !m.cache.hasEntry(track, frag.PlaybackRange) {
-				if !m.cache.hasRoomForAhead(track, i, segSize) {
-					break
-				}
-				if seg, start := m.cache.lookupOrCreate(track, frag.PlaybackRange, i, false); seg != nil && start {
-					m.fetchSegment(warmCtx, track, seg, false)
-				}
+			seg, start, hasRoom := m.cache.tryStartPrefetch(track, frag.PlaybackRange, i)
+			if !hasRoom {
+				break
+			}
+			if start {
+				m.fetchSegment(warmCtx, track, seg, false)
 			}
 			dur += frag.duration
 		}
