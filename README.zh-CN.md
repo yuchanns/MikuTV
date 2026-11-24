@@ -16,7 +16,7 @@
   </p>
 </div>
 
-https://github.com/user-attachments/assets/a6eaa704-1720-4db7-9272-53074f2040e4
+https://github.com/user-attachments/assets/f3868d0c-1b14-4be0-ae68-f7bb5268de82
 
 ## 核心特性
 
