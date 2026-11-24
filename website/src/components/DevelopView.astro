@@ -13,6 +13,25 @@ const isZh = lang === 'zh'
 const specUrl = isZh
   ? 'https://github.com/yuchanns/MikuTV/blob/main/docs/plugin-development.zh-CN.md'
   : 'https://github.com/yuchanns/MikuTV/blob/main/docs/plugin-development.md'
+
+const releaseWorkflow = [
+  'name: Release',
+  '',
+  'on:',
+  '  push:',
+  '    tags:',
+  "      - 'v*'",
+  '',
+  'permissions:',
+  '  contents: write',
+  '',
+  'jobs:',
+  '  release:',
+  '    runs-on: ubuntu-latest',
+  '    steps:',
+  '      - uses: actions/checkout@v7',
+  '      - uses: yuchanns/release-mikutv-plugin@v1',
+].join('\n')
 ---
 
 <section class="page-header">
@@ -290,15 +309,32 @@ const specUrl = isZh
     <section class="manual-sec" id="publish">
       <div class="mono">07</div>
       <h2>{d.toc[6].label}</h2>
+      <p>
+        {isZh ? (
+          <>
+            将插件放入公开 GitHub 仓库，保持 <code>plugin.json</code> 与 <code>LICENSE</code> 位于根目录并添加 topic <code>mikutv-plugin</code>。通过 <a href="https://github.com/yuchanns/release-mikutv-plugin" target="_blank" rel="noopener noreferrer" style="color:var(--ink);border-bottom:1px solid var(--line-strong);">yuchanns/release-mikutv-plugin</a>，推送与 <code>plugin.json</code> 版本一致的 <code>v*</code> 标签即可自动打包 <code>plugin.zip</code> 与 <code>SHA256SUMS.txt</code> 并发布 GitHub Release。
+          </>
+        ) : (
+          <>
+            Put the plugin in a public GitHub repository with <code>plugin.json</code> and <code>LICENSE</code> at the root and add topic <code>mikutv-plugin</code>. Using <a href="https://github.com/yuchanns/release-mikutv-plugin" target="_blank" rel="noopener noreferrer" style="color:var(--ink);border-bottom:1px solid var(--line-strong);">yuchanns/release-mikutv-plugin</a>, pushing a <code>v*</code> tag matching <code>plugin.json</code> packages <code>plugin.zip</code> and <code>SHA256SUMS.txt</code> and publishes a GitHub Release automatically.
+          </>
+        )}
+      </p>
       <div class="code-block">
         <div class="code-block__head">
-          <span class="mono">PACKAGE &amp; VERIFY</span>
+          <span class="mono">.github/workflows/release.yml</span>
+          <a href="https://github.com/yuchanns/release-mikutv-plugin" target="_blank" rel="noopener noreferrer" class="mono">ACTION ↗</a>
         </div>
-        <pre><code>zip -r -X plugin.zip plugin.json LICENSE index.js
-<span class="tn-c"># Validate via internal/plugin:</span>
+        <pre><code>{releaseWorkflow}</code></pre>
+      </div>
+      <div class="code-block">
+        <div class="code-block__head">
+          <span class="mono">{isZh ? '校验与发布' : 'VERIFY & PUBLISH'}</span>
+        </div>
+        <pre><code><span class="tn-c"># Validate via internal/plugin:</span>
 <span class="tn-c">#   InspectPackage / Open / OpenTheme / OpenLocale</span>
-<span class="tn-c"># Tag v1.0.0 -&gt; GitHub Release -&gt; attach plugin.zip</span>
-<span class="tn-c"># Add repository topic: mikutv-plugin</span></code></pre>
+git tag -a v1.0.0 -m <span class="tn-s">"Release v1.0.0"</span>
+git push origin v1.0.0</code></pre>
       </div>
       <figure class="manual-figure">
         <img src="/images/plugin-discover-themes.jpg" alt="MikuTV plugin discovery screen on Apple TV 4K" />
