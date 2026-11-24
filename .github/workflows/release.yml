@@ -1,49 +1,299 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Release tag to publish (e.g. v0.1.0)'
+      version:
+        description: Version without the v prefix, for example 0.1.0 or 0.1.0rc1
         required: true
         type: string
 
 permissions:
-  contents: write
+  actions: read
+  contents: read
+
+concurrency:
+  group: mikutv-release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
-  release:
-    name: Build & Publish tvOS Release
-    runs-on: macos-15
+  plan:
+    name: Plan Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      base_version: ${{ steps.plan.outputs.base_version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      is_prerelease: ${{ steps.plan.outputs.is_prerelease }}
+      previous_tag: ${{ steps.plan.outputs.previous_tag }}
+      source_commit: ${{ steps.plan.outputs.source_commit }}
+      mode: ${{ steps.plan.outputs.mode }}
+      existing_release_commit: ${{ steps.plan.outputs.existing_release_commit }}
     steps:
-      - name: Resolve release version
-        id: version
+      - name: Validate release input and branch
+        id: validate
         env:
-          INPUT_TAG: ${{ inputs.tag }}
-          REF_NAME: ${{ github.ref_name }}
-          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            tag="$INPUT_TAG"
-          else
-            tag="$REF_NAME"
-          fi
-          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Release tag must match vX.Y.Z, got '$tag'"
+          if ! printf '%s' "$RELEASE_VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(rc[1-9][0-9]*)?$'; then
+            echo "::error::Version must match X.Y.Z or X.Y.ZrcN without a leading v, got '$RELEASE_VERSION'"
             exit 1
           fi
-          ver="${tag#v}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "app_version=$ver" >> "$GITHUB_OUTPUT"
+          is_prerelease="false"
+          if [[ "$RELEASE_VERSION" == *rc* ]]; then
+            is_prerelease="true"
+          elif [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Stable releases must run from main"
+            exit 1
+          fi
+          base_version="${RELEASE_VERSION%%rc*}"
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "base_version=$base_version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout
+      - name: Checkout release source
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && steps.version.outputs.tag || github.ref }}
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.sha }}
+
+      - name: Resolve release state and previous tag
+        id: plan
+        env:
+          RELEASE_VERSION: ${{ steps.validate.outputs.version }}
+          BASE_VERSION: ${{ steps.validate.outputs.base_version }}
+          RELEASE_TAG: ${{ steps.validate.outputs.tag }}
+          IS_PRERELEASE: ${{ steps.validate.outputs.is_prerelease }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          head_subject="$(git show -s --format=%s HEAD)"
+          mode="new"
+          existing_release_commit=""
+          source_commit="$head_sha"
+
+          if git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG" >/dev/null; then
+            if [ "$(git cat-file -t "refs/tags/$RELEASE_TAG")" != "tag" ]; then
+              echo "::error::Existing ref $RELEASE_TAG is not an annotated tag"
+              exit 1
+            fi
+            tagged_commit="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+            if [ "$tagged_commit" != "$head_sha" ]; then
+              echo "::error::Tag $RELEASE_TAG already exists on $tagged_commit (expected $head_sha)"
+              exit 1
+            fi
+            mode="existing"
+            existing_release_commit="$tagged_commit"
+          elif [ "$head_subject" = "Release $RELEASE_TAG" ]; then
+            mode="existing"
+            existing_release_commit="$head_sha"
+            parent_sha="$(git rev-parse HEAD^ 2>/dev/null || true)"
+            if [ -n "$parent_sha" ]; then
+              source_commit="$parent_sha"
+            fi
+          fi
+
+          previous_tag="$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vxF "$RELEASE_TAG" | head -n 1 || true)"
+
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
+          echo "source_commit=$source_commit" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "existing_release_commit=$existing_release_commit" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Vet & Test Release Source
+    needs: plan
+    runs-on: macos-15
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.existing_release_commit || needs.plan.outputs.source_commit }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prepare patched vendor tree and run tests
+        run: |
+          set -euo pipefail
+          python3 scripts/tvos.py prepare
+          go vet -mod=vendor ./...
+          go test -mod=vendor -race -count=1 -timeout 20m ./...
+
+  prepare:
+    name: Update Changelog & Create Verified Release Commit
+    needs: [plan, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    outputs:
+      release_commit: ${{ steps.commit.outputs.release_commit }}
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ needs.plan.outputs.existing_release_commit || needs.plan.outputs.source_commit }}
+
+      - name: Generate changelog and create verified release commit
+        id: new_commit
+        uses: actions/github-script@v9
+        env:
+          RELEASE_VERSION: ${{ needs.plan.outputs.version }}
+          BASE_VERSION: ${{ needs.plan.outputs.base_version }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          IS_PRERELEASE: ${{ needs.plan.outputs.is_prerelease }}
+          RELEASE_BRANCH: ${{ github.ref_name }}
+          SOURCE_COMMIT: ${{ needs.plan.outputs.source_commit }}
+          PREVIOUS_TAG: ${{ needs.plan.outputs.previous_tag }}
+          MODE: ${{ needs.plan.outputs.mode }}
+        with:
+          result-encoding: string
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const version = process.env.RELEASE_VERSION;
+            const baseVersion = process.env.BASE_VERSION;
+            const tag = process.env.RELEASE_TAG;
+            const isPrerelease = process.env.IS_PRERELEASE === 'true';
+            const sourceCommit = process.env.SOURCE_COMMIT;
+            const previousTag = process.env.PREVIOUS_TAG;
+            const mode = process.env.MODE;
+
+            const generated = await github.rest.repos.generateReleaseNotes({
+              ...context.repo,
+              tag_name: tag,
+              target_commitish: sourceCommit,
+              ...(previousTag ? { previous_tag_name: previousTag } : {}),
+            });
+            const notesBody = (generated.data.body || '').trim();
+            fs.mkdirSync(path.join('build', 'release'), { recursive: true });
+            fs.writeFileSync(path.join('build', 'release', 'notes.md'), notesBody + '\n', 'utf8');
+
+            if (mode !== 'new') {
+              return '';
+            }
+
+            if (!isPrerelease) {
+              const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+              if (!changelog.includes('## ' + version + ' - ')) {
+                const heading = '## ' + version + ' - ' + new Date().toISOString().slice(0, 10);
+                const entry = heading + '\n\n' + notesBody + '\n';
+                const index = changelog.indexOf('\n## ');
+                const updated = index >= 0
+                  ? changelog.slice(0, index + 1) + entry + '\n' + changelog.slice(index + 1)
+                  : changelog.trimEnd() + '\n\n' + entry;
+                fs.writeFileSync('CHANGELOG.md', updated, 'utf8');
+              }
+
+              const replaceOnce = (file, regex, replacement) => {
+                const before = fs.readFileSync(file, 'utf8');
+                if (!regex.test(before)) {
+                  throw new Error(`Could not find version literal in ${file}`);
+                }
+                const after = before.replace(regex, replacement);
+                if (after !== before) {
+                  fs.writeFileSync(file, after, 'utf8');
+                }
+              };
+              replaceOnce('main.go', /(\bappVersion\s*=\s*")[^"]+(")/, `$1${baseVersion}$2`);
+              replaceOnce('scripts/tvos.py', /^(\bAPP_VERSION\s*=\s*")[^"]+(")/m, `$1${baseVersion}$2`);
+            }
+
+            const changed = (await exec.getExecOutput('git', ['diff', '--name-only', '-z'], { silent: true }))
+              .stdout.split('\0').filter(Boolean);
+            if (changed.length === 0) {
+              return sourceCommit;
+            }
+
+            const input = {
+              branch: {
+                repositoryNameWithOwner: context.repo.owner + '/' + context.repo.repo,
+                branchName: process.env.RELEASE_BRANCH,
+              },
+              expectedHeadOid: sourceCommit,
+              message: { headline: 'Release ' + tag },
+              fileChanges: {
+                additions: changed.map((filePath) => ({
+                  path: filePath,
+                  contents: fs.readFileSync(filePath).toString('base64'),
+                })),
+              },
+            };
+            const result = await github.graphql(
+              'mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid signature { isValid wasSignedByGitHub } } } }',
+              { input },
+            );
+            const commit = result.createCommitOnBranch.commit;
+            if (!commit.signature?.isValid || !commit.signature.wasSignedByGitHub) {
+              throw new Error('Release commit was not signed and verified by GitHub');
+            }
+            return commit.oid;
+
+      - name: Save generated release notes artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-notes-${{ needs.plan.outputs.version }}
+          path: build/release/notes.md
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Verify fixed release commit
+        id: commit
+        uses: actions/github-script@v9
+        env:
+          NEW_COMMIT: ${{ steps.new_commit.outputs.result }}
+          EXISTING_COMMIT: ${{ needs.plan.outputs.existing_release_commit }}
+          SOURCE_COMMIT: ${{ needs.plan.outputs.source_commit }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+        with:
+          script: |
+            const ref = process.env.NEW_COMMIT || process.env.EXISTING_COMMIT;
+            const { data } = await github.rest.repos.getCommit({ ...context.repo, ref });
+            if (
+              !data.commit.verification?.verified ||
+              (data.sha !== process.env.SOURCE_COMMIT && (
+                data.parents.length !== 1 ||
+                data.parents[0].sha !== process.env.SOURCE_COMMIT ||
+                data.commit.message.split('\n')[0] !== 'Release ' + process.env.RELEASE_TAG
+              ))
+            ) {
+              throw new Error('The release commit does not match its source and verified signature');
+            }
+            core.setOutput('release_commit', data.sha);
+
+  build:
+    name: Build & Verify tvOS IPA
+    needs: [plan, prepare]
+    runs-on: macos-15
+    outputs:
+      tag_object: ${{ steps.tag.outputs.tag_object }}
+      source_date_epoch: ${{ steps.tag.outputs.source_date_epoch }}
+    steps:
+      - name: Checkout fixed release commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ needs.prepare.outputs.release_commit }}
 
       - name: Set up Go
         uses: actions/setup-go@v7
@@ -77,30 +327,31 @@ jobs:
 
       - name: Build unsigned tvOS IPA
         env:
-          APP_VERSION: ${{ steps.version.outputs.app_version }}
+          APP_VERSION: ${{ needs.plan.outputs.base_version }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: python3 scripts/tvos.py package
 
-      - name: Run unit tests before release
-        run: |
-          go vet -mod=vendor ./...
-          go test -mod=vendor -race -count=1 ./...
+      - name: Vet release build tree
+        run: go vet -mod=vendor ./...
 
       - name: Verify artifacts and generate SHA256SUMS
         env:
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-          APP_VERSION: ${{ steps.version.outputs.app_version }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          APP_VERSION: ${{ needs.plan.outputs.base_version }}
         run: |
           set -euo pipefail
           app=".build/tvos/Payload/MikuTV.app"
           src=".build/tvos/MikuTV-unsigned.ipa"
-          got_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Info.plist")"
-          if [ "$got_ver" != "$APP_VERSION" ]; then
-            echo "::error::CFBundleShortVersionString mismatch: got '$got_ver', expected '$APP_VERSION'"
-            exit 1
-          fi
+          for plist in "$app/Info.plist" "$app/PlugIns/TopShelf.appex/Info.plist"; do
+            got_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
+            if [ "$got_ver" != "$APP_VERSION" ]; then
+              echo "::error::CFBundleShortVersionString mismatch in $plist: got '$got_ver', expected '$APP_VERSION'"
+              exit 1
+            fi
+          done
           for bin in "$app/MikuTV" "$app/PlugIns/TopShelf.appex/TopShelf"; do
-            file "$bin" | grep -q "arm64"
+            file_info="$(file "$bin")"
+            printf '%s\n' "$file_info" | grep -q "arm64"
             non_sys="$(otool -L "$bin" | tail -n +2 | awk '{print $1}' | grep -Ev '^(/usr/lib/|/System/Library/Frameworks/)' || true)"
             if [ -n "$non_sys" ]; then
               echo "::error::Unexpected non-system dynamic libraries in $bin: $non_sys"
@@ -116,37 +367,119 @@ jobs:
             cat SHA256SUMS.txt
           )
 
+      - name: Prepare reproducible annotated tag
+        id: tag
+        env:
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          source_date_epoch="$(git show -s --format=%ct HEAD)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG" >/dev/null; then
+            test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          else
+            GIT_COMMITTER_DATE="@$source_date_epoch +0000" git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
+          fi
+          echo "tag_object=$(git rev-parse "refs/tags/$RELEASE_TAG")" >> "$GITHUB_OUTPUT"
+          echo "source_date_epoch=$source_date_epoch" >> "$GITHUB_OUTPUT"
+
+      - name: Upload verified release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: mikutv-tvos-dist-${{ needs.plan.outputs.version }}
+          path: dist/
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 90
+
+  publish:
+    name: Tag & Publish GitHub Release
+    needs: [plan, prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout fixed release commit
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ needs.prepare.outputs.release_commit }}
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: mikutv-tvos-dist-${{ needs.plan.outputs.version }}
+          path: dist/
+
+      - name: Download generated release notes
+        uses: actions/download-artifact@v8
+        with:
+          name: release-notes-${{ needs.plan.outputs.version }}
+          path: build/release/
+
+      - name: Verify artifact checksums
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+
+      - name: Push reproducible annotated tag
+        env:
+          EXPECTED_TAG_OBJECT: ${{ needs.build.outputs.tag_object }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          SOURCE_DATE_EPOCH: ${{ needs.build.outputs.source_date_epoch }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG" >/dev/null; then
+            test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
+          else
+            GIT_COMMITTER_DATE="@$SOURCE_DATE_EPOCH +0000" git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
+          fi
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG")" = "$EXPECTED_TAG_OBJECT"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          git push origin "refs/tags/$RELEASE_TAG"
+
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_TAG: ${{ needs.plan.outputs.tag }}
+          IS_PRERELEASE: ${{ needs.plan.outputs.is_prerelease }}
         run: |
           set -euo pipefail
-          notes="$(cat <<'EOF'
-          Unsigned tvOS `.ipa` package built natively for Apple TV (`arm64`, tvOS 18.0+).
+          cat <<EOF > build/release/release-body.md
+          Unsigned tvOS \`.ipa\` package built natively for Apple TV (\`arm64\`, tvOS 18.0+).
 
           ### Assets
-          - `MikuTV-tvOS.ipa` — Stable asset name for automatic tracking and 7-day auto-refresh in [ATVLoadly](https://github.com/bitxeno/atvloadly).
-          - `MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa` — Versioned unsigned archive (identical content).
-          - `SHA256SUMS.txt` — SHA-256 verification checksums.
+          - \`MikuTV-tvOS.ipa\` — Stable asset name for automatic tracking and 7-day auto-refresh in [ATVLoadly](https://github.com/bitxeno/atvloadly).
+          - \`MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa\` — Versioned unsigned archive (identical content).
+          - \`SHA256SUMS.txt\` — SHA-256 verification checksums.
 
           See the [Installation & Sideloading Guide](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/install.md) for setup instructions.
+
           EOF
-          )"
-          notes="${notes//\$\{RELEASE_TAG\}/$RELEASE_TAG}"
-          notes="${notes//\$\{GITHUB_REPOSITORY\}/$GITHUB_REPOSITORY}"
+          cat build/release/notes.md >> build/release/release-body.md
+
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --notes-file build/release/release-body.md
             gh release upload "$RELEASE_TAG" \
               "dist/MikuTV-tvOS.ipa" \
               "dist/MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa" \
               "dist/SHA256SUMS.txt" \
               --clobber
           else
+            extra_flags=()
+            if [ "$IS_PRERELEASE" = "true" ]; then
+              extra_flags+=(--prerelease)
+            fi
             gh release create "$RELEASE_TAG" \
               "dist/MikuTV-tvOS.ipa" \
               "dist/MikuTV-${RELEASE_TAG}-tvOS-unsigned.ipa" \
               "dist/SHA256SUMS.txt" \
               --title "MikuTV ${RELEASE_TAG}" \
-              --notes "$notes" \
-              --generate-notes
+              --notes-file build/release/release-body.md \
+              "${extra_flags[@]}"
           fi
