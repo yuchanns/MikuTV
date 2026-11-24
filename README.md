@@ -1,5 +1,9 @@
 <div align="center">
-  <img src="assets/logo.svg" width="168" alt="MikuTV logo" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-mark-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo-mark-light.svg" />
+    <img src="assets/logo-mark-light.svg" width="96" alt="MikuTV logo" />
+  </picture>
   <h1>MikuTV</h1>
   <p><strong>A native Apple TV video client built around an extensible plugin architecture.</strong></p>
   <p>tvOS 18.0+ · Apple TV (arm64) · Apache-2.0</p>
@@ -12,9 +16,7 @@
   </p>
 </div>
 
-<p align="center">
-  <img src="docs/images/appearance-day-night.jpg" width="840" alt="MikuTV Day and Night automatic theme adaptation on Apple TV 4K" />
-</p>
+https://github.com/user-attachments/assets/a6eaa704-1720-4db7-9272-53074f2040e4
 
 ## Highlights
 
@@ -23,6 +25,9 @@
 - **Day & Night Appearance** — Built-in **MikuTV Dark** and **MikuTV Light**, plus 10 official Day/Night theme plugins powered by 46 semantic tokens (`theme.json`). Supports `Follow System`, `Day`, and `Night` modes with independent daytime and nighttime theme slots.
 - **Cohesive Native Architecture** — Written in Go to embed the pure-Go [`moejs`](https://github.com/MoeForge/moejs) plugin runtime directly in-process, paired with [`MyGo`](https://github.com/egoist/mygo) (Metal shaders and CoreText) and [`purego`](https://github.com/ebitengine/purego) bindings to `AVFoundation`, `AVKit`, `TVServices`, and Keychain.
 
+<p align="center">
+  <img src="docs/images/appearance-day-night.jpg" width="840" alt="MikuTV Day and Night automatic theme adaptation on Apple TV 4K" />
+</p>
 <p align="center">
   <img src="docs/images/theme-picker-dark.jpg" width="416" alt="MikuTV frosted-glass night theme picker on Apple TV" />
   <img src="docs/images/theme-picker-light.jpg" width="416" alt="MikuTV frosted-glass day theme picker on Apple TV" />

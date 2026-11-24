@@ -1,5 +1,9 @@
 <div align="center">
-  <img src="assets/logo.svg" width="168" alt="MikuTV logo" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-mark-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo-mark-light.svg" />
+    <img src="assets/logo-mark-light.svg" width="96" alt="MikuTV logo" />
+  </picture>
   <h1>MikuTV</h1>
   <p><strong>具备开放可扩展插件架构的原生 Apple TV 视频客户端。</strong></p>
   <p>tvOS 18.0+ · Apple TV (arm64) · Apache-2.0</p>
@@ -12,9 +16,7 @@
   </p>
 </div>
 
-<p align="center">
-  <img src="docs/images/appearance-day-night.jpg" width="840" alt="MikuTV 在 Apple TV 4K 上的白天与黑夜主题自动切换效果" />
-</p>
+https://github.com/user-attachments/assets/a6eaa704-1720-4db7-9272-53074f2040e4
 
 ## 核心特性
 
@@ -23,6 +25,9 @@
 - **白天 / 黑夜双槽外观** — 内置 **MikuTV Dark** 与 **MikuTV Light**，配套 10 款官方白天 / 黑夜主题插件（46 个语义色彩令牌 `theme.json`），支持「跟随系统 / 白天 / 黑夜」三态切换并独立配置白天与黑夜主题。
 - **一体化的原生技术栈** — 选用 Go 将纯 Go 编写的 [`moejs`](https://github.com/MoeForge/moejs) 插件运行时直接嵌入进程内，配合 [`MyGo`](https://github.com/egoist/mygo)（Metal 着色器与 CoreText 排版）和 [`purego`](https://github.com/ebitengine/purego) 直接调用 `AVFoundation`、`AVKit`、`TVServices` 与 Keychain 等系统框架。
 
+<p align="center">
+  <img src="docs/images/appearance-day-night.jpg" width="840" alt="MikuTV 在 Apple TV 4K 上的白天与黑夜主题自动切换效果" />
+</p>
 <p align="center">
   <img src="docs/images/theme-picker-dark.jpg" width="416" alt="MikuTV Apple TV 毛玻璃黑夜主题选择器" />
   <img src="docs/images/theme-picker-light.jpg" width="416" alt="MikuTV Apple TV 毛玻璃白天主题选择器" />
