@@ -2,14 +2,14 @@
 
 window.createPluginPages = ({content:C,state,settings,themes,icon,escape:e,button,header,modal,dismissModal,navigate,renderPage,toast,login}) => {
   const seed = () => [
-    {id:'little-tv',kind:'source',name:'示例影视',description:'视频、番剧与直播',glyph:'tv',artwork:{cover:'assets/entry-artwork/little-tv.png'},version:'1.0.0',latest:'1.0.0',repository:'随 MikuTV 提供',builtin:true,installed:true,enabled:true,permissions:['内容与账号服务']},
+    {id:'sample-source',kind:'source',name:'示例影视',description:'视频、番剧与直播',glyph:'tv',artwork:{cover:'assets/entry-artwork/sample-source.png'},version:'1.0.0',latest:'1.0.0',repository:'随 MikuTV 提供',builtin:true,installed:true,enabled:true,permissions:['内容与账号服务']},
     {id:'video',kind:'source',name:'示例视频源',description:'视频与内容合集',glyph:'monitor',artwork:{cover:'assets/entry-artwork/video.png'},version:'1.2.0',latest:'1.3.0',repository:'demo/video-source',installed:true,enabled:true,permissions:['api.video.example'],additionalPermissions:['images.video.example']},
     {id:'media',kind:'source',name:'示例媒体源',description:'视频与播放列表',glyph:'playlist',artwork:{cover:'assets/concert.jpg'},version:'1.0.0',latest:'1.0.0',repository:'demo/media-source',installed:false,enabled:false,permissions:['media.example']},
     {id:'channel',kind:'source',name:'示例频道源',description:'频道与精选内容',glyph:'following',version:'2.0.0',latest:'2.0.0',repository:'demo/channel-source',installed:false,enabled:false,permissions:['channel.example'],incompatible:true},
     {id:'twilight',kind:'theme',name:'暮光紫',description:'柔和紫色与深色背景',glyph:'palette',version:'1.0.0',latest:'1.1.0',repository:'demo/twilight-theme',installed:true,palette:'twilight'},
     {id:'ocean',kind:'theme',name:'深海蓝',description:'清透蓝色与深海色调',glyph:'palette',version:'1.0.0',latest:'1.0.0',repository:'demo/ocean-theme',installed:false,palette:'ocean'}
   ];
-  const model = {items:seed(),currentEntry:'little-tv',view:'installed',filter:'all',query:'',listScroll:0,catalogOrigin:null,selected:null,catalog:'ready',prompt:null,serial:0,timer:null,operationDelay:1800,failNext:false,lastFocus:'plugin-detail:little-tv',entryOrigin:null,forced:false,snapshots:{}};
+  const model = {items:seed(),currentEntry:'sample-source',view:'installed',filter:'all',query:'',listScroll:0,catalogOrigin:null,selected:null,catalog:'ready',prompt:null,serial:0,timer:null,operationDelay:1800,failNext:false,lastFocus:'plugin-detail:sample-source',entryOrigin:null,forced:false,snapshots:{}};
   const sessionFields = ['account','member','scenario','owned','trialsUsed','trialEnded','later','favorites','likes','following','tracked','history','coins','query','searchKind','sort','searchesCleared','homeTab','category','libraryTab','subtitles','quality','speed','danmaku'];
   sessionFields.push('accountId','accountName','accountInitial');
   const accountFields=['account','member','scenario','owned','trialsUsed','trialEnded','later','favorites','likes','following','tracked','history','coins'];
@@ -248,16 +248,16 @@ window.createPluginPages = ({content:C,state,settings,themes,icon,escape:e,butto
   function onFocus(node) {if(active()&&node.closest('.preferences')&&node.dataset.action)model.lastFocus=node.dataset.action;}
   function preview(name='installed') {
     if(state.overlay==='modal')dismissModal();leave();
-    Object.assign(model,{items:seed(),currentEntry:'little-tv',view:'installed',filter:'all',query:'',listScroll:0,catalogOrigin:null,selected:null,catalog:'ready',prompt:null,failNext:false,snapshots:{},entryOrigin:null,forced:false,lastFocus:'plugin-detail:little-tv'});
+    Object.assign(model,{items:seed(),currentEntry:'sample-source',view:'installed',filter:'all',query:'',listScroll:0,catalogOrigin:null,selected:null,catalog:'ready',prompt:null,failNext:false,snapshots:{},entryOrigin:null,forced:false,lastFocus:'plugin-detail:sample-source'});
     themes.model.failNext=false;themes.apply('mikutv-dark');
     for(const id of Object.keys(accounts))delete accounts[id];addingAccount=false;state.accountId=null;state.accountName='';state.accountInitial='';
     state.account=true;state.member=false;state.scenario='free';settings.preferences.section='plugins';navigate('settings');
     if(name==='entries'||name==='entries-empty'){if(name==='entries-empty'){model.items.forEach(item=>item.enabled=false);model.currentEntry=null;}openEntries({forced:name==='entries-empty'});return;}
     if(['discover','offline','loading','empty','error'].includes(name)){model.view='discover';model.catalog=name==='discover'?'ready':name;render(name==='error'?'plugin-refresh':name==='empty'?'plugin-add':name==='loading'?'plugin-back':'plugin-detail:media');return;}
-    if(name==='detail'||name==='external'){model.selected=name==='detail'?'little-tv':'video';render('plugin-toggle:'+model.selected);return;}
+    if(name==='detail'||name==='external'){model.selected=name==='detail'?'sample-source':'video';render('plugin-toggle:'+model.selected);return;}
     if(name==='repository'){render('plugin-add');requestAnimationFrame(addRepository);return;}
     if(['install','update','disable','remove','failed','progress'].includes(name)) {
-      const id=name==='install'||name==='progress'?'media':name==='disable'?'little-tv':'video';
+      const id=name==='install'||name==='progress'?'media':name==='disable'?'sample-source':'video';
       model.view=id==='media'?'discover':'installed';model.selected=id;render('plugin-'+(id==='media'?'install':name==='disable'?'toggle':'update')+':'+id);
       requestAnimationFrame(()=>{
         const kind=name==='failed'?'update':name==='progress'?'install':name;
@@ -266,7 +266,7 @@ window.createPluginPages = ({content:C,state,settings,themes,icon,escape:e,butto
         if(name==='progress')startOperation(model.prompt);
       });return;
     }
-    render(name==='sidebar'?'entry-open':'plugin-detail:little-tv');
+    render(name==='sidebar'?'entry-open':'plugin-detail:sample-source');
   }
   function openThemes(){model.view='discover';model.filter='theme';model.query='';model.catalogOrigin='appearance';model.selected=null;model.catalog='ready';settings.preferences.section='plugins';navigate('settings');focus('plugin-filter:theme');}
   function accountData(){const data={account:false,member:false,scenario:'guest',owned:new Set(),trialsUsed:new Set(),trialEnded:false,later:new Set(),favorites:new Set(),likes:new Set(),following:new Set(),tracked:new Set(),history:[],coins:0};for(const key of accountFields)if(state[key]!==undefined)data[key]=structuredClone(state[key]);return data;}

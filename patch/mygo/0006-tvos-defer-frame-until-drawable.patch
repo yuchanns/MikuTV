@@ -1,0 +1,38 @@
+diff --git a/internal/tvos/app.go b/internal/tvos/app.go
+--- a/internal/tvos/app.go
++++ b/internal/tvos/app.go
+@@ -156,9 +156,7 @@
+ 				return
+ 			}
+ 			w.pending = false
+-			if w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceFrame, Paced: true}) {
+-				w.RequestFrame()
+-			}
++			w.frame(true)
+ 		}},
+ 	})
+ }
+diff --git a/internal/tvos/window.go b/internal/tvos/window.go
+--- a/internal/tvos/window.go
++++ b/internal/tvos/window.go
+@@ -117,6 +117,20 @@
+ 	}
+ }
+ 
++var _ platform.PacedSurface = (*window)(nil)
++
++// FrameNow finishes a display-link frame deferred by the renderer.
++func (w *window) FrameNow() { w.frame(false) }
++
++func (w *window) frame(paced bool) {
++	if !w.IsFocused() {
++		return
++	}
++	if w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceFrame, Paced: paced}) {
++		w.RequestFrame()
++	}
++}
++
+ func (*window) RefreshRate() float64 {
+ 	return float64(send(send(class("UIScreen"), "mainScreen"), "maximumFramesPerSecond"))
+ }

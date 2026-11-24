@@ -56,17 +56,23 @@ window.createLibraryPages = ({content:C,state,icon,escape:e,button,header,card,f
     const [verb,key]=action.split(':');
     if(verb==='favorite'){chooser(state.player||state.detail);return true;}
     if(verb==='lib-open'){model.folder=key;model.editing=false;refresh('lib-back');return true;}
-    if(verb==='lib-back'){model.folder=null;model.editing=false;refresh();return true;}
+    if(verb==='lib-back'){const origin='lib-open:'+model.folder;model.folder=null;model.editing=false;refresh(origin);return true;}
     if(verb==='library'){model.folder=null;model.editing=false;model.selected.clear();return false;}
     if(verb==='lib-manage'){model.editing=!model.editing;model.selected.clear();refresh(action);return true;}
     if(verb==='lib-select'){model.selected.has(key)?model.selected.delete(key):model.selected.add(key);refresh(action);return true;}
     if(verb==='lib-all'){const all=ids();model.selected=model.selected.size===all.length?new Set():new Set(all);refresh(action);return true;}
     if(verb==='lib-remove'){
+      if(state.libraryTab==='favorites'){
+        if(model.selected.size)modal(L.remove,`<p>${e(L.removeConfirm.replace('%d',model.selected.size))}</p>`,button(L.confirmRemove,'lib-remove-confirm','primary','trash')+button(C.ui.cancel,'dismissmodal','secondary'));
+        return true;
+      }
+    }
+    if(verb==='lib-remove'||verb==='lib-remove-confirm'){
       const selected=new Set(model.selected);
       if(state.libraryTab==='history')state.history=state.history.filter(id=>!selected.has(id));
       if(state.libraryTab==='watchlater')selected.forEach(id=>state.later.delete(id));
       if(state.libraryTab==='tracking')selected.forEach(id=>state.tracked.delete(id));
-      if(state.libraryTab==='favorites')selected.forEach(id=>currentFolder().ids.delete(id));
+      if(verb==='lib-remove-confirm'){selected.forEach(id=>currentFolder().ids.delete(id));dismissModal();model.editing=false;}
       model.selected.clear();syncFavorites();refresh('lib-manage');toast(L.removed);return true;
     }
     if(verb==='lib-play-all'){startPlayer(ids()[0]);return true;}
@@ -94,5 +100,5 @@ window.createLibraryPages = ({content:C,state,icon,escape:e,button,header,card,f
   }
   C.courses.forEach(course=>state.owned.add(course.id));
   syncFavorites();
-  return {render,handle,folders,model,chooser,saveToDefault(id){folders[0].ids.add(id);syncFavorites();},back(){if(state.page!=='library')return false;if(model.editing){model.editing=false;refresh('lib-manage');return true;}if(model.folder){model.folder=null;refresh();return true;}return false;}};
+  return {render,handle,folders,model,chooser,saveToDefault(id){folders[0].ids.add(id);syncFavorites();},back(){if(state.page!=='library')return false;if(model.editing){model.editing=false;refresh('lib-manage');return true;}if(model.folder){const origin='lib-open:'+model.folder;model.folder=null;refresh(origin);return true;}return false;}};
 };

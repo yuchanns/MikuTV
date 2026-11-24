@@ -1,0 +1,24 @@
+diff --git a/ui/frame.go b/ui/frame.go
+--- a/ui/frame.go
++++ b/ui/frame.go
+@@ -24,6 +24,20 @@
+ 		return nil
+ 	}
+ 	return c.rt
++}
++
++// CommittedBounds looks up an element by its ID in the latest committed
++// layout. Call on the UI thread, including from input handlers between builds.
++func (c *Context) CommittedBounds(id uint64) Rect {
++	rt := c.runtime()
++	if rt == nil {
++		return Rect{}
++	}
++	s := rt.states[id]
++	if s == nil || s.invisible {
++		return Rect{}
++	}
++	return transformRect(s.world, Rect{s.x, s.y, s.w, s.h})
+ }
+ 
+ func (c *Context) build() *context {

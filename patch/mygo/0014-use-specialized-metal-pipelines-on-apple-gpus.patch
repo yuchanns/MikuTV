@@ -1,0 +1,57 @@
+diff --git a/internal/gpu/metal/metal.go b/internal/gpu/metal/metal.go
+--- a/internal/gpu/metal/metal.go
++++ b/internal/gpu/metal/metal.go
+@@ -85,8 +85,9 @@
+ 	pixelFormatRGBA16Float = 115
+ 	pixelFormatRGBA32Float = 125
+ 
+-	// gpuFamilyMac2 is MTLGPUFamilyMac2.
+-	gpuFamilyMac2 = 2002
++	// Metal GPU families that support specialized pipelines and dual-source blending.
++	gpuFamilyApple2 = 1002
++	gpuFamilyMac2   = 2002
+ 
+ 	usageShaderRead   = 1
+ 	usageRenderTarget = 4
+@@ -440,10 +441,8 @@
+ 	// pipelines of the classes and the worker that makes them.
+ 	source string
+ 	pipes  pipeState
+-	// canSpecialize tells that the device draws with the pipelines of the
+-	// classes: those of Metal's Mac2 family, Apple's among them, do. Older
+-	// ones, as Intel's Haswell (#1566), draw every batch with the general
+-	// pipeline, and their batches are not separated by class.
++	// canSpecialize tells that the device draws with pipelines of the classes.
++	// Other devices keep every batch on the general pipeline.
+ 	canSpecialize bool
+ 	// formats has what draws into BGRA8 targets, as frames do, and into
+ 	// RGBA16Float ones, as frames showing colors outside the sRGB gamut do
+@@ -631,8 +630,12 @@
+ 	// Specialized pipelines compile on a worker while frames draw: a
+ 	// Haswell GPU on macOS 14 (through OpenCore Legacy Patcher) hung in
+ 	// a frame drawn while two of them compiled (#1566). GPUs older than
+-	// the Mac2 family keep to the general pipeline, from the first frame.
+-	r.canSpecialize = respondsTo(r.device, "supportsFamily:") && byte(send(r.device, "supportsFamily:", gpuFamilyMac2)) != 0
++	// the Mac2 family on macOS keep to the general pipeline. Mobile Apple
++	// GPUs report their Apple family instead.
++	if respondsTo(r.device, "supportsFamily:") {
++		r.canSpecialize = byte(send(r.device, "supportsFamily:", gpuFamilyMac2)) != 0 ||
++			runtime.GOOS == "ios" && byte(send(r.device, "supportsFamily:", gpuFamilyApple2)) != 0
++	}
+ 	return nil
+ }
+ 
+diff --git a/internal/gpu/metal/pipelines.go b/internal/gpu/metal/pipelines.go
+--- a/internal/gpu/metal/pipelines.go
++++ b/internal/gpu/metal/pipelines.go
+@@ -15,8 +15,8 @@
+ // waits for one: pipeFor returns the general pipeline, which draws the same
+ // pixels, until a worker goroutine has made the specialized one, and a cache
+ // shared by every renderer of a device keeps them, so that a second window
+-// finds them made. GPUs older than Metal's Mac2 family (canSpecialize) have
+-// none: every batch draws with the general pipeline, and nothing compiles
++// finds them made. On devices where canSpecialize is false, every batch
++// draws with the general pipeline, and nothing compiles
+ // behind the frames.
+ 
+ // pipeKey names a pipeline: the pixel format of the target, the classes of

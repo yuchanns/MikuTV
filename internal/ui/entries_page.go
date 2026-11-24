@@ -1,0 +1,99 @@
+package tvui
+
+import (
+	"log"
+
+	"github.com/egoist/mygo/ui"
+	"github.com/yuchanns/MikuTV/internal/app"
+)
+
+type entriesPage struct{}
+
+func (entriesPage) Render(c *ui.Context, p *PageContext) {
+	width := p.Width - 186
+	p.region("entries", focusEdges{app.Left: p.left})
+	text := p.Assets.Text
+	note := text.EntriesNote
+	if entry, ok := p.State.Current(); ok {
+		note = text.CurrentEntry + " · " + entry.Name
+	}
+	p.heading(c, text.EntriesTitle, note)
+	entries := p.State.Entries()
+	if len(entries) == 0 {
+		colors := p.Theme.Colors
+		ui.Column(c).FillWidth().Height(530).Center().Gap(22).Children(func() {
+			ui.Icon(c, p.Assets.Icon("plug")).Size(64, 64).TextColor(paint(colors.Accent.Soft))
+			ui.Text(c, text.EmptyEntries).FontSize(36).FontWeight(550)
+			ui.Text(c, text.EmptyEntryNote).FontSize(22).TextColor(paint(colors.Text.Muted))
+			p.actionButton(c, text.Manage, "plug", app.ManagePlugins, "entries", func() {
+				p.host.pluginsUI.view = pluginsViewInstalled
+				p.host.pluginsUI.selectedInstalledID = ""
+				p.host.pluginsUI.selectedCatalogRepo = ""
+				p.State.Navigate(app.Route{Page: app.Settings, Section: "plugins"})
+			}).Margin(10, 0, 0, 0).AlignSelf(ui.Center)
+		})
+		return
+	}
+	columns := max(1, min(3, int(width/430)))
+	cardWidth := (width - float32(columns-1)*30) / float32(columns)
+	list := p.listState("entries")
+	if p.active && p.host.reveal {
+		for i, entry := range entries {
+			if p.State.Focus == app.EntryFocus(entry.ID) {
+				list.ScrollIntoView(i / columns)
+				break
+			}
+		}
+	}
+	ui.List(c.Key("entries"), list, (len(entries)+columns-1)/columns).FillWidth().MaxHeight(p.Height*0.65).
+		Padding(0, 0, focusBottomMargin, 0).Rows(func(row ui.ListRow) {
+		c := row.Context
+		first := row.Index * columns
+		ui.Row(c).FillWidth().Gap(30).Margin(0, 0, 30, 0).Children(func() {
+			for _, entry := range entries[first:min(len(entries), first+columns)] {
+				p.entryCard(c, entry, cardWidth)
+			}
+		})
+	})
+}
+
+func (p *PageContext) entryCard(c *ui.Context, entry app.Entry, width float32) {
+	id := app.EntryFocus(entry.ID)
+	colors := p.Theme.Colors
+	border := ui.Transparent
+	if p.State.Focus == id {
+		border = paint(colors.Focus.Ring)
+	}
+	e := ui.Column(c.Key(string(id))).Width(width).Shrink(0).Gap(14).Role(ui.RoleButton).Label(entry.Name).
+		OnClick(func() {
+			p.dispatch(func() {
+				if p.State.SelectEntry(entry.ID) {
+					if err := p.Preferences.Save(app.Preferences{RecentEntry: entry.ID}); err != nil {
+						log.Print(err)
+						p.host.notice = p.Assets.Text.SaveFailed
+					}
+				}
+			})
+		})
+	e.Children(func() {
+		ui.Box(c).FillWidth().Height(width/2).Radius(14).Border(4, border).
+			Background(paint(colors.Decoration.CardStart)).Clip().
+			Transition(ui.ElementTransition{Colors: true, Duration: focusDuration}).Children(func() {
+			if image := p.Assets.Artwork(entry.Artwork); image != nil {
+				ui.Image(c, image).Fill().Fit(ui.Cover)
+			} else {
+				ui.Box(c).Fill().Center().Children(func() { ui.Icon(c, p.Assets.Icon("tv")).Size(96, 96).TextColor(paint(colors.Accent.Soft)) })
+			}
+			if entry.ID == p.State.CurrentEntry {
+				ui.Row(c).Absolute().Right(16).Top(16).Gap(8).Padding(8, 12).Radius(8).
+					Background(paint(colors.Selected.Background)).TextColor(paint(colors.Selected.Foreground)).Children(func() {
+					ui.Icon(c, p.Assets.Icon("check")).Size(18, 18)
+					ui.Text(c, p.Assets.Text.CurrentEntry).FontSize(16)
+				})
+			}
+		})
+		ui.Text(c, entry.Name).FontSize(27).Bold()
+		ui.Text(c, entry.Description).FontSize(19).TextColor(paint(colors.Text.Secondary))
+	})
+	p.bind(e, id, "entries")
+}

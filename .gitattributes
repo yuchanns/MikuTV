@@ -1,0 +1,2 @@
+# Unified diff context has intentional whitespace; git apply checks patched code.
+patch/**/*.patch -whitespace

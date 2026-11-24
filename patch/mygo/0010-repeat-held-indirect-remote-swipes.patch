@@ -1,0 +1,241 @@
+diff --git a/internal/tvos/app.go b/internal/tvos/app.go
+--- a/internal/tvos/app.go
++++ b/internal/tvos/app.go
+@@ -131,14 +131,8 @@
+ 			}
+ 		}},
+ 		{Cmd: sel("remotePan:"), Fn: func(self id, _ objc.SEL, recognizer id) {
+-			const ended = 3 // UIGestureRecognizerStateEnded
+-			if w := b.window; w != nil && w.view == self && w.IsFocused() && send(recognizer, "state") == ended {
+-				delta := native.panTranslation(recognizer, sel("translationInView:"), w.view)
+-				// Remote focus follows the user's swipe direction.
+-				if key := panKey(delta.X, delta.Y); key != platform.KeyUnknown {
+-					w.sendRemoteKey(key, platform.KeyPressed)
+-					w.sendRemoteKey(key, platform.KeyReleased)
+-				}
++			if w := b.window; w != nil && w.view == self && w.IsFocused() {
++				w.updateRemotePan(recognizer)
+ 			}
+ 		}},
+ 		{Cmd: sel("pressesBegan:withEvent:"), Fn: func(self id, cmd objc.SEL, presses, event id) {
+diff --git a/internal/tvos/window.go b/internal/tvos/window.go
+--- a/internal/tvos/window.go
++++ b/internal/tvos/window.go
+@@ -23,6 +23,7 @@
+ 	pending      bool
+ 	closed       bool
+ 	handledKeys  remotePresses
++	pan          remotePan
+ 	repeat       remoteRepeat
+ 	textInput    platform.TextInputState
+ 	textField    id
+@@ -147,6 +148,7 @@
+ 
+ func (w *window) cancelRemotePresses() {
+ 	w.repeat = remoteRepeat{}
++	w.pan = remotePan{}
+ 	clear(w.handledKeys)
+ }
+ 
+@@ -187,6 +189,43 @@
+ 	send(recognizer, "release")
+ }
+ 
++func (w *window) updateRemotePan(recognizer id) {
++	const ( // UIGestureRecognizerState values.
++		began     = 1
++		changed   = 2
++		ended     = 3
++		cancelled = 4
++		failed    = 5
++	)
++	state := send(recognizer, "state")
++	switch state {
++	case began, changed:
++		delta := native.panTranslation(recognizer, sel("translationInView:"), w.view)
++		if key := w.pan.move(delta.X, delta.Y); key != platform.KeyUnknown && w.sendRemoteKey(key, platform.KeyPressed) {
++			w.startRemoteRepeat(key, remoteTouch)
++		}
++	case ended, cancelled, failed:
++		key := w.pan.key
++		w.pan = remotePan{}
++		if key != platform.KeyUnknown {
++			w.repeat.end(key, remoteTouch)
++			w.sendRemoteKey(key, platform.KeyReleased)
++		} else if state == ended {
++			delta := native.panTranslation(recognizer, sel("translationInView:"), w.view)
++			if key := panKey(delta.X, delta.Y); key != platform.KeyUnknown {
++				w.sendRemoteKey(key, platform.KeyPressed)
++				w.sendRemoteKey(key, platform.KeyReleased)
++			}
++		}
++	}
++}
++
++func (w *window) startRemoteRepeat(key platform.Key, input remoteInput) {
++	if w.IsFocused() && w.repeat.begin(key, input, time.Now()) {
++		send(w.link, "setPaused:", false)
++	}
++}
++
+ func (w *window) sendRemoteKey(key platform.Key, kind platform.SurfaceEventKind) bool {
+ 	return w.h.SurfaceEvent(platform.SurfaceEvent{Kind: kind, Key: key, PhysicalKey: key})
+ }
+@@ -201,7 +240,7 @@
+ 			continue
+ 		}
+ 		if kind == platform.KeyReleased {
+-			w.repeat.end(key)
++			w.repeat.end(key, remoteButton)
+-		} else if (key == platform.KeyUp || key == platform.KeyDown) && w.handledKeys[key] {
++		} else if isRemoteDirection(key) && w.handledKeys[key] {
+ 			handled = true
+ 			continue
+@@ -211,8 +250,8 @@
+ 			taken = w.sendRemoteKey(key, kind)
+ 		}
+ 		handled = w.handledKeys.take(key, kind, taken) || handled
+-		if kind == platform.KeyPressed && taken && w.IsFocused() && w.repeat.begin(key, time.Now()) {
+-			send(w.link, "setPaused:", false)
++		if kind == platform.KeyPressed && taken {
++			w.startRemoteRepeat(key, remoteButton)
+ 		}
+ 	}
+ 	return handled
+diff --git a/internal/tvos/remote.go b/internal/tvos/remote.go
+--- a/internal/tvos/remote.go
++++ b/internal/tvos/remote.go
+@@ -68,21 +68,58 @@
+ 	remoteSpeedUpAfter = 950 * time.Millisecond
+ )
+ 
++func isRemoteDirection(key platform.Key) bool {
++	switch key {
++	case platform.KeyLeft, platform.KeyRight, platform.KeyUp, platform.KeyDown:
++		return true
++	default:
++		return false
++	}
++}
++
++type remotePan struct {
++	x, y    float64
++	started bool
++	key     platform.Key
++}
++
++func (p *remotePan) move(x, y float64) platform.Key {
++	if !p.started {
++		// Indirect pans may begin with an offset from the touch surface.
++		p.x, p.y, p.started = x, y, true
++		return platform.KeyUnknown
++	}
++	dx, dy := x-p.x, y-p.y
++	if p.key != platform.KeyUnknown || max(math.Abs(dx), math.Abs(dy)) < 4 {
++		return platform.KeyUnknown
++	}
++	p.key = panKey(dx, dy)
++	return p.key
++}
++
++type remoteInput uint8
++
++const (
++	remoteButton remoteInput = iota
++	remoteTouch
++)
++
+ type remoteRepeat struct {
+ 	key          platform.Key
++	input        remoteInput
+ 	next, fastAt time.Time
+ }
+ 
+-func (r *remoteRepeat) begin(key platform.Key, now time.Time) bool {
++func (r *remoteRepeat) begin(key platform.Key, input remoteInput, now time.Time) bool {
+-	if key != platform.KeyUp && key != platform.KeyDown {
++	if !isRemoteDirection(key) {
+ 		return false
+ 	}
+-	*r = remoteRepeat{key: key, next: now.Add(remoteHoldDelay), fastAt: now.Add(remoteSpeedUpAfter)}
++	*r = remoteRepeat{key: key, input: input, next: now.Add(remoteHoldDelay), fastAt: now.Add(remoteSpeedUpAfter)}
+ 	return true
+ }
+ 
+-func (r *remoteRepeat) end(key platform.Key) {
+-	if r.key == key {
++func (r *remoteRepeat) end(key platform.Key, input remoteInput) {
++	if r.key == key && r.input == input {
+ 		*r = remoteRepeat{}
+ 	}
+ }
+diff --git a/internal/tvos/remote_test.go b/internal/tvos/remote_test.go
+--- a/internal/tvos/remote_test.go
++++ b/internal/tvos/remote_test.go
+@@ -44,7 +44,7 @@
+-func TestHeldVerticalRemotePressUsesDelayAndAccelerates(t *testing.T) {
++func TestHeldRemotePressUsesDelayAndAccelerates(t *testing.T) {
+ 	start := time.Now()
+ 	var repeat remoteRepeat
+-	if repeat.begin(platform.KeyLeft, start) || !repeat.begin(platform.KeyDown, start) {
++	if repeat.begin(platform.KeyEnter, remoteButton, start) || !repeat.begin(platform.KeyDown, remoteButton, start) {
+-		t.Fatal("only vertical remote presses should repeat")
++		t.Fatal("only directional remote presses should repeat")
+ 	}
+ 	if got := repeat.poll(start.Add(remoteHoldDelay - time.Millisecond)); got != platform.KeyUnknown {
+@@ -61,14 +61,52 @@
+ 	if got := repeat.poll(late); got != platform.KeyUnknown {
+ 		t.Fatalf("late frame emitted multiple repeats: %v", got)
+ 	}
+-	repeat.begin(platform.KeyUp, late)
+-	repeat.end(platform.KeyDown)
++	repeat.begin(platform.KeyUp, remoteButton, late)
++	repeat.end(platform.KeyDown, remoteButton)
+ 	if got := repeat.poll(late.Add(remoteHoldDelay)); got != platform.KeyUp {
+ 		t.Fatalf("new direction should win: %v", got)
+ 	}
+-	repeat.end(platform.KeyUp)
++	repeat.end(platform.KeyUp, remoteButton)
+ 	if got := repeat.poll(late.Add(5 * time.Second)); got != platform.KeyUnknown {
+ 		t.Fatalf("release left a repeat scheduled: %v", got)
++	}
++}
++
++func TestHorizontalRemotePressesRepeat(t *testing.T) {
++	var repeat remoteRepeat
++	start := time.Now()
++	for _, direction := range []platform.Key{platform.KeyLeft, platform.KeyRight} {
++		if !repeat.begin(direction, remoteButton, start) || repeat.poll(start.Add(remoteHoldDelay)) != direction {
++			t.Fatalf("holding %v did not repeat", direction)
++		}
++		repeat.end(direction, remoteButton)
++	}
++}
++
++func TestRemotePanUsesMovementAfterTheStartingOffset(t *testing.T) {
++	var pan remotePan
++	if pan.move(-1350, 0) != platform.KeyUnknown || pan.move(-1348, 1) != platform.KeyUnknown {
++		t.Fatal("the starting offset or small drift produced a key")
++	}
++	if got := pan.move(-1290, 2); got != platform.KeyRight {
++		t.Fatalf("rightward movement after a negative offset produced %v", got)
++	}
++	if got := pan.move(-1500, 0); got != platform.KeyUnknown {
++		t.Fatalf("an active gesture emitted a second key: %v", got)
++	}
++}
++
++func TestTouchRemoteHoldKeepsItsOwnRelease(t *testing.T) {
++	var repeat remoteRepeat
++	start := time.Now()
++	repeat.begin(platform.KeyDown, remoteTouch, start)
++	repeat.end(platform.KeyDown, remoteButton)
++	if got := repeat.poll(start.Add(remoteHoldDelay)); got != platform.KeyDown {
++		t.Fatalf("a button release cancelled the held touch gesture: %v", got)
++	}
++	repeat.end(platform.KeyDown, remoteTouch)
++	if got := repeat.poll(start.Add(2 * time.Second)); got != platform.KeyUnknown {
++		t.Fatalf("releasing the held touch gesture left a repeat scheduled: %v", got)
+ 	}
+ }
+ 

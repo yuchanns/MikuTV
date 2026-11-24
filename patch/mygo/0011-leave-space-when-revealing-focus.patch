@@ -1,0 +1,21 @@
+diff --git a/ui/scroll.go b/ui/scroll.go
+--- a/ui/scroll.go
++++ b/ui/scroll.go
+@@ -124,6 +124,9 @@
+ 	// the container's, inside its border. Right to left, the inline start
+ 	// is at the right.
+ 	Block, Inline ScrollAlign
++	// BlockEndMargin leaves extra space between the element and the bottom
++	// of each vertical scroll viewport, where its scroll range allows it.
++	BlockEndMargin float32
+ 	// Animation, when set, glides the containers there as it says (Smooth,
+ 	// a spring, or a curve), as the web's behavior: "smooth" does, rather
+ 	// than at once. The user scrolling, or the app, stops it. While the
+@@ -349,6 +352,7 @@
+ 		// taller than the view, as a code editor as high as its lines.
+ 		x, y, w, h = x+r.X, y+r.Y, max(r.W, 1), r.H
+ 	}
++	h += max(o.BlockEndMargin, 0)
+ 	rt := e.c.rt
+ 	frame := rt.frame
+ 	smooth := o.Animation != nil && !rt.preferences().ReduceMotion && !rt.instant()

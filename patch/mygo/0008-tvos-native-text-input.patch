@@ -1,0 +1,206 @@
+diff --git a/internal/tvos/window.go b/internal/tvos/window.go
+--- a/internal/tvos/window.go
++++ b/internal/tvos/window.go
+@@ -24,6 +24,8 @@
+ 	closed       bool
+ 	handledKeys  remotePresses
+ 	repeat       remoteRepeat
++	textInput    platform.TextInputState
++	textField    id
+ }
+ 
+ func (b *Backend) NewWindow(options *platform.WindowOptions, handler platform.WindowHandler) (platform.Window, error) {
+@@ -92,6 +94,7 @@
+ 		return
+ 	}
+ 	w.closed, w.visible = true, false
++	w.removeTextField()
+ 	w.b.window = nil
+ 	send(w.link, "invalidate")
+ 	// The content releases its renderer before the native layer is destroyed.
+@@ -165,7 +168,6 @@
+ }
+ 
+ func (*window) SetCursor(platform.Cursor)                 {}
+-func (*window) SetTextInput(platform.TextInputState)      {}
+ func (*window) UpdateAccessibility(*platform.AccessTree)  {}
+ func (*window) StartDataDrag(platform.DragRequest)        {}
+ func (*window) CancelDataDrag()                           {}
+@@ -204,7 +206,10 @@
+ 			handled = true
+ 			continue
+ 		}
+-		taken := w.sendRemoteKey(key, kind)
++		taken := kind == platform.KeyPressed && key == platform.KeyEnter && w.showTextField()
++		if !taken {
++			taken = w.sendRemoteKey(key, kind)
++		}
+ 		handled = w.handledKeys.take(key, kind, taken) || handled
+ 		if kind == platform.KeyPressed && taken && w.IsFocused() && w.repeat.begin(key, time.Now()) {
+ 			send(w.link, "setPaused:", false)
+diff --git a/internal/tvos/app.go b/internal/tvos/app.go
+--- a/internal/tvos/app.go
++++ b/internal/tvos/app.go
+@@ -109,6 +109,20 @@
+ 	if err := register("MyGoTVView", "UIView", []objc.MethodDef{
+ 		{Cmd: sel("canBecomeFirstResponder"), Fn: func(id, objc.SEL) bool { return true }},
+ 		{Cmd: sel("canBecomeFocused"), Fn: func(id, objc.SEL) bool { return true }},
++		{Cmd: sel("textFieldShouldReturn:"), Fn: func(_ id, _ objc.SEL, field id) bool {
++			send(field, "resignFirstResponder")
++			return false
++		}},
++		{Cmd: sel("textFieldDidEndEditing:reason:"), Fn: func(_ id, _ objc.SEL, field id, reason int) {
++			if b.window != nil {
++				b.window.finishTextField(field, reason)
++			}
++		}},
++		{Cmd: sel("textFieldChanged:"), Fn: func(_ id, _ objc.SEL, field id) {
++			if b.window != nil {
++				b.window.limitTextField(field)
++			}
++		}},
+ 		{Cmd: sel("layoutSubviews"), Fn: func(self id, cmd objc.SEL) {
+ 			sendViewSuper(self, cmd)
+ 			if b.window != nil {
+diff --git a/internal/platform/surface.go b/internal/platform/surface.go
+--- a/internal/platform/surface.go
++++ b/internal/platform/surface.go
+@@ -305,6 +305,10 @@
+ 	NoInputMethod bool
+ 	// Traits describe the input to on-screen keyboards.
+ 	Traits TextTraits
++	// Placeholder and the edit limits travel with the focused input to a
++	// backend that presents a native field.
++	Placeholder string
++	MaxLength   int
+ 	// ShowKeyboard counts the requests for the on-screen keyboard to show,
+ 	// as a finger taps the input again after the keyboard was dismissed
+ 	// while it kept the focus.
+diff --git a/ui/input.go b/ui/input.go
+--- a/ui/input.go
++++ b/ui/input.go
+@@ -1584,6 +1584,8 @@
+ 			t.Traits = s.traits
+ 			if s.editor != nil {
+ 				t.Traits.Multiline, t.Traits.Secure = s.editor.multiline, s.editor.password
++				t.Placeholder = s.editor.placeholder
++				t.MaxLength = s.editor.maxLength
+ 			}
+ 		}
+ 		t.ShowKeyboard = rt.ime.show
+diff --git a/internal/tvos/text_input.go b/internal/tvos/text_input.go
+new file mode 100644
+--- /dev/null
++++ b/internal/tvos/text_input.go
+@@ -0,0 +1,111 @@
++//go:build ios && tvos && arm64
++
++package tvos
++
++import (
++	"math"
++
++	"github.com/ebitengine/purego/objc"
++	"github.com/egoist/mygo/internal/platform"
++)
++
++const textEditingChanged = 1 << 17 // UIControlEventEditingChanged
++
++func (w *window) SetTextInput(state platform.TextInputState) {
++	previous := w.textInput
++	w.textInput = state
++	changed := previous.Client != state.Client
++	if !state.Active || state.NoInputMethod || changed {
++		w.removeTextField()
++	}
++	if !previous.Active || changed || previous.ShowKeyboard != state.ShowKeyboard {
++		w.showTextField()
++	}
++}
++
++func (w *window) showTextField() bool {
++	state := w.textInput
++	if !state.Active || state.Client == nil || state.NoInputMethod || !w.IsFocused() || w.textField != 0 {
++		return false
++	}
++	value, _ := state.Client.TextForRange(platform.TextRange{End: math.MaxInt32})
++	// UIKit owns the onscreen keyboard. Keep its backing field outside the
++	// drawn surface so MyGo's focused element remains the visible editor.
++	field := native.initRect(send(class("UITextField"), "alloc"), sel("initWithFrame:"), rect{X: -2, Y: -2, Width: 1, Height: 1})
++	w.textField = field
++	send(field, "setDelegate:", w.view)
++	send(field, "setText:", stringID(value))
++	send(field, "setPlaceholder:", stringID(state.Placeholder))
++	send(field, "setSecureTextEntry:", state.Traits.Secure)
++	send(field, "setKeyboardType:", [...]int{0, 7, 4, 8, 5, 3, 10}[state.Traits.Keyboard])
++	send(field, "setReturnKeyType:", [...]int{0, 9, 1, 4, 6, 7}[state.Traits.ReturnKey])
++	if state.Traits.Capitalize != platform.CapitalizeDefault {
++		send(field, "setAutocapitalizationType:", int(state.Traits.Capitalize)-1)
++	}
++	send(field, "setAutocorrectionType:", [...]int{0, 2, 1}[state.Traits.Autocorrect])
++	send(field, "addTarget:action:forControlEvents:", w.view, sel("textFieldChanged:"), textEditingChanged)
++	send(w.view, "addSubview:", field)
++	if !objc.Send[bool](field, sel("becomeFirstResponder")) {
++		w.removeTextField()
++		return false
++	}
++	return true
++}
++
++func (w *window) removeTextField() {
++	if field := w.textField; field != 0 {
++		w.textField = 0
++		send(field, "setDelegate:", id(0))
++		send(field, "removeTarget:action:forControlEvents:", w.view, sel("textFieldChanged:"), textEditingChanged)
++		send(field, "resignFirstResponder")
++		send(field, "removeFromSuperview")
++		// UIKit can still be unwinding this field's delegate callback.
++		send(field, "autorelease")
++		if w.IsFocused() {
++			send(w.view, "becomeFirstResponder")
++		}
++	}
++}
++
++func fieldText(field id) string {
++	return objc.Send[string](send(field, "text"), sel("UTF8String"))
++}
++
++func limitFieldText(value string, maxLength int) string {
++	if maxLength > 0 {
++		return value[:platform.UTF16ByteOffset(value, maxLength)]
++	}
++	return value
++}
++
++func (w *window) limitTextField(field id) {
++	if send(field, "markedTextRange") != 0 {
++		return
++	}
++	value := fieldText(field)
++	if limited := limitFieldText(value, w.textInput.MaxLength); limited != value {
++		send(field, "setText:", stringID(limited))
++	}
++}
++
++func (w *window) finishTextField(field id, reason int) {
++	if field == 0 || w.textField != field {
++		return
++	}
++	state, text := w.textInput, fieldText(field)
++	w.removeTextField()
++
++	const cancelled = 1 // UITextFieldDidEndEditingReasonCancelled
++	key := platform.KeyEscape
++	if reason != cancelled {
++		value := limitFieldText(text, state.MaxLength)
++		key = platform.KeyEnter
++		if client := state.Client; client != nil {
++			if current, all := client.TextForRange(platform.TextRange{End: math.MaxInt32}); current != value {
++				client.ReplaceText(&all, value)
++			}
++		}
++	}
++	w.sendRemoteKey(key, platform.KeyPressed)
++	w.sendRemoteKey(key, platform.KeyReleased)
++}

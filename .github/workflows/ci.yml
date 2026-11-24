@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Vet, Test & Package tvOS IPA
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Select Xcode with AppleTVOS SDK
+        run: |
+          set -euo pipefail
+          if xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
+            echo "Using default Xcode: $(xcode-select -p)"
+            xcodebuild -version
+            exit 0
+          fi
+          selected=""
+          for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
+            if DEVELOPER_DIR="$app/Contents/Developer" xcrun --sdk appletvos --show-sdk-path >/dev/null 2>&1; then
+              selected="$app/Contents/Developer"
+              break
+            fi
+          done
+          if [ -z "$selected" ]; then
+            echo "::error::No installed Xcode contains the appletvos SDK"
+            ls -la /Applications
+            exit 1
+          fi
+          sudo xcode-select -s "$selected"
+          xcodebuild -version
+          xcrun --sdk appletvos --show-sdk-path
+
+      - name: Package unsigned tvOS IPA
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: python3 scripts/tvos.py package
+
+      - name: Go vet
+        run: go vet -mod=vendor ./...
+
+      - name: Go test (race)
+        run: go test -mod=vendor -race -count=1 -timeout 20m ./...
+
+      - name: Verify Mach-O binaries and IPA bundle
+        run: |
+          set -euo pipefail
+          app=".build/tvos/Payload/MikuTV.app"
+          ipa=".build/tvos/MikuTV-unsigned.ipa"
+          test -f "$ipa"
+          for bin in "$app/MikuTV" "$app/PlugIns/TopShelf.appex/TopShelf"; do
+            file "$bin" | grep -q "arm64"
+            non_sys="$(otool -L "$bin" | tail -n +2 | awk '{print $1}' | grep -Ev '^(/usr/lib/|/System/Library/Frameworks/)' || true)"
+            if [ -n "$non_sys" ]; then
+              echo "::error::Unexpected non-system dynamic libraries in $bin: $non_sys"
+              exit 1
+            fi
+          done
+          unzip -l "$ipa" | grep -q "Payload/MikuTV.app/Info.plist"
+          unzip -l "$ipa" | grep -q "Payload/MikuTV.app/PlugIns/TopShelf.appex/TopShelf"
+          shasum -a 256 "$ipa"
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: MikuTV-tvOS-unsigned-build-${{ github.run_number }}
+          path: .build/tvos/MikuTV-unsigned.ipa
+          retention-days: 7

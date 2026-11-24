@@ -1,0 +1,680 @@
+diff --git a/backend_mobile.go b/backend_mobile.go
+index 3a67b15..e34cfd2 100644
+--- a/backend_mobile.go
++++ b/backend_mobile.go
+@@ -1,4 +1,4 @@
+-//go:build ios || android
++//go:build (ios && !tvos) || android
+ 
+ package mygo
+ 
+diff --git a/backend_tvos.go b/backend_tvos.go
+new file mode 100644
+index 0000000..2cf4892
+--- /dev/null
++++ b/backend_tvos.go
+@@ -0,0 +1,10 @@
++//go:build ios && tvos && arm64
++
++package mygo
++
++import (
++	"github.com/egoist/mygo/internal/platform"
++	"github.com/egoist/mygo/internal/tvos"
++)
++
++func newBackend() platform.Backend { return tvos.New() }
+diff --git a/internal/tvos/app.go b/internal/tvos/app.go
+new file mode 100644
+index 0000000..1b12a76
+--- /dev/null
++++ b/internal/tvos/app.go
+@@ -0,0 +1,165 @@
++//go:build ios && tvos && arm64
++
++// Package tvos implements the single-window UIKit backend using Go and purego.
++package tvos
++
++import (
++	"fmt"
++	"log"
++	"os"
++	"unsafe"
++
++	"github.com/ebitengine/purego"
++	"github.com/ebitengine/purego/objc"
++	"github.com/egoist/mygo/internal/platform"
++	"github.com/egoist/mygo/internal/unsupported"
++)
++
++type Backend struct {
++	unsupported.Backend
++	h            platform.AppHandler
++	window       *window
++	loop, source uintptr
++	active       bool
++	loadErr      error
++}
++
++func New() *Backend                 { return &Backend{loadErr: load()} }
++func (*Backend) Name() string       { return "tvos/uikit" }
++func (*Backend) IsMainThread() bool { return native.mainThread == nil || native.mainThread() != 0 }
++
++func (b *Backend) Init(h platform.AppHandler, _ platform.AppOptions) error {
++	if b.loadErr != nil {
++		return b.loadErr
++	}
++	b.h = h
++	if err := b.registerClasses(); err != nil {
++		return fmt.Errorf("tvos: register classes: %w", err)
++	}
++	b.loop = native.mainLoop()
++	var context [10]uintptr
++	context[9] = purego.NewCallback(func(uintptr) { b.h.Dispatch() })
++	b.source = native.sourceCreate(0, 0, unsafe.Pointer(&context[0]))
++	if b.source == 0 {
++		return fmt.Errorf("tvos: create main run loop source")
++	}
++	native.addSource(b.loop, b.source, native.commonModes)
++	return nil
++}
++
++func (b *Backend) Run() error {
++	pool := native.poolPush()
++	defer native.poolPop(pool)
++	code := native.applicationMain(0, 0, 0, stringID("MyGoTVAppDelegate"))
++	return fmt.Errorf("tvos: UIApplicationMain returned %d", code)
++}
++
++// UIKit owns the application lifetime; an explicit App.Quit exits the process.
++func (*Backend) Quit() { os.Exit(0) }
++
++func (b *Backend) Signal() {
++	native.signalSource(b.source)
++	native.wakeLoop(b.loop)
++}
++
++func (b *Backend) Wake() { b.Signal() }
++func (*Backend) Step()   { native.runMode(native.defaultMode, 0.05, true) }
++
++func (b *Backend) registerClasses() error {
++	if err := register("MyGoTVAppDelegate", "UIResponder", []objc.MethodDef{
++		{Cmd: sel("application:didFinishLaunchingWithOptions:"), Fn: func(_ id, _ objc.SEL, app id, _ id) bool {
++			b.active = send(app, "applicationState") != 2
++			log.Print("mygo: tvos/uikit ready on main thread")
++			b.h.Ready()
++			return true
++		}},
++		{Cmd: sel("window"), Fn: func(id, objc.SEL) id {
++			if b.window != nil {
++				return b.window.native
++			}
++			return 0
++		}},
++		{Cmd: sel("applicationDidBecomeActive:"), Fn: func(id, objc.SEL, id) {
++			b.active = true
++			b.h.DidBecomeActive()
++			if b.window != nil {
++				b.window.h.Focused()
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceFocus})
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceShown})
++				b.window.RequestFrame()
++			}
++		}},
++		{Cmd: sel("applicationWillResignActive:"), Fn: func(id, objc.SEL, id) {
++			b.active = false
++			if b.window != nil {
++				send(b.window.link, "setPaused:", true)
++				b.window.h.Blurred()
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceBlur})
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceHidden})
++			}
++			b.h.DidResignActive()
++		}},
++		{Cmd: sel("applicationDidEnterBackground:"), Fn: func(id, objc.SEL, id) {
++			if b.window != nil {
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceHidden})
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceLowMemory})
++			}
++			b.h.PowerEvent("suspend")
++		}},
++		{Cmd: sel("applicationWillEnterForeground:"), Fn: func(id, objc.SEL, id) { b.h.PowerEvent("resume") }},
++		{Cmd: sel("applicationDidReceiveMemoryWarning:"), Fn: func(id, objc.SEL, id) {
++			b.h.MemoryWarning()
++			if b.window != nil {
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceLowMemory})
++			}
++		}},
++		{Cmd: sel("applicationWillTerminate:"), Fn: func(id, objc.SEL, id) { b.h.Terminating() }},
++	}); err != nil {
++		return err
++	}
++	if err := register("MyGoTVView", "UIView", []objc.MethodDef{
++		{Cmd: sel("canBecomeFirstResponder"), Fn: func(id, objc.SEL) bool { return true }},
++		{Cmd: sel("canBecomeFocused"), Fn: func(id, objc.SEL) bool { return true }},
++		{Cmd: sel("layoutSubviews"), Fn: func(self id, cmd objc.SEL) {
++			sendViewSuper(self, cmd)
++			if b.window != nil {
++				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceResize})
++				b.window.RequestFrame()
++			}
++		}},
++		{Cmd: sel("pressesBegan:withEvent:"), Fn: func(self id, cmd objc.SEL, presses, event id) {
++			if b.window == nil || !b.window.press(presses, platform.KeyPressed) {
++				sendViewSuper(self, cmd, presses, event)
++			}
++		}},
++		{Cmd: sel("pressesEnded:withEvent:"), Fn: func(self id, cmd objc.SEL, presses, event id) {
++			if b.window == nil || !b.window.press(presses, platform.KeyReleased) {
++				sendViewSuper(self, cmd, presses, event)
++			}
++		}},
++		{Cmd: sel("pressesCancelled:withEvent:"), Fn: func(self id, cmd objc.SEL, presses, event id) {
++			if b.window != nil {
++				b.window.press(presses, platform.KeyReleased)
++			}
++			sendViewSuper(self, cmd, presses, event)
++		}},
++	}); err != nil {
++		return err
++	}
++	return register("MyGoTVFrameTarget", "NSObject", []objc.MethodDef{
++		{Cmd: sel("displayFrame:"), Fn: func(id, objc.SEL, id) {
++			w := b.window
++			if w == nil {
++				return
++			}
++			send(w.link, "setPaused:", true)
++			if !b.active || !w.visible || !w.pending {
++				return
++			}
++			w.pending = false
++			if w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceFrame, Paced: true}) {
++				w.RequestFrame()
++			}
++		}},
++	})
++}
+diff --git a/internal/tvos/desktop.go b/internal/tvos/desktop.go
+new file mode 100644
+index 0000000..85e1157
+--- /dev/null
++++ b/internal/tvos/desktop.go
+@@ -0,0 +1,106 @@
++//go:build ios && tvos && arm64
++
++package tvos
++
++import "github.com/egoist/mygo/internal/platform"
++
++// Desktop chrome and WebKit are unavailable on tvOS. Keep their inert defaults
++// separate from the implemented UIKit window and return errors to async callers.
++type desktopWindow struct{}
++
++func (desktopWindow) SetRepresentedFile(string)                  {}
++func (desktopWindow) SetDocumentEdited(bool)                     {}
++func (desktopWindow) SetBounds(platform.Rect)                    {}
++func (desktopWindow) SetContentBounds(platform.Rect)             {}
++func (desktopWindow) SetMinimumSize(platform.Size)               {}
++func (desktopWindow) SetMaximumSize(platform.Size)               {}
++func (desktopWindow) SetResizable(bool)                          {}
++func (desktopWindow) IsResizable() bool                          { return false }
++func (desktopWindow) SetMovable(bool)                            {}
++func (desktopWindow) IsMovable() bool                            { return false }
++func (desktopWindow) SetMinimizable(bool)                        {}
++func (desktopWindow) IsMinimizable() bool                        { return false }
++func (desktopWindow) SetMaximizable(bool)                        {}
++func (desktopWindow) IsMaximizable() bool                        { return false }
++func (desktopWindow) SetClosable(bool)                           {}
++func (desktopWindow) IsClosable() bool                           { return false }
++func (desktopWindow) SetAlwaysOnTop(bool)                        {}
++func (desktopWindow) IsAlwaysOnTop() bool                        { return false }
++func (desktopWindow) Blur()                                      {}
++func (desktopWindow) CornerRadius() float64                      { return 0 }
++func (desktopWindow) Minimize()                                  {}
++func (desktopWindow) IsMinimized() bool                          { return false }
++func (desktopWindow) Maximize()                                  {}
++func (desktopWindow) Unmaximize()                                {}
++func (desktopWindow) IsMaximized() bool                          { return false }
++func (desktopWindow) Restore()                                   {}
++func (desktopWindow) SetFullScreen(bool)                         {}
++func (desktopWindow) IsFullScreen() bool                         { return true }
++func (desktopWindow) Center()                                    {}
++func (desktopWindow) SetBackgroundColor(platform.Color)          {}
++func (desktopWindow) SetOpacity(float64)                         {}
++func (desktopWindow) Opacity() float64                           { return 1 }
++func (desktopWindow) SetHasShadow(bool)                          {}
++func (desktopWindow) HasShadow() bool                            { return false }
++func (desktopWindow) SetIgnoreMouseEvents(bool)                  {}
++func (desktopWindow) IgnoresMouseEvents() bool                   { return false }
++func (desktopWindow) SetContentProtection(bool)                  {}
++func (desktopWindow) SetVibrancy(string)                         {}
++func (desktopWindow) SetVibrancyTint(*platform.Color)            {}
++func (desktopWindow) SetActiveAppearance(bool)                   {}
++func (desktopWindow) SetWindowButtonsTheme(string)               {}
++func (desktopWindow) SetProgressBar(string, float64)             {}
++func (desktopWindow) FlashFrame(bool)                            {}
++func (desktopWindow) SetSkipTaskbar(bool)                        {}
++func (desktopWindow) SetVisibleOnAllWorkspaces(bool)             {}
++func (desktopWindow) SetIcon([]byte) error                       { return platform.ErrUnsupported }
++func (desktopWindow) SetMenu(*platform.Menu)                     {}
++func (desktopWindow) SetAutoHideMenu(bool)                       {}
++func (desktopWindow) TitleBar() platform.TitleBar                { return platform.TitleBar{} }
++func (desktopWindow) StartDrag()                                 {}
++func (desktopWindow) TitleBarDoubleClicked()                     {}
++func (desktopWindow) PlaceFlyout(platform.Flyout, platform.Size) {}
++func (desktopWindow) WebViewHandle() uintptr                     { return 0 }
++func (desktopWindow) LoadURL(string)                             {}
++func (desktopWindow) LoadHTML(string, string)                    {}
++func (desktopWindow) LoadFile(string, string)                    {}
++func (desktopWindow) Reload(bool)                                {}
++func (desktopWindow) StopLoading()                               {}
++func (desktopWindow) GoBack()                                    {}
++func (desktopWindow) GoForward()                                 {}
++func (desktopWindow) CanGoBack() bool                            { return false }
++func (desktopWindow) CanGoForward() bool                         { return false }
++func (desktopWindow) URL() string                                { return "" }
++func (desktopWindow) IsLoading() bool                            { return false }
++func (desktopWindow) Eval(string)                                {}
++func (desktopWindow) SetUserScripts([]platform.UserScript)       {}
++func (desktopWindow) SetContentRules([]any)                      {}
++func (desktopWindow) CallAsyncFunction(_ string, cb func(string, error)) {
++	cb("", platform.ErrUnsupported)
++}
++func (desktopWindow) SetZoom(float64)     {}
++func (desktopWindow) Zoom() float64       { return 1 }
++func (desktopWindow) SetUserAgent(string) {}
++func (desktopWindow) UserAgent() string   { return "" }
++func (desktopWindow) ProcessID() int      { return 0 }
++func (desktopWindow) GPUProcessID() int   { return 0 }
++func (desktopWindow) IsAudible() bool     { return false }
++func (desktopWindow) SetAudioMuted(bool)  {}
++func (desktopWindow) IsAudioMuted() bool  { return false }
++func (desktopWindow) CaptureState(platform.CaptureKind) platform.CaptureState {
++	return platform.CaptureNone
++}
++func (desktopWindow) SetCaptureState(platform.CaptureKind, platform.CaptureState) {}
++func (desktopWindow) TogglePictureInPicture()                                     {}
++func (desktopWindow) PictureInPictureActive(cb func(bool))                        { cb(false) }
++func (desktopWindow) SessionState() []byte                                        { return nil }
++func (desktopWindow) RestoreSessionState([]byte) bool                             { return false }
++func (desktopWindow) OpenDevTools()                                               {}
++func (desktopWindow) CloseDevTools()                                              {}
++func (desktopWindow) IsDevToolsOpened() bool                                      { return false }
++func (desktopWindow) CapturePage(cb func([]byte, error))                          { cb(nil, platform.ErrUnsupported) }
++func (desktopWindow) PrintToPDF(_ platform.PDFOptions, cb func([]byte, error)) {
++	cb(nil, platform.ErrUnsupported)
++}
++func (desktopWindow) DroppedFiles() []string { return nil }
++func (desktopWindow) Print()                 {}
+diff --git a/internal/tvos/objc.go b/internal/tvos/objc.go
+new file mode 100644
+index 0000000..d65692f
+--- /dev/null
++++ b/internal/tvos/objc.go
+@@ -0,0 +1,149 @@
++//go:build ios && tvos && arm64
++
++package tvos
++
++import (
++	"fmt"
++	"runtime"
++	"sync"
++	"unsafe"
++
++	"github.com/ebitengine/purego"
++	"github.com/ebitengine/purego/objc"
++)
++
++type id = objc.ID
++type rect struct{ X, Y, Width, Height float64 }
++
++var native struct {
++	applicationMain func(int32, uintptr, id, id) int32
++	mainThread      func() int32
++	mainLoop        func() uintptr
++	sourceCreate    func(uintptr, int, unsafe.Pointer) uintptr
++	addSource       func(uintptr, uintptr, uintptr)
++	signalSource    func(uintptr)
++	wakeLoop        func(uintptr)
++	runMode         func(uintptr, float64, bool) int32
++	poolPush        func() uintptr
++	poolPop         func(uintptr)
++	getRect         func(id, objc.SEL) rect
++	initRect        func(id, objc.SEL, rect) id
++	commonModes     uintptr
++	defaultMode     uintptr
++	superSend       uintptr
++	getFloat64      func(id, objc.SEL) float64
++}
++
++var (
++	selMu      sync.RWMutex
++	selCache   = make(map[string]objc.SEL)
++	classMu    sync.RWMutex
++	classCache = make(map[string]id)
++)
++
++func load() error {
++	libraries := make(map[string]uintptr)
++	for _, name := range []string{
++		"/usr/lib/libSystem.B.dylib", "/usr/lib/libobjc.A.dylib",
++		"/System/Library/Frameworks/Foundation.framework/Foundation",
++		"/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
++		"/System/Library/Frameworks/QuartzCore.framework/QuartzCore",
++		"/System/Library/Frameworks/UIKit.framework/UIKit",
++	} {
++		lib, err := purego.Dlopen(name, purego.RTLD_NOW|purego.RTLD_GLOBAL)
++		if err != nil {
++			return fmt.Errorf("tvos: load %s: %w", name, err)
++		}
++		libraries[name] = lib
++	}
++	cf := libraries["/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"]
++	ui := libraries["/System/Library/Frameworks/UIKit.framework/UIKit"]
++	libobjc := libraries["/usr/lib/libobjc.A.dylib"]
++	var err error
++	native.superSend, err = purego.Dlsym(libobjc, "objc_msgSendSuper")
++	if err != nil {
++		return err
++	}
++	purego.RegisterLibFunc(&native.applicationMain, ui, "UIApplicationMain")
++	purego.RegisterLibFunc(&native.getFloat64, libobjc, "objc_msgSend")
++	purego.RegisterLibFunc(&native.mainThread, libraries["/usr/lib/libSystem.B.dylib"], "pthread_main_np")
++	purego.RegisterLibFunc(&native.mainLoop, cf, "CFRunLoopGetMain")
++	purego.RegisterLibFunc(&native.sourceCreate, cf, "CFRunLoopSourceCreate")
++	purego.RegisterLibFunc(&native.addSource, cf, "CFRunLoopAddSource")
++	purego.RegisterLibFunc(&native.signalSource, cf, "CFRunLoopSourceSignal")
++	purego.RegisterLibFunc(&native.wakeLoop, cf, "CFRunLoopWakeUp")
++	purego.RegisterLibFunc(&native.runMode, cf, "CFRunLoopRunInMode")
++	purego.RegisterLibFunc(&native.poolPush, libobjc, "objc_autoreleasePoolPush")
++	purego.RegisterLibFunc(&native.poolPop, libobjc, "objc_autoreleasePoolPop")
++	purego.RegisterLibFunc(&native.getRect, libobjc, "objc_msgSend")
++	purego.RegisterLibFunc(&native.initRect, libobjc, "objc_msgSend")
++	for name, destination := range map[string]*uintptr{
++		"kCFRunLoopCommonModes": &native.commonModes, "kCFRunLoopDefaultMode": &native.defaultMode,
++	} {
++		address, err := purego.Dlsym(cf, name)
++		if err != nil {
++			return err
++		}
++		*destination = **(**uintptr)(unsafe.Pointer(&address))
++	}
++	return nil
++}
++
++func sel(name string) objc.SEL {
++	selMu.RLock()
++	s, ok := selCache[name]
++	selMu.RUnlock()
++	if ok {
++		return s
++	}
++	s = objc.RegisterName(name)
++	selMu.Lock()
++	selCache[name] = s
++	selMu.Unlock()
++	return s
++}
++
++func class(name string) id {
++	classMu.RLock()
++	c, ok := classCache[name]
++	classMu.RUnlock()
++	if ok {
++		return c
++	}
++	c = id(objc.GetClass(name))
++	if c != 0 {
++		classMu.Lock()
++		classCache[name] = c
++		classMu.Unlock()
++	}
++	return c
++}
++
++func alloc(name string) id { return send(send(class(name), "alloc"), "init") }
++
++func send(object id, method string, args ...any) id {
++	return object.Send(sel(method), args...)
++}
++
++func stringID(value string) id {
++	return send(class("NSString"), "stringWithUTF8String:", value)
++}
++
++func register(name, superclass string, methods []objc.MethodDef) error {
++	_, err := objc.RegisterClass(name, objc.GetClass(superclass), nil, nil, methods)
++	return err
++}
++
++// sendViewSuper names the defined superclass, independent of runtime subclasses.
++func sendViewSuper(self id, command objc.SEL, values ...id) id {
++	context := struct{ receiver, superclass id }{self, class("UIView")}
++	var pin runtime.Pinner
++	pin.Pin(&context)
++	defer pin.Unpin()
++	args := []uintptr{uintptr(unsafe.Pointer(&context)), uintptr(command)}
++	for _, value := range values {
++		args = append(args, uintptr(value))
++	}
++	result, _, _ := purego.SyscallN(native.superSend, args...)
++	return id(result)
++}
+diff --git a/internal/tvos/remote.go b/internal/tvos/remote.go
+new file mode 100644
+index 0000000..45d1441
+--- /dev/null
++++ b/internal/tvos/remote.go
+@@ -0,0 +1,25 @@
++package tvos
++
++import "github.com/egoist/mygo/internal/platform"
++
++// UIPressType values are stable public UIKit constants, independent of key codes.
++func remoteKey(press int) platform.Key {
++	switch press {
++	case 0:
++		return platform.KeyUp
++	case 1:
++		return platform.KeyDown
++	case 2:
++		return platform.KeyLeft
++	case 3:
++		return platform.KeyRight
++	case 4:
++		return platform.KeyEnter
++	case 5:
++		return platform.KeyEscape
++	case 6:
++		return platform.KeySpace
++	default:
++		return platform.KeyUnknown
++	}
++}
+diff --git a/internal/tvos/remote_test.go b/internal/tvos/remote_test.go
+new file mode 100644
+index 0000000..61df972
+--- /dev/null
++++ b/internal/tvos/remote_test.go
+@@ -0,0 +1,22 @@
++package tvos
++
++import (
++	"testing"
++
++	"github.com/egoist/mygo/internal/platform"
++)
++
++func TestRemoteKeys(t *testing.T) {
++	for _, test := range []struct {
++		press int
++		key   platform.Key
++	}{
++		{0, platform.KeyUp}, {1, platform.KeyDown}, {2, platform.KeyLeft},
++		{3, platform.KeyRight}, {4, platform.KeyEnter}, {5, platform.KeyEscape},
++		{6, platform.KeySpace}, {-1, platform.KeyUnknown}, {7, platform.KeyUnknown},
++	} {
++		if got := remoteKey(test.press); got != test.key {
++			t.Errorf("remoteKey(%d) = %v, want %v", test.press, got, test.key)
++		}
++	}
++}
+diff --git a/internal/tvos/window.go b/internal/tvos/window.go
+new file mode 100644
+index 0000000..69f03bb
+--- /dev/null
++++ b/internal/tvos/window.go
+@@ -0,0 +1,151 @@
++//go:build ios && tvos && arm64
++
++package tvos
++
++import (
++	"errors"
++	"fmt"
++
++	"github.com/egoist/mygo/internal/platform"
++	"github.com/egoist/mygo/transfer"
++)
++
++type window struct {
++	desktopWindow
++	b            *Backend
++	h            platform.WindowHandler
++	native, view id
++	link, target id
++	title        string
++	visible      bool
++	pending      bool
++	closed       bool
++}
++
++func (b *Backend) NewWindow(options *platform.WindowOptions, handler platform.WindowHandler) (platform.Window, error) {
++	if !options.Surface {
++		return nil, fmt.Errorf("tvos: only native UI windows are supported: %w", platform.ErrUnsupported)
++	}
++	if b.window != nil {
++		return nil, errors.New("tvos: only one fullscreen window is supported")
++	}
++	screen := send(class("UIScreen"), "mainScreen")
++	bounds := native.getRect(screen, sel("bounds"))
++	w := &window{b: b, h: handler, title: options.Title}
++	w.native = native.initRect(send(class("UIWindow"), "alloc"), sel("initWithFrame:"), bounds)
++	w.view = native.initRect(send(class("MyGoTVView"), "alloc"), sel("initWithFrame:"), rect{Width: bounds.Width, Height: bounds.Height})
++	controller := alloc("UIViewController")
++	send(controller, "setView:", w.view)
++	send(w.native, "setRootViewController:", controller)
++	send(controller, "release")
++	send(w.view, "release")
++	w.target = alloc("MyGoTVFrameTarget")
++	w.link = send(class("CADisplayLink"), "displayLinkWithTarget:selector:", w.target, sel("displayFrame:"))
++	send(w.link, "retain")
++	send(w.link, "setPaused:", true)
++	send(w.link, "addToRunLoop:forMode:", send(class("NSRunLoop"), "mainRunLoop"), native.commonModes)
++	b.window = w
++	return w, nil
++}
++
++func (w *window) Handle() uintptr           { return uintptr(w.native) }
++func (w *window) Surface() platform.Surface { return w }
++func (w *window) SetTitle(value string)     { w.title = value }
++func (w *window) Title() string             { return w.title }
++func (w *window) Bounds() platform.Rect {
++	width, height, _ := w.Size()
++	return platform.Rect{Width: int(width), Height: int(height)}
++}
++func (w *window) ContentBounds() platform.Rect { return w.Bounds() }
++func (w *window) IsVisible() bool              { return w.visible && !w.closed }
++func (w *window) IsFocused() bool              { return w.IsVisible() && w.b.active }
++
++func (w *window) Show() {
++	if w.closed {
++		return
++	}
++	w.visible = true
++	send(w.native, "makeKeyAndVisible")
++	send(w.view, "becomeFirstResponder")
++	w.h.Focused()
++	w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceFocus})
++	w.RequestFrame()
++}
++
++func (w *window) ShowInactive() { w.Show() }
++func (w *window) Focus()        { w.Show() }
++func (w *window) Hide() {
++	w.visible = false
++	send(w.link, "setPaused:", true)
++	send(w.native, "setHidden:", true)
++	w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceHidden})
++}
++
++func (w *window) Close() {
++	if w.closed {
++		return
++	}
++	w.closed, w.visible = true, false
++	w.b.window = nil
++	send(w.link, "invalidate")
++	// The content releases its renderer before the native layer is destroyed.
++	w.h.Closed()
++	send(w.native, "setHidden:", true)
++	send(w.link, "release")
++	send(w.target, "release")
++	send(w.native, "release")
++}
++
++func (w *window) Native() platform.SurfaceNative {
++	return platform.SurfaceNative{View: uintptr(w.view), Layer: uintptr(send(w.view, "layer"))}
++}
++
++func (w *window) Size() (width, height, scale float64) {
++	bounds := native.getRect(w.view, sel("bounds"))
++	screen := send(class("UIScreen"), "mainScreen")
++	scale = native.getFloat64(screen, sel("scale"))
++	return bounds.Width, bounds.Height, scale
++}
++
++func (w *window) RequestFrame() {
++	w.pending = true
++	if w.b.active && w.IsVisible() {
++		send(w.link, "setPaused:", false)
++	}
++}
++
++func (*window) RefreshRate() float64 {
++	return float64(send(send(class("UIScreen"), "mainScreen"), "maximumFramesPerSecond"))
++}
++
++func (*window) PresentPixels([]byte, int, int, int) {
++	panic("tvos: Metal rendering failed; software fallback is not implemented")
++}
++
++func (*window) SetCursor(platform.Cursor)                 {}
++func (*window) SetTextInput(platform.TextInputState)      {}
++func (*window) UpdateAccessibility(*platform.AccessTree)  {}
++func (*window) StartDataDrag(platform.DragRequest)        {}
++func (*window) CancelDataDrag()                           {}
++func (*window) SetDropFormats([]transfer.Format)          {}
++func (*window) PlaceWebViews([]platform.WebViewPlacement) {}
++func (*window) NewWebView(*platform.WindowOptions, platform.WindowHandler) (platform.WebView, error) {
++	return nil, platform.ErrUnsupported
++}
++
++func (w *window) press(presses id, kind platform.SurfaceEventKind) bool {
++	handled := false
++	items := send(presses, "allObjects")
++	for index, count := uintptr(0), uintptr(send(items, "count")); index < count; index++ {
++		press := send(items, "objectAtIndex:", index)
++		key := remoteKey(int(send(press, "type")))
++		if key != platform.KeyUnknown {
++			handled = w.h.SurfaceEvent(platform.SurfaceEvent{Kind: kind, Key: key, PhysicalKey: key}) || handled
++		}
++	}
++	return handled
++}
++
++var _ platform.Backend = (*Backend)(nil)
++var _ platform.Window = (*window)(nil)
++var _ platform.Surface = (*window)(nil)

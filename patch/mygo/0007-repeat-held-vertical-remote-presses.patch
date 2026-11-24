@@ -1,0 +1,212 @@
+diff --git a/internal/tvos/remote.go b/internal/tvos/remote.go
+--- a/internal/tvos/remote.go
++++ b/internal/tvos/remote.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"math"
++	"time"
+ 
+ 	"github.com/egoist/mygo/internal/platform"
+ )
+@@ -59,3 +60,42 @@
+ 	}
+ 	return taken
+ }
++
++const (
++	remoteHoldDelay    = 525 * time.Millisecond
++	remoteRepeatSlow   = 125 * time.Millisecond
++	remoteRepeatFast   = 105 * time.Millisecond
++	remoteSpeedUpAfter = 950 * time.Millisecond
++)
++
++type remoteRepeat struct {
++	key          platform.Key
++	next, fastAt time.Time
++}
++
++func (r *remoteRepeat) begin(key platform.Key, now time.Time) bool {
++	if key != platform.KeyUp && key != platform.KeyDown {
++		return false
++	}
++	*r = remoteRepeat{key: key, next: now.Add(remoteHoldDelay), fastAt: now.Add(remoteSpeedUpAfter)}
++	return true
++}
++
++func (r *remoteRepeat) end(key platform.Key) {
++	if r.key == key {
++		*r = remoteRepeat{}
++	}
++}
++
++func (r *remoteRepeat) poll(now time.Time) platform.Key {
++	if r.next.IsZero() || now.Before(r.next) {
++		return platform.KeyUnknown
++	}
++	interval := remoteRepeatFast
++	if now.Before(r.fastAt) {
++		interval = remoteRepeatSlow
++	}
++	// A late frame emits one step and restarts the interval from that frame.
++	r.next = now.Add(interval)
++	return r.key
++}
+diff --git a/internal/tvos/window.go b/internal/tvos/window.go
+--- a/internal/tvos/window.go
++++ b/internal/tvos/window.go
+@@ -5,6 +5,7 @@
+ import (
+ 	"errors"
+ 	"fmt"
++	"time"
+ 
+ 	"github.com/egoist/mygo/internal/platform"
+ 	"github.com/egoist/mygo/transfer"
+@@ -22,6 +23,7 @@
+ 	pending      bool
+ 	closed       bool
+ 	handledKeys  remotePresses
++	repeat       remoteRepeat
+ }
+ 
+ func (b *Backend) NewWindow(options *platform.WindowOptions, handler platform.WindowHandler) (platform.Window, error) {
+@@ -79,6 +81,7 @@
+ func (w *window) Focus()        { w.Show() }
+ func (w *window) Hide() {
+ 	w.visible = false
++	w.cancelRemotePresses()
+ 	send(w.link, "setPaused:", true)
+ 	send(w.native, "setHidden:", true)
+ 	w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceHidden})
+@@ -122,6 +125,28 @@
+ // FrameNow finishes a display-link frame deferred by the renderer.
+ func (w *window) FrameNow() { w.frame(false) }
+ 
++func (w *window) displayFrame() {
++	if !w.IsFocused() {
++		send(w.link, "setPaused:", true)
++		return
++	}
++	if key := w.repeat.poll(time.Now()); key != platform.KeyUnknown {
++		w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: key, PhysicalKey: key, Repeat: true})
++	}
++	if w.pending {
++		w.pending = false
++		w.frame(true)
++	}
++	if !w.closed && !w.pending && w.repeat.next.IsZero() {
++		send(w.link, "setPaused:", true)
++	}
++}
++
++func (w *window) cancelRemotePresses() {
++	w.repeat = remoteRepeat{}
++	clear(w.handledKeys)
++}
++
+ func (w *window) frame(paced bool) {
+ 	if !w.IsFocused() {
+ 		return
+@@ -170,9 +195,19 @@
+ 	for index, count := uintptr(0), uintptr(send(items, "count")); index < count; index++ {
+ 		press := send(items, "objectAtIndex:", index)
+ 		key := remoteKey(int(send(press, "type")))
+-		if key != platform.KeyUnknown {
+-			taken := w.sendRemoteKey(key, kind)
+-			handled = w.handledKeys.take(key, kind, taken) || handled
++		if key == platform.KeyUnknown {
++			continue
++		}
++		if kind == platform.KeyReleased {
++			w.repeat.end(key)
++		} else if (key == platform.KeyUp || key == platform.KeyDown) && w.handledKeys[key] {
++			handled = true
++			continue
++		}
++		taken := w.sendRemoteKey(key, kind)
++		handled = w.handledKeys.take(key, kind, taken) || handled
++		if kind == platform.KeyPressed && taken && w.IsFocused() && w.repeat.begin(key, time.Now()) {
++			send(w.link, "setPaused:", false)
+ 		}
+ 	}
+ 	return handled
+diff --git a/internal/tvos/app.go b/internal/tvos/app.go
+--- a/internal/tvos/app.go
++++ b/internal/tvos/app.go
+@@ -92,6 +92,7 @@
+ 		{Cmd: sel("applicationWillResignActive:"), Fn: func(id, objc.SEL, id) {
+ 			b.active = false
+ 			if b.window != nil {
++				b.window.cancelRemotePresses()
+ 				send(b.window.link, "setPaused:", true)
+ 				b.window.h.Blurred()
+ 				b.window.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceBlur})
+@@ -147,16 +148,9 @@
+ 	}
+ 	return register("MyGoTVFrameTarget", "NSObject", []objc.MethodDef{
+ 		{Cmd: sel("displayFrame:"), Fn: func(id, objc.SEL, id) {
+-			w := b.window
+-			if w == nil {
+-				return
++			if w := b.window; w != nil {
++				w.displayFrame()
+ 			}
+-			send(w.link, "setPaused:", true)
+-			if !b.active || !w.visible || !w.pending {
+-				return
+-			}
+-			w.pending = false
+-			w.frame(true)
+ 		}},
+ 	})
+ }
+diff --git a/internal/tvos/remote_test.go b/internal/tvos/remote_test.go
+--- a/internal/tvos/remote_test.go
++++ b/internal/tvos/remote_test.go
+@@ -2,6 +2,7 @@
+ 
+ import (
+ 	"testing"
++	"time"
+ 
+ 	"github.com/egoist/mygo/internal/platform"
+ )
+@@ -40,6 +41,37 @@
+ 	}
+ }
+ 
++func TestHeldVerticalRemotePressUsesDelayAndAccelerates(t *testing.T) {
++	start := time.Now()
++	var repeat remoteRepeat
++	if repeat.begin(platform.KeyLeft, start) || !repeat.begin(platform.KeyDown, start) {
++		t.Fatal("only vertical remote presses should repeat")
++	}
++	if got := repeat.poll(start.Add(remoteHoldDelay - time.Millisecond)); got != platform.KeyUnknown {
++		t.Fatalf("a tap repeated before the hold delay: %v", got)
++	}
++	first := start.Add(remoteHoldDelay)
++	if got := repeat.poll(first); got != platform.KeyDown || repeat.next.Sub(first) != remoteRepeatSlow {
++		t.Fatalf("first repeat has key %v and interval %v", got, repeat.next.Sub(first))
++	}
++	late := start.Add(2 * time.Second)
++	if got := repeat.poll(late); got != platform.KeyDown || repeat.next.Sub(late) != remoteRepeatFast {
++		t.Fatalf("steady repeat has key %v and interval %v", got, repeat.next.Sub(late))
++	}
++	if got := repeat.poll(late); got != platform.KeyUnknown {
++		t.Fatalf("late frame emitted multiple repeats: %v", got)
++	}
++	repeat.begin(platform.KeyUp, late)
++	repeat.end(platform.KeyDown)
++	if got := repeat.poll(late.Add(remoteHoldDelay)); got != platform.KeyUp {
++		t.Fatalf("new direction should win: %v", got)
++	}
++	repeat.end(platform.KeyUp)
++	if got := repeat.poll(late.Add(5 * time.Second)); got != platform.KeyUnknown {
++		t.Fatalf("release left a repeat scheduled: %v", got)
++	}
++}
++
+ func TestRemotePanUsesItsDominantDirection(t *testing.T) {
+ 	for _, test := range []struct {
+ 		x, y float64
