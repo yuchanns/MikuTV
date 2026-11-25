@@ -26,6 +26,15 @@ const (
 	PlaybackSubtitleEnglish PlaybackSubtitlePref = "en"
 )
 
+type PlaybackLoopMode string
+
+const (
+	PlaybackLoopSequential PlaybackLoopMode = ""
+	PlaybackLoopRepeatAll  PlaybackLoopMode = "repeat-all"
+	PlaybackLoopRepeatOne  PlaybackLoopMode = "repeat-one"
+	PlaybackLoopShuffle    PlaybackLoopMode = "shuffle"
+)
+
 var supportedPlaybackSpeeds = [...]float64{0.75, 1.0, 1.25, 1.5, 2.0}
 
 type PlaybackPreferences struct {
@@ -34,6 +43,7 @@ type PlaybackPreferences struct {
 	Subtitle              PlaybackSubtitlePref `json:"subtitle"`
 	Autoplay              bool                 `json:"autoplay"`
 	AllowAudioScreensaver bool                 `json:"allowAudioScreensaver,omitempty"`
+	LoopMode              PlaybackLoopMode     `json:"loopMode,omitempty"`
 }
 
 func DefaultPlaybackPreferences() PlaybackPreferences {
@@ -67,6 +77,11 @@ func (p PlaybackPreferences) Normalize() PlaybackPreferences {
 	case PlaybackSubtitleOff, PlaybackSubtitleChinese, PlaybackSubtitleEnglish:
 	default:
 		p.Subtitle = PlaybackSubtitleOff
+	}
+	switch p.LoopMode {
+	case PlaybackLoopSequential, PlaybackLoopRepeatAll, PlaybackLoopRepeatOne, PlaybackLoopShuffle:
+	default:
+		p.LoopMode = PlaybackLoopSequential
 	}
 	return p
 }

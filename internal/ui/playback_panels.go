@@ -543,7 +543,7 @@ func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, cur
 	}
 	p.region(playerPanelGroup, focusEdges{})
 	upcoming := playbackUpcomingEpisodes(state, current.item)
-	hasEpisodes := !s.keepQueue && (len(s.items) > 1 || len(upcoming) > 0)
+	hasEpisodes := len(s.items) > 1 || (!s.keepQueue && len(upcoming) > 0)
 	if !hasEpisodes {
 		p.bind(drawer.Focusable().Label(text.Info), playerPanelExit, playerPanelGroup)
 	}
@@ -563,7 +563,9 @@ func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, cur
 				}
 				if hasEpisodes {
 					episodesHeading := text.Episodes
-					if current.item.Ref.Kind == provider.Course {
+					if s.keepQueue {
+						episodesHeading = text.Playlist
+					} else if current.item.Ref.Kind == provider.Course {
 						episodesHeading = p.Assets.Text.Detail.CourseUnit
 					}
 					p.styledButton(c, episodesHeading, "following", playerPanelExit, playerPanelGroup,

@@ -42,6 +42,7 @@ var operations = map[provider.Capability][]string{
 	provider.ResolvePlayback:                   {"resolvePlayback"},
 	provider.ReportPlayback:                    {"reportPlayback"},
 	provider.ReadSubtitles:                     {"readSubtitles"},
+	provider.PlaybackModes:                     nil,
 	provider.ReadDanmaku:                       {"readDanmaku"},
 	provider.WriteDanmaku:                      {"postDanmaku"},
 	provider.DanmakuRules:                      {"readDanmakuRules", "addDanmakuRule", "removeDanmakuRule"},

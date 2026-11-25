@@ -71,7 +71,11 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 	p.region(favoriteTabs, focusEdges{app.Down: {Focus: app.ContentAction, Region: belowHeader.Region}})
 	p.region(favoriteHeader, focusEdges{app.Up: {Focus: activeTab}, app.Down: belowHeader})
 	p.region(favoriteTools, focusEdges{app.Up: {Focus: libraryManageID(query.Folder != "")}, app.Down: {Region: favoriteCards}})
-	p.region(libraryMeta, focusEdges{app.Up: {Focus: app.ContentAction, Region: favoriteTabs}, app.Down: {Region: favoriteCards}})
+	metaUp := focusDestination{Focus: app.ContentAction, Region: favoriteTabs}
+	if query.Folder != "" {
+		metaUp = focusDestination{Focus: app.ContentAction, Region: favoriteHeader}
+	}
+	p.region(libraryMeta, focusEdges{app.Up: metaUp, app.Down: {Region: favoriteCards}})
 	p.region(favoriteCards, focusEdges{app.Up: aboveCards, app.Down: {Region: favoriteStatus}})
 	p.region(favoriteStatus, focusEdges{app.Up: {Focus: activeTab, Region: favoriteCards}})
 	headingHeight, actionTop, metaTop := float32(266), float32(110), float32(203)
@@ -255,13 +259,23 @@ func (p *PageContext) libraryCollectionMeta(c *ui.Context, query provider.Accoun
 		ui.Text(c, label).FontSize(26).FontWeight(400)
 		ui.Text(c, fmt.Sprintf(text.FolderCount, total)).FontSize(18).TextColor(paint(colors.Text.Muted))
 	})
-	if query.Section == provider.AccountWatchLater {
+	rows := p.host.Activity.Snapshot(query).Page.Rows
+	if query.Section == provider.AccountWatchLater || (query.Section == provider.AccountFavorites && query.Folder != "" && p.hasPlayableRows(rows)) {
 		ui.Box(c).Absolute().Top(top + 7).Right(83).Children(func() {
 			p.libraryTextLink(c, text.PlayAll, "play", libraryPlayAll, libraryMeta, func() {
-				p.playWatchLater(p.host.Activity.Snapshot(query).Page.Rows)
+				p.playWatchLater(rows)
 			})
 		})
 	}
+}
+
+func (p *PageContext) hasPlayableRows(rows []provider.AccountRow) bool {
+	for _, row := range rows {
+		if row.Ref != nil && p.canPlay(*row.Ref) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *PageContext) libraryTextLink(c *ui.Context, label, icon string, id app.FocusID, region string, action func()) {

@@ -113,7 +113,12 @@
     "AudioTrack": "Audio Track",
     "AudioDefault": "Default",
     "FastForward": "Fast Forward",
-    "Rewind": "Rewind"
+    "Rewind": "Rewind",
+    "Playlist": "Playlist",
+    "ModeSequential": "Sequential",
+    "ModeRepeatAll": "Repeat All",
+    "ModeRepeatOne": "Repeat One",
+    "ModeShuffle": "Shuffle"
   },
   "PlaybackPrefs": {
     "Title": "Playback",

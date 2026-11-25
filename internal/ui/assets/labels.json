@@ -113,7 +113,12 @@
     "AudioTrack": "\u97f3\u8f68",
     "AudioDefault": "\u9ed8\u8ba4",
     "FastForward": "\u5feb\u8fdb",
-    "Rewind": "\u5feb\u9000"
+    "Rewind": "\u5feb\u9000",
+    "Playlist": "\u64ad\u653e\u5217\u8868",
+    "ModeSequential": "\u987a\u5e8f\u64ad\u653e",
+    "ModeRepeatAll": "\u5217\u8868\u5faa\u73af",
+    "ModeRepeatOne": "\u5355\u66f2\u5faa\u73af",
+    "ModeShuffle": "\u968f\u673a\u64ad\u653e"
   },
   "PlaybackPrefs": {
     "Title": "\u64ad\u653e",

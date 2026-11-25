@@ -10,6 +10,7 @@ const (
 	ReportPlayback     Capability = "playback.progress"
 	ReadDanmaku        Capability = "playback.danmaku"
 	ReadSubtitles      Capability = "playback.subtitles"
+	PlaybackModes      Capability = "playback.modes"
 	WriteDanmaku       Capability = "account.danmaku"
 	EditVideoFavorites Capability = "account.videoFavorites"
 )

@@ -283,6 +283,7 @@ type playbackLabels struct {
 	Interactive, BranchQuestion, BranchButton                                                             string
 	AudioTrack, AudioDefault                                                                              string
 	FastForward, Rewind                                                                                   string
+	Playlist, ModeSequential, ModeRepeatAll, ModeRepeatOne, ModeShuffle                                   string
 }
 
 type playbackAccessLabels struct {

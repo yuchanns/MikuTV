@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ const (
 	playerComments     app.FocusID = "player/comments"
 	playerFavorite     app.FocusID = "player/favorite"
 	playerDanmaku      app.FocusID = "player/danmaku"
+	playerLoopMode     app.FocusID = "player/loop-mode"
 	playerSubtitles    app.FocusID = "player/subtitles"
 	playerAudio        app.FocusID = "player/audio"
 	playerQuality      app.FocusID = "player/quality"
@@ -58,6 +60,8 @@ type playbackView struct {
 	items            []playbackItem
 	index            int
 	keepQueue        bool
+	loopMode         app.PlaybackLoopMode
+	shuffleOrder     []int
 	metadata         context.CancelFunc
 	followPending    context.CancelFunc
 	openInfoOnReady  bool
@@ -228,7 +232,9 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 	s.discussion.cancelOperation()
 	s.discussion = videoDetailState{}
 	s.index = index
-	if index == 0 && v.State.Focus == playerPrevious || index == len(s.items)-1 && v.State.Focus == playerNext ||
+	loopMode := v.playbackLoopMode()
+	wrapNav := len(s.items) > 1 && (loopMode == app.PlaybackLoopRepeatAll || loopMode == app.PlaybackLoopShuffle)
+	if (!wrapNav && index == 0 && v.State.Focus == playerPrevious) || (!wrapNav && index == len(s.items)-1 && v.State.Focus == playerNext) ||
 		(v.State.Focus == playerCreator && !v.canOpenCreator(s.items[index].item.Creator)) {
 		v.State.Focus, v.reveal = playerToggle, true
 	}
@@ -302,6 +308,137 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 			s.discussion.item = metadata
 		}
 	})
+}
+
+func (v *View) supportsPlaybackModes(liveMode bool) bool {
+	if liveMode || len(v.player.items) <= 1 {
+		return false
+	}
+	entry, ok := v.State.Current()
+	return ok && entry.Capabilities.Has(provider.PlaybackModes)
+}
+
+func (v *View) playbackLoopMode() app.PlaybackLoopMode {
+	entry, ok := v.State.Current()
+	if !ok || !entry.Capabilities.Has(provider.PlaybackModes) {
+		return app.PlaybackLoopSequential
+	}
+	if v.PlaybackSettings != nil {
+		return v.PlaybackSettings.Preferences().LoopMode
+	}
+	return v.player.loopMode
+}
+
+func (v *View) cyclePlaybackLoopMode() {
+	order := [...]app.PlaybackLoopMode{
+		app.PlaybackLoopSequential,
+		app.PlaybackLoopRepeatAll,
+		app.PlaybackLoopRepeatOne,
+		app.PlaybackLoopShuffle,
+	}
+	cur := v.playbackLoopMode()
+	next := order[0]
+	for i, m := range order {
+		if m == cur {
+			next = order[(i+1)%len(order)]
+			break
+		}
+	}
+	v.player.loopMode = next
+	if next == app.PlaybackLoopShuffle {
+		v.player.shuffleOrder = nil
+	}
+	if v.PlaybackSettings != nil {
+		_ = v.PlaybackSettings.Update(func(cfg *app.PlaybackPreferences) { cfg.LoopMode = next })
+	}
+	_, label := playbackLoopModePresentation(next, v.Assets.Text.Playback)
+	v.player.content.notice(label)
+}
+
+func playbackLoopModePresentation(mode app.PlaybackLoopMode, text playbackLabels) (icon, label string) {
+	switch mode {
+	case app.PlaybackLoopRepeatAll:
+		return "mode-repeat", text.ModeRepeatAll
+	case app.PlaybackLoopRepeatOne:
+		return "mode-repeat-one", text.ModeRepeatOne
+	case app.PlaybackLoopShuffle:
+		return "mode-shuffle", text.ModeShuffle
+	default:
+		return "mode-sequential", text.ModeSequential
+	}
+}
+
+func (s *playbackView) ensureShuffleOrder() []int {
+	n := len(s.items)
+	if n <= 1 {
+		s.shuffleOrder = nil
+		return nil
+	}
+	if len(s.shuffleOrder) == n {
+		return s.shuffleOrder
+	}
+	order := make([]int, n)
+	for i := range order {
+		order[i] = i
+	}
+	cur := min(max(0, s.index), n-1)
+	order[0], order[cur] = order[cur], order[0]
+	if n > 2 {
+		tail := order[1:]
+		rand.Shuffle(len(tail), func(i, j int) { tail[i], tail[j] = tail[j], tail[i] })
+	}
+	s.shuffleOrder = order
+	return order
+}
+
+func (s *playbackView) stepIndex(dir int, mode app.PlaybackLoopMode) (int, bool) {
+	n := len(s.items)
+	if n == 0 || dir == 0 {
+		return 0, false
+	}
+	switch mode {
+	case app.PlaybackLoopRepeatAll:
+		return (s.index + dir%n + n) % n, true
+	case app.PlaybackLoopShuffle:
+		order := s.ensureShuffleOrder()
+		if len(order) != n {
+			return 0, false
+		}
+		pos := slices.Index(order, s.index)
+		if pos < 0 {
+			pos = 0
+		}
+		return order[(pos+dir%n+n)%n], true
+	default:
+		next := s.index + dir
+		if next < 0 || next >= n {
+			return 0, false
+		}
+		return next, true
+	}
+}
+
+func (v *View) stepPlayback(dir int, ended bool) bool {
+	s := &v.player
+	if len(s.items) == 0 {
+		return false
+	}
+	mode := v.playbackLoopMode()
+	if ended && mode == app.PlaybackLoopRepeatOne {
+		v.Playback.Seek(0)
+		if !v.Playback.State().Playing {
+			v.Playback.Toggle()
+		}
+		return true
+	}
+	next, ok := s.stepIndex(dir, mode)
+	if !ok {
+		return false
+	}
+	s.panel, s.controlFocus = "", ""
+	s.scrubbing, s.selectingChapter = false, false
+	v.startPlaybackItem(next, nil)
+	return true
 }
 
 func (s *playbackView) current() playbackItem {
@@ -431,24 +568,28 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 	liveMode := isLivePlayback(state, s.current())
 	v.tickPlaybackTrick(c, now, state, liveMode)
 	state = v.Playback.State()
-	autoplay := v.playbackPreferences().Autoplay
+	loopMode := v.playbackLoopMode()
+	autoplay := v.playbackPreferences().Autoplay || (loopMode != app.PlaybackLoopSequential)
 	if autoplay && !liveMode && state.Clock.Ended && state.Resolution.Plan.Access != provider.VideoAccessPreview &&
 		state.Failure == "" && !playbackHasAccessDialog(state) && !playbackHasBranchChoices(state) && !playbackAutoAdvancingBranch(state) &&
-		s.index+1 < len(s.items) && p.active && !s.content.overlay() {
-		s.panel, s.controlFocus = "", ""
-		s.scrubbing, s.selectingChapter = false, false
-		v.startPlaybackItem(s.index+1, nil)
-		v.State.Focus, v.reveal = playerToggle, true
-		state = v.Playback.State()
+		p.active && !s.content.overlay() {
+		if v.stepPlayback(1, true) {
+			if loopMode != app.PlaybackLoopRepeatOne {
+				v.State.Focus, v.reveal = playerToggle, true
+			}
+			state = v.Playback.State()
+		}
 	}
-	if autoplay && !liveMode && state.Playing && state.Clock.HasFrame && !state.Loading && !state.Switching &&
+	if autoplay && !liveMode && loopMode != app.PlaybackLoopRepeatOne && state.Playing && state.Clock.HasFrame && !state.Loading && !state.Switching &&
 		!state.Clock.Buffering && !state.Clock.Ended && state.Failure == "" &&
 		state.Resolution.Plan.Access != provider.VideoAccessPreview &&
-		s.index+1 < len(s.items) && state.Duration >= 30 &&
+		state.Duration >= 30 &&
 		state.Duration-state.Position <= 20 && state.Duration-state.Position > 1 {
-		next := s.items[s.index+1]
-		if !next.locked {
-			v.Playback.PreloadNext(provider.PlaybackTarget{Ref: next.item.Ref, PartID: next.partID}, v.Playback.Owner())
+		if nextIdx, ok := s.stepIndex(1, loopMode); ok {
+			next := s.items[nextIdx]
+			if !next.locked {
+				v.Playback.PreloadNext(provider.PlaybackTarget{Ref: next.item.Ref, PartID: next.partID}, v.Playback.Owner())
+			}
 		}
 	}
 	if !playbackShowNetworkSpeed(state, s) {
@@ -813,9 +954,11 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 				controls.playerButton(c, playerInfo, "info", infoLabel, "", false, func() { s.openPanel(v, playerInfo) })
 			})
 			ui.Row(c).Height(65).Gap(15).Shrink(0).AlignItems(ui.Center).Children(func() {
+				loopMode := v.playbackLoopMode()
+				wrapNav := len(s.items) > 1 && (loopMode == app.PlaybackLoopRepeatAll || loopMode == app.PlaybackLoopShuffle)
 				if !liveMode {
-					controls.playerButton(c, playerPrevious, "skip-back", text.Previous, "", s.index == 0, func() {
-						v.startPlaybackItem(s.index-1, nil)
+					controls.playerButton(c, playerPrevious, "skip-back", text.Previous, "", !wrapNav && s.index == 0, func() {
+						v.stepPlayback(-1, false)
 					})
 				}
 				icon, label := "play", text.Play
@@ -824,8 +967,8 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 				}
 				controls.playerButton(c, playerToggle, icon, label, "", false, v.togglePlayback)
 				if !liveMode {
-					controls.playerButton(c, playerNext, "skip-forward", text.Next, "", s.index+1 >= len(s.items), func() {
-						v.startPlaybackItem(s.index+1, nil)
+					controls.playerButton(c, playerNext, "skip-forward", text.Next, "", !wrapNav && s.index+1 >= len(s.items), func() {
+						v.stepPlayback(1, false)
 					})
 				}
 			})
@@ -877,6 +1020,11 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 				}
 				if entry.Capabilities.Has(provider.ReadDanmaku) {
 					controls.playerButton(c, playerDanmaku, "", text.Danmaku, text.Danmaku, false, func() { s.openPanel(v, playerDanmaku) })
+				}
+				if v.supportsPlaybackModes(liveMode) {
+					mode := v.playbackLoopMode()
+					modeIcon, modeTitle := playbackLoopModePresentation(mode, text)
+					controls.playerButton(c, playerLoopMode, modeIcon, modeTitle, "", false, v.cyclePlaybackLoopMode)
 				}
 				if entry.Capabilities.Has(provider.ReadSubtitles) && (len(state.Resolution.Plan.Subtitles) > 0 || s.content.subtitle != "") {
 					controls.playerButton(c, playerSubtitles, "captions", text.Subtitles, "", false, func() { s.openPanel(v, playerSubtitles) })
@@ -953,6 +1101,11 @@ func (p *PageContext) playerButton(c *ui.Context, id app.FocusID, icon, title, l
 	if icon == "like-filled" || icon == "star-filled" {
 		icon = strings.TrimSuffix(icon, "-filled")
 		background, ink = withAlpha(color.Playback.Foreground, 0x12), paint(color.Accent.Soft)
+	}
+	// Loop/shuffle button stays transparent (no circle fill) when unfocused, using
+	// soft accent ink to indicate non-sequential modes.
+	if id == playerLoopMode && icon != "mode-sequential" {
+		ink = paint(color.Accent.Soft)
 	}
 	focused := p.paintFocus() == id
 	if focused {
