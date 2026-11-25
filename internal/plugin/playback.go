@@ -248,7 +248,7 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 		if track.ID == "" || track.Label == "" {
 			return false
 		}
-		if s.ownPlaybackResource(&track.Resource, allow) {
+		if len(track.Resource.URLs) == 0 || s.ownPlaybackResource(&track.Resource, allow) {
 			tracks = append(tracks, track)
 		}
 	}
@@ -831,7 +831,8 @@ func (s *Session) invokePlaybackWrite(ctx context.Context, capability provider.C
 }
 
 func (s *Session) PlaybackSubtitles(ctx context.Context, query provider.PlaybackSubtitleQuery) ([]provider.SubtitleCue, error) {
-	if !s.ownsPlayback(query.PlaybackTarget) || !s.ownPlaybackResource(&query.Track.Resource, s.allowRequestForSession(true)) {
+	if !s.ownsPlayback(query.PlaybackTarget) || strings.TrimSpace(query.Track.ID) == "" ||
+		(len(query.Track.Resource.URLs) > 0 && !s.ownPlaybackResource(&query.Track.Resource, s.allowRequestForSession(true))) {
 		return nil, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()

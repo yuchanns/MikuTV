@@ -620,7 +620,7 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 		s.visible = false
 		p.State.Focus, v.reveal = playerWake, true
 	}
-	if s.visible || s.panel != "" || !state.Clock.HasFrame {
+	if s.visible || s.panel != "" || !state.Clock.HasFrame || state.AudioOnly {
 		images := []string{item.item.CoverURL}
 		if item.item.Creator != nil {
 			images = append(images, item.item.Creator.AvatarURL)
@@ -653,6 +653,8 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 		c.After(100 * time.Millisecond)
 	} else if !liveMode && state.Playing && !state.BranchPending && plan.Branch != nil && len(plan.Branch.Options) > 0 {
 		c.After(100 * time.Millisecond)
+	} else if !liveMode && state.AudioOnly && state.Playing && len(s.content.cues) > 0 {
+		c.After(120 * time.Millisecond)
 	} else {
 		c.After(s.content.refresh(v, state))
 	}
@@ -751,7 +753,9 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 			video.Cache().Blur(backdropBlur)
 		}
 		video.Children(func() {
-			if !hasBackdrop && (!state.Clock.HasFrame || backdropBlur > 0) {
+			if !liveMode && display.AudioOnly {
+				surface.renderAudioStage(c, display, item, now)
+			} else if !hasBackdrop && (!state.Clock.HasFrame || backdropBlur > 0) {
 				surface.playbackPoster(c, item.item.CoverURL)
 			}
 			if !branchVisible && s.visible {
@@ -822,6 +826,15 @@ func (s *playbackView) updatePlan(v *View, state app.PlaybackState) {
 			s.content.subtitleChosen = true
 			if matched, found := app.MatchPreferredSubtitle(v.playbackPreferences().Subtitle, plan.Subtitles); found {
 				s.content.setSubtitle(v, matched)
+			} else if state.AudioOnly {
+				chosen := plan.Subtitles[0]
+				for _, track := range plan.Subtitles {
+					if track.Default {
+						chosen = track
+						break
+					}
+				}
+				s.content.setSubtitle(v, chosen)
 			}
 		}
 	}
