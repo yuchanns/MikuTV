@@ -254,7 +254,7 @@ func TestPlaybackModesCapabilityGatingAndStepBehavior(t *testing.T) {
 	}
 }
 
-func TestFavoritesFolderUnlocksPlayAll(t *testing.T) {
+func TestFavoritesFolderQueuesAllTracksOnItemPlay(t *testing.T) {
 	assets, err := LoadAssets()
 	if err != nil {
 		t.Fatal(err)
@@ -265,6 +265,7 @@ func TestFavoritesFolderUnlocksPlayAll(t *testing.T) {
 	}
 	caps := provider.Capabilities{
 		provider.BrowseCatalog,
+		provider.GetCatalogItem,
 		provider.BrowseLibrary,
 		provider.AccountFavorites.Capability(),
 		provider.ResolvePlayback,
@@ -318,6 +319,8 @@ func TestFavoritesFolderUnlocksPlayAll(t *testing.T) {
 		Theme:    theme.Default(),
 	})
 	view.Playback = pb
+	view.SyncEntry()
+	activity.Bind(entries[0], "user-1", sess)
 
 	// Navigate into favorite folder f1
 	state.Navigate(libraryRoute(provider.AccountFavorites))
@@ -329,8 +332,25 @@ func TestFavoritesFolderUnlocksPlayAll(t *testing.T) {
 
 	tester := ui.NewTester(view.Render, 1920, 1080)
 	tester.Frame()
-	if _, found := tester.Access(assets.Text.Activity.PlayAll); !found {
-		t.Fatal("expected Play All button inside favorite folder")
+	if _, found := tester.Access(assets.Text.Activity.PlayAll); found {
+		t.Fatal("favorites folder should not show redundant Play All button")
+	}
+	// Clicking Song 2 opens detail carrying the entire folder queue starting at Song 2.
+	if err := tester.Click("Song 2"); err != nil {
+		t.Fatalf("click Song 2 failed: %v", err)
+	}
+	drain()
+	tester.Frame()
+	if state.Page != app.VideoDetail || len(view.videoDetail.queue) != 2 || view.videoDetail.queueIndex != 1 {
+		t.Fatalf("expected Song 2 detail with 2-item folder queue at index 1, got page=%s len=%d idx=%d",
+			state.Page, len(view.videoDetail.queue), view.videoDetail.queueIndex)
+	}
+	page := view.context(state.Location, true, 1920, 1080)
+	view.videoDetail.item = provider.MediaItem{Ref: ref2, Title: "Song 2"}
+	page.startDetailPlayback(view.videoDetail.item, nil)
+	if len(view.player.items) != 2 || view.player.index != 1 || !view.player.keepQueue {
+		t.Fatalf("expected playback to carry 2-item folder queue at index 1, got len=%d idx=%d keep=%v",
+			len(view.player.items), view.player.index, view.player.keepQueue)
 	}
 }
 

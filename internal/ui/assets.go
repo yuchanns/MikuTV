@@ -297,6 +297,8 @@ type playbackAccessLabels struct {
 	TrialEndedTitle, TrialEndedBody, PurchaseTrialEndedBody, QualityVIPTitle, QualityVIPBody                                      string
 	TrialSeconds, MobileClient                                                                                                    string
 	AudioTrialState, AudioTrialLeft, AudioTrialEndedTitle, AudioTrialSeconds, AudioTrialMinutes, AudioVIPTitle                    string
+	AudioQualityVIPTitle, AudioQualityVIPBody, AudioKeep, AudioUseBest, AudioSourceTitle, AudioSourceBody, AudioSourceGeneric     string
+	AudioVIPBody, AudioVIPNoPreview, AudioTrialEndedBody, AudioRefresh, AudioMembershipInstructions                               string
 }
 
 type detailLabels struct {

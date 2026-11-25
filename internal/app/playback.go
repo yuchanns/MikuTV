@@ -621,6 +621,8 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 		if plan.PartID != "" {
 			p.state.Target.PartID = plan.PartID
 		}
+		p.state.AudioOnly = p.mediaKind == provider.PlaybackMediaAudio ||
+			(len(plan.AvailableKinds) > 0 && plan.AvailableKinds[0] == provider.PlaybackMediaAudio)
 		p.state.Resolution = result
 		p.state.Revision++
 		if p.state.Limit == "" {

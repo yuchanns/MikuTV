@@ -3,6 +3,7 @@ package tvui
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"io"
@@ -185,18 +186,36 @@ func TestAudioStagePlanALyricsNoLyricsLightAndOLEDPauseDim(t *testing.T) {
 			t.Fatal("expected non-nil rendered frame")
 		}
 		// Showing the HUD must overlay on top without shrinking or shifting the stage cover.
-		coverHidden, okHidden := tester.Find("audio-cover-square")
+		titleHidden, okHidden := tester.Find("Nocturne in Blue")
+		if !okHidden {
+			t.Fatal("expected song title to render on audio stage when HUD hidden")
+		}
 		view.player.visible = true
 		tester.Frame()
-		coverVisible, okVisible := tester.Find("audio-cover-square")
-		if okHidden && okVisible && coverHidden != coverVisible {
-			t.Fatalf("audio stage cover moved/resized when HUD appeared: hidden=%+v visible=%+v", coverHidden, coverVisible)
-		}
+		tester.Advance(300 * time.Millisecond)
+		tester.Frame()
 		// Audio-only player HUD must present audio-native labels (Track Info / Lyrics / Audio Quality / Prev/Next Track).
 		if !tester.HasText(assets.Text.Playback.AudioInfo) {
 			t.Fatalf("expected audio info label %q when AudioOnly=true", assets.Text.Playback.AudioInfo)
 		}
+		// Compare center of the 490x490 album cover (x=385, y=460, well above bottom scrim)
+		// across HUD hidden vs visible (and with right drawer open) to prove 0 resize/shift.
+		visImg := tester.Image()
+		if darkImg.RGBAAt(385, 460) != visImg.RGBAAt(385, 460) {
+			t.Fatalf("album cover center pixel shifted when HUD appeared: hidden=%v visible=%v titleHidden=%+v",
+				darkImg.RGBAAt(385, 460), visImg.RGBAAt(385, 460), titleHidden)
+		}
+		view.player.panel = playerInfo
+		tester.Frame()
+		drawerImg := tester.Image()
+		if darkImg.RGBAAt(385, 460) != drawerImg.RGBAAt(385, 460) {
+			t.Fatalf("album cover shifted/resized when right drawer opened in audio mode: hidden=%v drawer=%v",
+				darkImg.RGBAAt(385, 460), drawerImg.RGBAAt(385, 460))
+		}
+		view.player.panel = ""
 		view.player.visible = false
+		tester.Frame()
+		tester.Advance(300 * time.Millisecond)
 		tester.Frame()
 
 		// Pause for 5+ minutes -> AudioDimmed=true; outer corner must remain opaque dark canvas
@@ -444,4 +463,100 @@ func (s *audioStageSwitchSession) PlaybackSubtitles(_ context.Context, q provide
 		return s.audioCues, nil
 	}
 	return s.videoCues, nil
+}
+
+func TestPlaybackDrawerVirtualizesLargePlaylistAndRelatedAutoplay(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []app.Entry{{
+		ID: "demo", SourceID: "demo", Name: "Demo",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.ResolvePlayback, provider.PlaybackModes},
+	}}
+	state, err := app.NewState(entries, "demo", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := &audioStageTestSession{audioOnly: true}
+	queue := make(chan func(), 64)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	catalog := app.NewCatalog(func(string) provider.Session { return sess }, func(fn func()) { queue <- fn }, func() {})
+	defer catalog.Close()
+	catalog.Open(entries[0])
+
+	clock := &player.Status{HasFrame: true, AudioOnly: true, Position: 10, Duration: 180}
+	pb := app.NewPlayback(catalog, player.Engine{
+		Open:        func(string, float64) bool { return true },
+		SetRate:     func(float64) {},
+		Stop:        func() {},
+		SetAudioOnly: func(a bool) { clock.AudioOnly = a },
+		Snapshot:    func() player.Status { return *clock },
+	}, nil, func(fn func()) { queue <- fn }, func() {})
+	defer pb.Close()
+
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
+	view.Playback = pb
+	state.Push(app.Route{Page: app.Player})
+
+	// 1. Virtualized playlist drawer: 250 items must NOT mount all offscreen rows.
+	items := make([]playbackItem, 250)
+	for i := range items {
+		items[i] = playbackItem{item: provider.MediaItem{
+			Ref:   provider.MediaRef{EntryID: "demo", Kind: provider.Video, ID: fmt.Sprintf("track-%d", i)},
+			Title: fmt.Sprintf("Track %d", i),
+		}}
+	}
+	view.player = playbackView{items: items, keepQueue: true, visible: true}
+	view.startPlaybackItem(120, nil)
+	view.player.openPanel(view, playerInfo)
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	drain()
+	tester.Frame()
+	if view.focus.item(playerEpisodeID(0)) == nil || view.focus.item(playerEpisodeID(120)) == nil || view.focus.item(playerEpisodeID(249)) == nil {
+		t.Fatal("expected pinned head (0), active (120), and tail (249) playlist rows to be mounted")
+	}
+	if view.focus.item(playerEpisodeID(180)) != nil {
+		t.Fatal("expected far-offscreen playlist row 180 to be virtualized (not mounted)")
+	}
+
+	// 2. Single-track autoplay continuation via VideoDetails.Related when track ends.
+	relRef := provider.MediaRef{EntryID: "demo", Kind: provider.Video, ID: "related-next"}
+	view.player = playbackView{
+		items: []playbackItem{{item: provider.MediaItem{
+			Ref:   provider.MediaRef{EntryID: "demo", Kind: provider.Video, ID: "seed-track"},
+			Title: "Seed Track",
+			VideoDetails: &provider.VideoDetails{
+				Related: []provider.MediaItem{{Ref: relRef, Title: "Related Next"}},
+			},
+		}}},
+		visible: false,
+	}
+	view.startPlaybackItem(0, nil)
+	for range 5 {
+		time.Sleep(15 * time.Millisecond)
+		drain()
+		tester.Frame()
+	}
+	clock.Ended = true
+	pb.Tick(time.Now())
+	tester.Frame()
+	drain()
+	if len(view.player.items) != 2 || view.player.index != 1 || view.player.items[1].item.Ref != relRef {
+		t.Fatalf("expected single-track end to auto-continue via Related, got len=%d idx=%d items=%+v",
+			len(view.player.items), view.player.index, view.player.items)
+	}
 }

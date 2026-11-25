@@ -241,7 +241,7 @@ func (p *PageContext) renderAudioStage(c *ui.Context, state app.PlaybackState, i
 	ambient := cachedAudioAmbientBackdrop(art, p.Theme.Dark, colors.Surface.Canvas)
 
 	var driftX, driftY float32
-	if state.Playing && !s.visible && !v.reduceMotionEnabled(c) {
+	if state.Playing && !v.reduceMotionEnabled(c) {
 		sec := float64(now.UnixNano()) / 1e9
 		phase := (sec / audioOLEDDriftPeriod) * 2 * math.Pi
 		driftX = float32(math.Sin(phase) * audioOLEDDriftMaxX)
@@ -250,7 +250,7 @@ func (p *PageContext) renderAudioStage(c *ui.Context, state app.PlaybackState, i
 
 	// Keep the outermost stage container 100% opaque Surface.Canvas so OLED pause
 	// dimming on the inner canvas never leaks underlying transparent window pixels.
-	ui.Box(c.Key("audio-stage")).Absolute().Top(0).Left(0).Fill().
+	ui.Box(c.Key("audio-stage")).Absolute().Top(0).Left(0).Fill().ZIndex(0).
 		Background(paint(colors.Surface.Canvas)).Clip().IgnoreInput(true).Children(func() {
 		inner := ui.Box(c.Key("audio-stage-canvas")).Absolute().Top(0).Left(0).Fill()
 		if state.AudioDimmed {
@@ -265,7 +265,7 @@ func (p *PageContext) renderAudioStage(c *ui.Context, state app.PlaybackState, i
 			sub := audioStageSubtitle(item)
 			compact := p.Width < 1500
 
-			if len(cues) == 0 {
+			if len(cues) == 0 && s.content.subtitleQuery == nil {
 				p.renderAudioStageArtworkOnly(c, cover, title, sub, compact, driftX, driftY)
 				return
 			}
@@ -297,13 +297,13 @@ func (p *PageContext) renderAudioCoverSquare(c *ui.Context, key string, cover *u
 
 func (p *PageContext) renderAudioStageArtworkOnly(c *ui.Context, cover *ui.Bitmap, title, sub string, compact bool, driftX, driftY float32) {
 	colors := p.Theme.Colors
-	coverSize := float32(520)
+	coverSize := float32(490)
 	if compact {
-		coverSize = 440
+		coverSize = 420
 	}
 	ui.Column(c.Key("audio-stage-centered")).Absolute().Top(driftY).Left(driftX).Right(-driftX).Bottom(-driftY).
 		Center().Padding(0, 80, 0, 80).Children(func() {
-		p.renderAudioCoverSquare(c, "audio-cover-hero", cover, coverSize, 24)
+		p.renderAudioCoverSquare(c, "audio-cover-hero", cover, coverSize, 22)
 		ui.Column(c).Margin(36, 0, 0, 0).Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, title).FontSize(40).FontWeight(650).MaxLines(1).TextColor(paint(colors.Text.Primary))
 			if sub != "" {

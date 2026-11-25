@@ -257,6 +257,9 @@ func (p *PageContext) homeShelves(sourceShelves []provider.Collection, picks []p
 	var history []provider.MediaItem
 	if activity := p.host.Activity; activity != nil && activity.HistorySync() {
 		for _, row := range activity.Snapshot(homeHistory).Page.Rows {
+			if row.Finished {
+				continue
+			}
 			if item := row.Item; item != nil && item.ProgressSeconds != nil && *item.ProgressSeconds > 0 &&
 				(item.DurationSeconds == nil || *item.ProgressSeconds < *item.DurationSeconds) {
 				history = append(history, *item)
@@ -272,11 +275,15 @@ func (p *PageContext) homeShelves(sourceShelves []provider.Collection, picks []p
 		}
 	}
 	picksTitle, picksNote := p.sourceHomePicks()
-	return []catalogShelf{
-		{id: "continue", title: p.sourceHomeContinueTitle(), note: text.ContinueNote, items: history},
-		{id: "picks", title: picksTitle, note: picksNote, items: picks},
-		{id: "following", title: followingTitle, note: text.FollowingNote, items: followingItems},
+	shelves := make([]catalogShelf, 0, 3)
+	if len(history) > 0 {
+		shelves = append(shelves, catalogShelf{id: "continue", title: p.sourceHomeContinueTitle(), note: text.ContinueNote, items: history})
 	}
+	shelves = append(shelves,
+		catalogShelf{id: "picks", title: picksTitle, note: picksNote, items: picks},
+		catalogShelf{id: "following", title: followingTitle, note: text.FollowingNote, items: followingItems},
+	)
+	return shelves
 }
 
 func (p *PageContext) catalogRegions(shelves []catalogShelf, emptyFeed bool) {

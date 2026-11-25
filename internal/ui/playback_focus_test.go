@@ -37,7 +37,7 @@ func TestPlaybackPopoverColors(t *testing.T) {
 		page := view.context(state.Location, true, 320, 160)
 		ui.Column(c).FillWidth().Children(func() {
 			page.playbackOption(c, playbackOptionID(playerQuality, "hdr"), "HDR",
-				page.playbackLimitLabel(provider.PlaybackMembership), false, func() {})
+				page.playbackLimitLabel(provider.PlaybackMembership, false), false, func() {})
 			page.playbackSlider(c, "density", "Density", density, 10, func(next int) { density = next })
 		})
 	}, 320, 160)

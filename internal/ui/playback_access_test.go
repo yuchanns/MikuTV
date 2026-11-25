@@ -118,7 +118,8 @@ func TestSourcePresentationOverridesTermsWithoutPollutingNeutralSources(t *testi
 	if page.sourceCreatorMark() != assets.Text.Detail.CreatorMark ||
 		page.sourcePinnedLabel() != assets.Text.Detail.Pinned ||
 		page.sourceMembership() != assets.Text.Playback.QualityMember ||
-		page.playbackLimitLabel(provider.PlaybackMembership) != assets.Text.Playback.MembershipLimit ||
+		page.playbackLimitLabel(provider.PlaybackMembership, false) != assets.Text.Playback.MembershipLimit ||
+		page.playbackLimitLabel(provider.PlaybackSource, true) != assets.Text.Playback.AudioSourceLimit ||
 		page.librarySectionLabel(provider.AccountTracking) != assets.Text.Activity.Tracking ||
 		page.librarySectionLabel(provider.AccountCourses) != assets.Text.Activity.Courses {
 		t.Fatalf("neutral source lost host defaults")
@@ -139,7 +140,7 @@ func TestSourcePresentationOverridesTermsWithoutPollutingNeutralSources(t *testi
 	if page.sourceCreatorMark() != "创作者" ||
 		page.sourcePinnedLabel() != "创作者置顶" ||
 		page.sourceMembership() != "会员" ||
-		page.playbackLimitLabel(provider.PlaybackMembership) != "会员专享" ||
+		page.playbackLimitLabel(provider.PlaybackMembership, false) != "会员专享" ||
 		page.librarySectionLabel(provider.AccountTracking) != "我的追番" ||
 		page.librarySectionLabel(provider.AccountCourses) != "已购课堂" {
 		t.Fatalf("branded presentation did not override labels")
@@ -174,11 +175,27 @@ func TestSourcePresentationOverridesTermsWithoutPollutingNeutralSources(t *testi
 		ID: "following", Title: "Returned Shelf Title",
 		Items: []provider.MediaItem{{Ref: provider.MediaRef{EntryID: branded.ID, Kind: provider.Video, ID: "v1"}, Title: "V1"}},
 	}}, nil)
-	if shelves[2].title != "Returned Shelf Title" {
-		t.Fatalf("returned shelf title was ignored: %q", shelves[2].title)
+	if len(shelves) != 2 || shelves[0].id != "picks" || shelves[1].id != "following" {
+		t.Fatalf("empty continue shelf must be hidden; got %+v", shelves)
+	}
+	if shelves[1].title != "Returned Shelf Title" {
+		t.Fatalf("returned shelf title was ignored: %q", shelves[1].title)
 	}
 	fallbackShelves := page.homeShelves(nil, nil)
-	if fallbackShelves[2].title != branded.Presentation.CreatorGroupTitle {
-		t.Fatalf("manifest creatorGroupTitle fallback = %q", fallbackShelves[2].title)
+	if len(fallbackShelves) != 2 || fallbackShelves[1].title != branded.Presentation.CreatorGroupTitle {
+		t.Fatalf("manifest creatorGroupTitle fallback = %+v", fallbackShelves)
+	}
+	audioVIP := page.playbackAccessDialogFor(app.PlaybackState{
+		AudioOnly: true,
+		Limit:     provider.PlaybackMembership,
+		Resolution: provider.Playback{Plan: provider.PlaybackPlan{
+			Quality:   "exhigh",
+			Qualities: []provider.PlaybackQuality{{ID: "exhigh", Label: "High"}},
+		}},
+	}, playbackItem{})
+	if audioVIP.title != assets.Text.Playback.Access.AudioQualityVIPTitle ||
+		!strings.Contains(audioVIP.body, branded.Presentation.Membership) ||
+		strings.Contains(audioVIP.body, "4K") {
+		t.Fatalf("audio quality VIP dialog leaked video copy: %+v", audioVIP)
 	}
 }

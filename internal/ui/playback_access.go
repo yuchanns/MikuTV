@@ -117,12 +117,27 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 	}
 	if state.PreviewPending || playbackPreviewEnded(state) || playbackHasWorkRestriction(state) {
 		purchase := state.Limit == provider.PlaybackPurchase || plan.PreviewRestriction == provider.PlaybackPurchase
-		vipTitle := labels.VIPTitle
-		if state.AudioOnly && labels.AudioVIPTitle != "" {
-			vipTitle = labels.AudioVIPTitle
+		vipTitle, vipNoPreview, vipBody := labels.VIPTitle, labels.VIPNoPreview, labels.VIPBody
+		refreshLabel, instr := labels.Refresh, labels.MembershipInstructions
+		if state.AudioOnly {
+			if labels.AudioVIPTitle != "" {
+				vipTitle = labels.AudioVIPTitle
+			}
+			if labels.AudioVIPNoPreview != "" {
+				vipNoPreview = labels.AudioVIPNoPreview
+			}
+			if labels.AudioVIPBody != "" {
+				vipBody = labels.AudioVIPBody
+			}
+			if labels.AudioRefresh != "" {
+				refreshLabel = labels.AudioRefresh
+			}
+			if labels.AudioMembershipInstructions != "" {
+				instr = labels.AudioMembershipInstructions
+			}
 		}
 		dialog := playbackAccessDialog{
-			title: p.sourceText(vipTitle), body: p.sourceText(labels.VIPNoPreview), work: item.item.Title,
+			title: p.sourceText(vipTitle), body: p.sourceText(vipNoPreview), work: item.item.Title,
 			workAccess: true, returnToDetail: true, purchase: purchase,
 		}
 		if purchase {
@@ -130,7 +145,7 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 		}
 		if state.PreviewPending {
 			if !purchase {
-				dialog.body = p.sourceText(labels.VIPBody)
+				dialog.body = p.sourceText(vipBody)
 			}
 			trialMin, trialSec := labels.TrialMinutes, labels.TrialSeconds
 			if state.AudioOnly {
@@ -153,11 +168,16 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 			}})
 		}
 		if playbackPreviewEnded(state) {
-			endedTitle := labels.TrialEndedTitle
-			if state.AudioOnly && labels.AudioTrialEndedTitle != "" {
-				endedTitle = labels.AudioTrialEndedTitle
+			endedTitle, endedBody := labels.TrialEndedTitle, labels.TrialEndedBody
+			if state.AudioOnly {
+				if labels.AudioTrialEndedTitle != "" {
+					endedTitle = labels.AudioTrialEndedTitle
+				}
+				if labels.AudioTrialEndedBody != "" {
+					endedBody = labels.AudioTrialEndedBody
+				}
 			}
-			dialog.title, dialog.body = endedTitle, p.sourceText(labels.TrialEndedBody)
+			dialog.title, dialog.body = endedTitle, p.sourceText(endedBody)
 			if purchase {
 				dialog.body = labels.PurchaseTrialEndedBody
 			}
@@ -170,10 +190,10 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 		if !purchase {
 			dialog.actions = append(dialog.actions, playbackAccessAction{labels.MembershipHelp, "", func() { s.showAccessHelp = true }})
 			if s.showAccessHelp {
-				dialog.instructions = p.sourceText(labels.MembershipInstructions)
+				dialog.instructions = p.sourceText(instr)
 			}
 		}
-		dialog.actions = append(dialog.actions, playbackAccessAction{labels.Refresh, "", v.Playback.RefreshAccess})
+		dialog.actions = append(dialog.actions, playbackAccessAction{refreshLabel, "", v.Playback.RefreshAccess})
 		return dialog
 	}
 	switch state.Limit {
@@ -206,16 +226,34 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 			}
 		}
 		title, body := text.SourceLimit, labels.SourceGeneric
+		srcTitle, srcBody, useBest := labels.SourceTitle, labels.SourceBody, labels.UseBest
+		if state.AudioOnly {
+			if text.AudioSourceLimit != "" {
+				title = text.AudioSourceLimit
+			}
+			if labels.AudioSourceGeneric != "" {
+				body = labels.AudioSourceGeneric
+			}
+			if labels.AudioSourceTitle != "" {
+				srcTitle = labels.AudioSourceTitle
+			}
+			if labels.AudioSourceBody != "" {
+				srcBody = labels.AudioSourceBody
+			}
+			if labels.AudioUseBest != "" {
+				useBest = labels.AudioUseBest
+			}
+		}
 		if state.Fallback != "" {
 			for _, quality := range plan.Qualities {
 				if quality.ID == state.Fallback {
-					title, body = fmt.Sprintf(labels.SourceTitle, quality.Label), fmt.Sprintf(labels.SourceBody, quality.Label)
+					title, body = fmt.Sprintf(srcTitle, quality.Label), fmt.Sprintf(srcBody, quality.Label)
 					break
 				}
 			}
 		}
 		return playbackAccessDialog{title: title, body: body, actions: []playbackAccessAction{
-			{labels.UseBest, "", fallback(state.Fallback)}, {p.Assets.Text.Close, "", closeDialog},
+			{useBest, "", fallback(state.Fallback)}, {p.Assets.Text.Close, "", closeDialog},
 		}}
 	case provider.PlaybackRegion:
 		return playbackAccessDialog{title: labels.RegionTitle, body: labels.RegionBody, actions: []playbackAccessAction{
@@ -227,17 +265,35 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 			{p.Assets.Text.Close, "", closeDialog},
 		}}
 	case provider.PlaybackMembership:
+		qTitle, qBody, keepLabel, refreshLabel, instr := labels.QualityVIPTitle, labels.QualityVIPBody, labels.Keep, labels.Refresh, labels.MembershipInstructions
+		if state.AudioOnly {
+			if labels.AudioQualityVIPTitle != "" {
+				qTitle = labels.AudioQualityVIPTitle
+			}
+			if labels.AudioQualityVIPBody != "" {
+				qBody = labels.AudioQualityVIPBody
+			}
+			if labels.AudioKeep != "" {
+				keepLabel = labels.AudioKeep
+			}
+			if labels.AudioRefresh != "" {
+				refreshLabel = labels.AudioRefresh
+			}
+			if labels.AudioMembershipInstructions != "" {
+				instr = labels.AudioMembershipInstructions
+			}
+		}
 		dialog := playbackAccessDialog{
-			title: p.sourceText(labels.QualityVIPTitle),
-			body:  fmt.Sprintf(p.sourceText(labels.QualityVIPBody), playbackQualityLabel(state)),
+			title: p.sourceText(qTitle),
+			body:  fmt.Sprintf(p.sourceText(qBody), playbackQualityLabel(state)),
 			actions: []playbackAccessAction{
 				{labels.MembershipHelp, "", func() { s.showAccessHelp = true }},
-				{labels.Refresh, "", func() { v.Playback.ChooseQuality(s.content.requestQuality) }},
-				{labels.Keep, "", closeDialog},
+				{refreshLabel, "", func() { v.Playback.ChooseQuality(s.content.requestQuality) }},
+				{keepLabel, "", closeDialog},
 			},
 		}
 		if s.showAccessHelp {
-			dialog.instructions = p.sourceText(labels.MembershipInstructions)
+			dialog.instructions = p.sourceText(instr)
 		}
 		return dialog
 	default:

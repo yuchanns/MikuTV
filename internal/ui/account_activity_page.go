@@ -123,9 +123,15 @@ func libraryQueryFor(v *View, section string) provider.AccountQuery {
 }
 
 func syncLibrary(v *View) {
-	if v.Activity != nil {
-		v.Activity.Ensure(libraryQuery(v))
+	if v.Activity == nil {
+		return
 	}
+	query := libraryQuery(v)
+	if query.Section == provider.AccountHistory {
+		v.Activity.RefreshHistoryIfDirty(query)
+		return
+	}
+	v.Activity.Ensure(query)
 }
 
 func pauseLibraryHistory(v *View) {

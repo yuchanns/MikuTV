@@ -44,6 +44,7 @@ type AccountActivity struct {
 	pendingWrite *accountWrite
 	noticeWrite  *accountWrite
 	historyViews *historyViews
+	historyDirty bool
 }
 
 func NewAccountActivity(store HistorySyncStore, post func(func()), changed func()) *AccountActivity {
@@ -82,6 +83,27 @@ func (a *AccountActivity) Snapshot(query provider.AccountQuery) AccountSnapshot 
 func (a *AccountActivity) Ensure(query provider.AccountQuery) {
 	if a.reads[query] == nil {
 		a.start(query, "", provider.AccountPage{})
+	}
+}
+
+func (a *AccountActivity) MarkHistoryDirty() {
+	if a != nil {
+		a.historyDirty = true
+	}
+}
+
+func (a *AccountActivity) RefreshHistoryIfDirty(query provider.AccountQuery) {
+	if a == nil {
+		return
+	}
+	if a.reads[query] == nil {
+		a.historyDirty = false
+		a.start(query, "", provider.AccountPage{})
+		return
+	}
+	if a.historyDirty {
+		a.historyDirty = false
+		a.Refresh(query)
 	}
 }
 

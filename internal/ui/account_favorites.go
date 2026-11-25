@@ -261,8 +261,8 @@ func (p *PageContext) libraryCollectionMeta(c *ui.Context, query provider.Accoun
 		ui.Text(c, fmt.Sprintf(text.FolderCount, total)).FontSize(18).TextColor(paint(colors.Text.Muted))
 	})
 	rows := p.host.Activity.Snapshot(query).Page.Rows
-	if query.Section == provider.AccountWatchLater || (query.Section == provider.AccountFavorites && query.Folder != "" && p.hasPlayableRows(rows)) {
-		ui.Box(c).Absolute().Top(top + 7).Right(83).Children(func() {
+	if query.Section == provider.AccountWatchLater {
+		ui.Box(c).Absolute().Top(top + 2).Right(83).Children(func() {
 			p.libraryTextLink(c, text.PlayAll, "play", libraryPlayAll, libraryMeta, func() {
 				p.playWatchLater(rows)
 			})
@@ -270,29 +270,24 @@ func (p *PageContext) libraryCollectionMeta(c *ui.Context, query provider.Accoun
 	}
 }
 
-func (p *PageContext) hasPlayableRows(rows []provider.AccountRow) bool {
-	for _, row := range rows {
-		if row.Ref != nil && p.canPlay(*row.Ref) {
-			return true
-		}
-	}
-	return false
-}
-
 func (p *PageContext) libraryTextLink(c *ui.Context, label, icon string, id app.FocusID, region string, action func()) {
-	ink := paint(p.Theme.Colors.Text.Secondary)
-	if p.paintFocus() == id {
-		ink = paint(p.Theme.Colors.Text.Primary)
+	colors := p.Theme.Colors
+	focused := p.paintFocus() == id
+	bg, ink := ui.Transparent, paint(colors.Text.Secondary)
+	borderW, borderCol := float32(0), ui.Transparent
+	if focused {
+		bg, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+		borderW, borderCol = 2, paint(colors.Focus.Ring)
 	}
-	button := ui.Button(c.Key(string(id)), "").Label(label).Height(28).Padding(0, 0).
-		Border(0, ui.Transparent).Background(ui.Transparent).TextColor(ink).
+	button := ui.Button(c.Key(string(id)), "").Label(label).Height(38).Padding(0, 14).Radius(19).
+		Border(borderW, borderCol).Background(bg).TextColor(ink).
 		OnClick(func() { p.dispatch(action) })
-	p.animateFocus(button, ui.Transparent, ink)
+	p.animateFocus(button, bg, ink)
 	p.bind(button, id, region)
 	button.Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, p.Assets.Icon(icon)).Size(20, 20)
-			ui.Text(c, label).FontSize(19)
+			ui.Icon(c, p.Assets.Icon(icon)).Size(20, 20).TextColor(ink)
+			ui.Text(c, label).FontSize(19).TextColor(ink)
 		})
 	})
 }
@@ -353,7 +348,7 @@ func (p *PageContext) libraryGrid(c *ui.Context, query provider.AccountQuery, sn
 		draw := func(row int) {
 			ui.Row(c.Key(row)).Absolute().Top(float32(row) * stride).Left(103).Right(83).Height(stride).Gap(gap).Children(func() {
 				for _, item := range items[row*columns : min((row+1)*columns, len(items))] {
-					p.libraryCard(c, query, item, directory, width, cover, managing)
+					p.libraryCard(c, query, items, item, directory, width, cover, managing)
 				}
 			})
 		}
@@ -389,7 +384,7 @@ func (p *PageContext) accountRowImage(location string) *ui.Bitmap {
 	return p.catalogCover(location)
 }
 
-func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, item provider.AccountRow, directory bool, width, cover float32, managing bool) {
+func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, allRows []provider.AccountRow, item provider.AccountRow, directory bool, width, cover float32, managing bool) {
 	colors := p.Theme.Colors
 	var quality string
 	if query.Section == provider.AccountHistory && item.Ref != nil {
@@ -420,7 +415,36 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, it
 	if !managing && !directory && item.Ref != nil && item.Ref.EntryID == p.State.CurrentEntry && p.canOpenVideoDetail(*item.Ref) {
 		media := provider.MediaItem{Ref: *item.Ref, Title: item.Title, CoverURL: item.CoverURL,
 			DurationSeconds: item.DurationSeconds, Views: item.Views}
-		button.OnClick(func() { p.dispatch(func() { p.openVideoDetail(media) }) })
+		if item.Item != nil {
+			media = *item.Item
+		}
+		button.OnClick(func() {
+			p.dispatch(func() {
+				if (query.Section == provider.AccountFavorites && query.Folder != "") || query.Section == provider.AccountWatchLater {
+					queue := make([]playbackItem, 0, len(allRows))
+					clickedIdx := -1
+					for _, row := range allRows {
+						if row.Ref == nil || !p.canPlay(*row.Ref) {
+							continue
+						}
+						m := provider.MediaItem{Ref: *row.Ref, Title: row.Title, CoverURL: row.CoverURL,
+							DurationSeconds: row.DurationSeconds, Views: row.Views}
+						if row.Item != nil {
+							m = *row.Item
+						}
+						if row.ID == item.ID && *row.Ref == *item.Ref && clickedIdx < 0 {
+							clickedIdx = len(queue)
+						}
+						queue = append(queue, playbackItem{item: m})
+					}
+					if clickedIdx >= 0 && len(queue) > 1 {
+						p.openVideoDetailInQueue(media, queue, clickedIdx)
+						return
+					}
+				}
+				p.openVideoDetail(media)
+			})
+		})
 	}
 	p.bind(button, id, favoriteCards)
 	button.Children(func() {

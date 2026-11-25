@@ -73,6 +73,8 @@ type videoDetailState struct {
 	synopsisWidth float32
 	synopsisLang  string
 	synopsis      videoDetailSynopsis
+	queue         []playbackItem
+	queueIndex    int
 }
 
 type videoDetailLocation struct {
@@ -113,6 +115,10 @@ func (p *PageContext) canOpenVideoDetail(ref provider.MediaRef) bool {
 }
 
 func (p *PageContext) openVideoDetail(item provider.MediaItem) {
+	p.openVideoDetailInQueue(item, nil, 0)
+}
+
+func (p *PageContext) openVideoDetailInQueue(item provider.MediaItem, queue []playbackItem, queueIndex int) {
 	if p.State.Page == app.VideoDetail {
 		p.openRelatedVideoDetail(item)
 		return
@@ -137,6 +143,10 @@ func (p *PageContext) openVideoDetail(item provider.MediaItem) {
 		view.videoDetail.close()
 	}
 	view.videoDetail.seed = item
+	if len(queue) > 1 && queueIndex >= 0 && queueIndex < len(queue) {
+		view.videoDetail.queue = queue
+		view.videoDetail.queueIndex = queueIndex
+	}
 	if len(layers) == 1 {
 		view.videoDetail.entrance.from = layers[0]
 	}
@@ -464,7 +474,7 @@ func (p *PageContext) videoDetailCreator(c *ui.Context, creator provider.Creator
 			openCreator = func() { p.dispatch(func() { p.openCreator(selected) }) }
 		}
 		p.styledButton(c, creator.Name, "", videoDetailCreatorID, videoDetailControls, openCreator, style).AlignSelf(ui.Center)
-		if entry.Capabilities.Has(provider.EditVideo) {
+		if entry.Capabilities.Has(provider.FollowCreator) {
 			follow := text.Follow
 			if creator.Following {
 				follow = text.Followed

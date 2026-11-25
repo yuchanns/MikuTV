@@ -152,6 +152,9 @@ func (v *View) closePlayback() {
 	if v.Playback != nil {
 		v.Playback.Close()
 	}
+	if v.Activity != nil {
+		v.Activity.MarkHistoryDirty()
+	}
 }
 
 func (p *PageContext) canPlay(ref provider.MediaRef) bool {
@@ -163,9 +166,10 @@ func (p *PageContext) canPlay(ref provider.MediaRef) bool {
 func (p *PageContext) startDetailPlayback(item provider.MediaItem, start *float64) {
 	partID := ""
 	fallback := 0
-	if p.host.videoDetail.item.Ref == item.Ref {
-		fallback = p.host.videoDetail.part
-		if idx := p.host.videoDetail.episodeIndex(); idx >= 0 {
+	detail := &p.host.videoDetail
+	if detail.item.Ref == item.Ref {
+		fallback = detail.part
+		if idx := detail.episodeIndex(); idx >= 0 {
 			episodes := videoEpisodes(item.VideoDetails)
 			if idx < len(episodes) && !episodes[idx].Unavailable {
 				partID = episodes[idx].PartID
@@ -173,6 +177,14 @@ func (p *PageContext) startDetailPlayback(item provider.MediaItem, start *float6
 		}
 	}
 	items, selected := playbackEpisodes(item, nil, partID, fallback)
+	if len(items) == 1 && detail.item.Ref == item.Ref && len(detail.queue) > 1 &&
+		detail.queueIndex >= 0 && detail.queueIndex < len(detail.queue) &&
+		detail.queue[detail.queueIndex].item.Ref == item.Ref {
+		queued := slices.Clone(detail.queue)
+		queued[detail.queueIndex].item = item
+		p.openPlayback(queued, detail.queueIndex, true, start)
+		return
+	}
 	p.openPlayback(items, selected, false, start)
 }
 
@@ -301,6 +313,9 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 		v.Playback.SetPreferences(v.PlaybackSettings)
 	}
 	v.Playback.Start(provider.PlaybackTarget{Ref: item.Ref, PartID: part}, owner, syncSource, start)
+	if v.Activity != nil {
+		v.Activity.MarkHistoryDirty()
+	}
 	if v.LiveChat != nil {
 		if item.Ref.Kind == provider.Live {
 			s.liveChatAutoFollow = true
@@ -460,6 +475,37 @@ func (s *playbackView) stepIndex(dir int, mode app.PlaybackLoopMode) (int, bool)
 	}
 }
 
+func (v *View) nextRelatedPlaybackItem() (provider.MediaItem, bool) {
+	s := &v.player
+	current := s.current().item
+	entry, ok := v.State.Current()
+	if !ok || !entry.Capabilities.Has(provider.ResolvePlayback) {
+		return provider.MediaItem{}, false
+	}
+	var related []provider.MediaItem
+	if current.VideoDetails != nil && len(current.VideoDetails.Related) > 0 {
+		related = current.VideoDetails.Related
+	} else if s.discussion.item.Ref == current.Ref && s.discussion.item.VideoDetails != nil && len(s.discussion.item.VideoDetails.Related) > 0 {
+		related = s.discussion.item.VideoDetails.Related
+	}
+	for _, cand := range related {
+		if cand.Ref.EntryID != entry.ID || !cand.Ref.Kind.Valid() || cand.Ref.Kind == provider.Live {
+			continue
+		}
+		seen := false
+		for _, existing := range s.items {
+			if existing.item.Ref == cand.Ref {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			return cand, true
+		}
+	}
+	return provider.MediaItem{}, false
+}
+
 func (v *View) stepPlayback(dir int, ended bool) bool {
 	s := &v.player
 	if len(s.items) == 0 {
@@ -475,7 +521,17 @@ func (v *View) stepPlayback(dir int, ended bool) bool {
 	}
 	next, ok := s.stepIndex(dir, mode)
 	if !ok {
-		return false
+		if ended && dir > 0 && v.playbackPreferences().Autoplay {
+			if rel, found := v.nextRelatedPlaybackItem(); found {
+				s.items = append(s.items, playbackItem{item: rel})
+				s.keepQueue = true
+				next = len(s.items) - 1
+				ok = true
+			}
+		}
+		if !ok {
+			return false
+		}
 	}
 	s.panel, s.controlFocus = "", ""
 	s.scrubbing, s.selectingChapter = false, false
@@ -506,6 +562,10 @@ func (v *View) advancePlaybackQueue(state app.PlaybackState, allowFocus bool) ap
 			next := s.items[nextIdx]
 			if !next.locked {
 				v.Playback.PreloadNext(provider.PlaybackTarget{Ref: next.item.Ref, PartID: next.partID}, v.Playback.Owner())
+			}
+		} else if v.playbackPreferences().Autoplay {
+			if rel, found := v.nextRelatedPlaybackItem(); found {
+				v.Playback.PreloadNext(provider.PlaybackTarget{Ref: rel.Ref}, v.Playback.Owner())
 			}
 		}
 	}
@@ -688,7 +748,7 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 	}
 	surfaceWidth := p.Width
 	drawerOpen := (!liveMode && s.panel == playerInfo) || s.panel == playerComments
-	if drawerOpen && !playbackHasAccessDialog(state) {
+	if drawerOpen && !playbackHasAccessDialog(state) && !state.AudioOnly {
 		surfaceWidth -= playerDrawerWidth
 	}
 	if s.trick.scanning() || s.content.needsAnimationFrame(v, state, now, surfaceWidth) ||
@@ -776,7 +836,7 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 	}
 	surface := *p
 	showChapters := !liveMode && len(plan.Chapters) > 0 && (s.selectingChapter || p.State.Focus == playerTimeline)
-	if drawerOpen && !access {
+	if drawerOpen && !access && !state.AudioOnly {
 		surface.Width -= playerDrawerWidth
 	}
 	if p.Width > 0 {
@@ -804,10 +864,10 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 				surface.playbackPoster(c, item.item.CoverURL)
 			}
 			if !branchVisible && s.visible {
-				surface.playbackShade(c, showChapters)
+				surface.playbackShade(c, showChapters, display.AudioOnly)
 				surface.playbackTop(c, item, display, state)
 			} else if !branchVisible && playbackShowNetworkSpeed(state, s) {
-				ui.Box(c.Key("player-network-speed")).Absolute().Right(playerInset).Top(67).IgnoreInput(true).Children(func() {
+				ui.Box(c.Key("player-network-speed")).Absolute().Right(playerInset).Top(67).ZIndex(2).IgnoreInput(true).Children(func() {
 					surface.playbackNetworkSpeed(c, state, true)
 				})
 			}
@@ -928,7 +988,7 @@ func (p *PageContext) playbackPoster(c *ui.Context, cover string) {
 	})
 }
 
-func (p *PageContext) playbackShade(c *ui.Context, chapters bool) {
+func (p *PageContext) playbackShade(c *ui.Context, chapters, audioOnly bool) {
 	colors := p.Theme.Colors
 	shade := ui.LinearGradient{
 		Angle: 180, Stops: []ui.GradientStop{
@@ -945,8 +1005,22 @@ func (p *PageContext) playbackShade(c *ui.Context, chapters bool) {
 			{At: .68, Color: withAlpha(base, 0xbd)},
 			{At: 1, Color: withAlpha(base, 0xf5)},
 		}
+	} else if audioOnly {
+		shade.Stops = []ui.GradientStop{
+			{Color: withAlpha(colors.Overlay.PlayerTop, 0x99)},
+			{At: .24, Color: ui.Transparent},
+			{At: .68, Color: ui.Transparent},
+			{At: 1, Color: withAlpha(colors.Overlay.PlayerBottom, 0xe8)},
+		}
 	}
-	ui.Box(c).Absolute().Left(0).Top(0).Fill().IgnoreInput(true).LinearGradient(shade)
+	el := ui.Box(c.Key("player-shade")).Absolute().Left(0).Top(0).Fill().ZIndex(1).IgnoreInput(true).LinearGradient(shade)
+	if !p.host.reduceMotionEnabled(c) {
+		el.Transition(ui.ElementTransition{
+			Position: true, Duration: 220 * time.Millisecond, ExitDuration: 200 * time.Millisecond,
+			Ease: ui.EaseOut, ExitEase: ui.EaseInOut,
+			Enter: &ui.Motion{Opacity: 0}, Exit: &ui.Motion{Opacity: 0},
+		})
+	}
 }
 
 func (p *PageContext) playbackTop(c *ui.Context, item playbackItem, display, live app.PlaybackState) {
@@ -957,7 +1031,15 @@ func (p *PageContext) playbackTop(c *ui.Context, item playbackItem, display, liv
 	if liveMode {
 		label = p.Assets.Text.Following.LiveBadge
 	}
-	ui.Row(c).Absolute().Left(playerInset).Right(playerInset).Top(67).Gap(20).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+	topRow := ui.Row(c.Key("player-top")).Absolute().Left(playerInset).Right(playerInset).Top(67).ZIndex(2).Gap(20).Justify(ui.SpaceBetween).AlignItems(ui.Center)
+	if !p.host.reduceMotionEnabled(c) {
+		topRow.Transition(ui.ElementTransition{
+			Position: true, Duration: 220 * time.Millisecond, ExitDuration: 200 * time.Millisecond,
+			Ease: ui.EaseOut, ExitEase: ui.EaseInOut,
+			Enter: &ui.Motion{Y: -36, Opacity: 0}, Exit: &ui.Motion{Y: -36, Opacity: 0},
+		})
+	}
+	topRow.Children(func() {
 		ui.Column(c).Gap(13).Shrink(1).Children(func() {
 			title := item.item.Title
 			if branch := display.Resolution.Plan.Branch; branch != nil && branch.NodeTitle != "" && branch.NodeTitle != title {
@@ -1011,7 +1093,15 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 	if liveMode {
 		controlHeight = 65
 	}
-	ui.Box(c.Key("player-controls")).Absolute().Bottom(68).Left(playerInset).Right(playerInset).Height(controlHeight).Children(func() {
+	ctrlBox := ui.Box(c.Key("player-controls")).Absolute().Bottom(68).Left(playerInset).Right(playerInset).Height(controlHeight).ZIndex(2)
+	if !p.host.reduceMotionEnabled(c) {
+		ctrlBox.Transition(ui.ElementTransition{
+			Position: true, Duration: 220 * time.Millisecond, ExitDuration: 200 * time.Millisecond,
+			Ease: ui.EaseOut, ExitEase: ui.EaseInOut,
+			Enter: &ui.Motion{Y: 96, Opacity: 0}, Exit: &ui.Motion{Y: 112, Opacity: 0},
+		})
+	}
+	ctrlBox.Children(func() {
 		if !liveMode {
 			controls.playbackTimeline(c, state, item.item.Title)
 		}
