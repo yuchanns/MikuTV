@@ -236,13 +236,26 @@ func TestDanmakuSettingsRulesEditorFilteringAndCapabilityHiding(t *testing.T) {
 		t.Fatalf("expected Escape from rules subview to focus blocklist row, got open=%t focus=%q", view.danmakuUI.rulesOpen, state.Focus)
 	}
 
-	// 4. Switch to no-danmaku source -> Settings → 弹幕 gracefully falls back to empty state without crashing.
+	// 4. Switch to no-danmaku source -> Settings hides the Danmaku sidebar entry and redirects off it instead of showing an empty section.
 	state.SelectEntry(noDanmakuEntry.ID)
 	view.SyncEntry()
-	state.Navigate(app.Route{Page: app.Settings, Section: "danmaku"})
-	tester.Frame()
 	if view.hasDanmakuSettingsCapability() {
 		t.Fatal("expected no-danmaku source to report danmaku settings unavailable")
+	}
+	// Direct navigation to Settings/danmaku must redirect cleanly to playback without showing EmptySettings.
+	state.Navigate(app.Route{Page: app.Settings, Section: "danmaku"})
+	tester.Frame()
+	if state.Section != "playback" || view.focus.item(app.SectionFocus("danmaku")) != nil {
+		t.Fatalf("expected direct navigation to hidden danmaku section to redirect to playback, got section=%q", state.Section)
+	}
+	if _, found := tester.Find(assets.Text.EmptySettings); found {
+		t.Fatal("hidden settings section should not render EmptySettings placeholder")
+	}
+	// Pressing Down from playback in the settings sidebar skips hidden danmaku and lands directly on appearance.
+	tester.Key(0, ui.KeyDown)
+	tester.Frame()
+	if state.Section != "appearance" || state.Focus != app.SectionFocus("appearance") {
+		t.Fatalf("expected Down from playback to skip hidden danmaku and reach appearance, got section=%q focus=%q", state.Section, state.Focus)
 	}
 	_ = time.Second
 }

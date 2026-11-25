@@ -178,15 +178,21 @@ type privacyDetailsPage struct{}
 func (privacyDetailsPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
 	priv := p.Assets.Text.Privacy
+	canManage := v.settingsSectionAvailable("privacy")
+	if p.active && !canManage && p.State.Focus == privacyManageAction {
+		p.State.Focus, v.reveal = app.CloseModal, true
+	}
 	p.region("privacy-details", nil)
 	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		p.framelessHeader(c, "PRIVACY \u00b7 DATA", "lock", priv.DetailsTitle, priv.DetailsBody)
 		ui.Row(c).Margin(40, 0, 0, 0).Gap(16).Children(func() {
-			p.styledButton(c, priv.ManageAction, "", privacyManageAction, "privacy-details", func() {
-				p.State.Back()
-				p.State.Navigate(app.Route{Page: app.Settings, Section: "privacy"})
-				p.State.Focus, p.State.Area, v.reveal = v.firstPrivacyFocus(), app.ContentArea, true
-			}, p.framelessButtonAppearance())
+			if canManage {
+				p.styledButton(c, priv.ManageAction, "", privacyManageAction, "privacy-details", func() {
+					p.State.Back()
+					p.State.Navigate(app.Route{Page: app.Settings, Section: "privacy"})
+					p.State.Focus, p.State.Area, v.reveal = v.firstPrivacyFocus(), app.ContentArea, true
+				}, p.framelessButtonAppearance())
+			}
 			p.styledButton(c, p.Assets.Text.Close, "", app.CloseModal, "privacy-details", func() {
 				p.State.Back()
 			}, p.framelessButtonAppearance())

@@ -190,6 +190,13 @@ func TestAudioStagePlanALyricsNoLyricsLightAndOLEDPauseDim(t *testing.T) {
 		if !okHidden {
 			t.Fatal("expected song title to render on audio stage when HUD hidden")
 		}
+		// Stage layout must stay stationary over time (no foreground pixel drift).
+		tester.Advance(15 * time.Second)
+		tester.Frame()
+		titleLater, okLater := tester.Find("Nocturne in Blue")
+		if !okLater || titleLater.X != titleHidden.X || titleLater.Y != titleHidden.Y {
+			t.Fatalf("expected stationary audio stage without drift, before=%+v after=%+v", titleHidden, titleLater)
+		}
 		view.player.visible = true
 		tester.Frame()
 		tester.Advance(300 * time.Millisecond)

@@ -804,6 +804,7 @@ func TestRailLibraryAndSettingsHoverSwitchImmediately(t *testing.T) {
 		provider.BrowseSeries,
 		provider.BrowseLive,
 		provider.BrowseLibrary,
+		provider.ReadDanmaku,
 		provider.AccountHistory.Capability(),
 		provider.AccountWatchLater.Capability(),
 		provider.AccountFavorites.Capability(),

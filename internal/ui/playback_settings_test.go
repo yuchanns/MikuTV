@@ -290,3 +290,44 @@ func TestPlaybackSettingsUIAndAudioTrackMenuAndAutoplay(t *testing.T) {
 		t.Fatal("expected player/audio button hidden when only 1 audio track exists")
 	}
 }
+
+func TestPlaybackSettingsHidesSubtitlesWithoutCapability(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withSub := app.Entry{
+		ID: "with-sub", SourceID: "with-sub", Name: "WithSub",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.ResolvePlayback, provider.ReadSubtitles},
+	}
+	noSub := app.Entry{
+		ID: "no-sub", SourceID: "no-sub", Name: "NoSub",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.ResolvePlayback},
+	}
+	state, err := app.NewState([]app.Entry{withSub, noSub}, withSub.ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := newTestView(t, Options{State: state, Pages: pages, Assets: assets, Theme: theme.Default()})
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	state.Navigate(app.Route{Page: app.Settings, Section: "playback"})
+	tester.Frame()
+	if view.focus.item(playbackPrefSubtitles) == nil {
+		t.Fatal("expected subtitles preference row visible when source supports ReadSubtitles")
+	}
+	state.SelectEntry(noSub.ID)
+	view.SyncEntry()
+	state.Navigate(app.Route{Page: app.Settings, Section: "playback"})
+	state.Focus = playbackPrefSubtitles
+	tester.Frame()
+	if view.focus.item(playbackPrefSubtitles) != nil {
+		t.Fatal("expected subtitles preference row hidden when source lacks ReadSubtitles")
+	}
+	if state.Focus == playbackPrefSubtitles {
+		t.Fatal("expected focus moved off hidden subtitles preference row")
+	}
+}

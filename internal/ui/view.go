@@ -657,6 +657,7 @@ func (v *View) SyncAccountActivity() {
 	if v.State.Page == app.PrivacyConfirm && (v.privacyUI.confirmEntry != entry.ID || v.privacyUI.confirmOwner != owner) {
 		v.State.Back()
 	}
+	v.ensureAvailableSettingsSection()
 	if sync := v.Pages.components[v.State.Route].Sync; sync != nil {
 		sync(v)
 	}

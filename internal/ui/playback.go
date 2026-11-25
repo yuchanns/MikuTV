@@ -871,7 +871,7 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 		}
 		video.Children(func() {
 			if !liveMode && display.AudioOnly {
-				surface.renderAudioStage(c, display, item, now)
+				surface.renderAudioStage(c, display, item)
 			} else if !hasBackdrop && (!state.Clock.HasFrame || backdropBlur > 0) {
 				surface.playbackPoster(c, item.item.CoverURL)
 			}

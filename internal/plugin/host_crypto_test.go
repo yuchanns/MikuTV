@@ -303,6 +303,23 @@ func TestHostRandomBytesAndGunzipLimits(t *testing.T) {
 	if _, err := hex.DecodeString(hex16); err != nil {
 		t.Fatalf("randomBytes(16) invalid hex: %v", err)
 	}
+	// randomBytes(..., "bytes") and aesEncrypt(..., outputEncoding: "bytes") must return indexable Uint8Array instances.
+	bytesCheck := evalString(t, rt, `(() => {
+		const rnd = host.crypto.randomBytes(16, "bytes");
+		if (!(rnd instanceof Uint8Array) || rnd.length !== 16) return "bad-rnd";
+		const alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+		let key = "";
+		for (let i = 0; i < rnd.length; i++) {
+			if (typeof rnd[i] !== "number" || rnd[i] < 0 || rnd[i] > 255) return "bad-elem";
+			key += alpha[rnd[i] % alpha.length];
+		}
+		const ct = host.crypto.aesEncrypt({ mode: "cbc", key, iv: "0102030405060708", data: "payload", outputEncoding: "bytes" });
+		if (!(ct instanceof Uint8Array) || ct.length !== 16) return "bad-ct";
+		return "ok:" + key.length + ":" + ct.length;
+	})()`)
+	if bytesCheck != "ok:16:16" {
+		t.Fatalf("randomBytes/aesEncrypt bytes Uint8Array check = %q, want ok:16:16", bytesCheck)
+	}
 	if _, err := evalJS(rt, `host.crypto.randomBytes(0)`); err == nil {
 		t.Fatal("expected error for randomBytes(0)")
 	}
@@ -310,13 +327,21 @@ func TestHostRandomBytesAndGunzipLimits(t *testing.T) {
 		t.Fatal("expected error for randomBytes(2048)")
 	}
 
-	// Valid gzip decompression
+	// Valid gzip decompression returns indexable Uint8Array and converts cleanly via ToGo
 	var gzBuf bytes.Buffer
 	gw := gzip.NewWriter(&gzBuf)
 	_, _ = gw.Write([]byte("compressed-track-metadata"))
 	_ = gw.Close()
 	if err := rt.SetGlobal("gzSample", gzBuf.Bytes()); err != nil {
 		t.Fatal(err)
+	}
+	gzCheck := evalString(t, rt, `(() => {
+		const out = host.compress.gunzip(gzSample);
+		if (!(out instanceof Uint8Array) || out.length !== 25) return "bad-type";
+		return new TextDecoder().decode(out);
+	})()`)
+	if gzCheck != "compressed-track-metadata" {
+		t.Fatalf("gunzip Uint8Array decode = %q", gzCheck)
 	}
 	val, err := evalJS(rt, `host.compress.gunzip(gzSample)`)
 	if err != nil {

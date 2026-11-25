@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
@@ -17,9 +16,6 @@ import (
 
 const (
 	audioAmbientCacheLimit = 16
-	audioOLEDDriftPeriod   = 180.0
-	audioOLEDDriftMaxX     = 14.0
-	audioOLEDDriftMaxY     = 10.0
 	audioPauseDimOpacity   = float32(0.50)
 )
 
@@ -223,8 +219,8 @@ func audioStageSubtitle(item playbackItem) string {
 	return strings.Join(parts, " · ")
 }
 
-func (p *PageContext) renderAudioStage(c *ui.Context, state app.PlaybackState, item playbackItem, now time.Time) {
-	v, s := p.host, &p.host.player
+func (p *PageContext) renderAudioStage(c *ui.Context, state app.PlaybackState, item playbackItem) {
+	s := &p.host.player
 	colors := p.Theme.Colors
 	var cover *ui.Bitmap
 	var art *app.CatalogArtwork
@@ -239,14 +235,6 @@ func (p *PageContext) renderAudioStage(c *ui.Context, state app.PlaybackState, i
 		art = p.catalogArtwork(catalogImageKey{location: item.item.CoverURL})
 	}
 	ambient := cachedAudioAmbientBackdrop(art, p.Theme.Dark, colors.Surface.Canvas)
-
-	var driftX, driftY float32
-	if state.Playing && !v.reduceMotionEnabled(c) {
-		sec := float64(now.UnixNano()) / 1e9
-		phase := (sec / audioOLEDDriftPeriod) * 2 * math.Pi
-		driftX = float32(math.Sin(phase) * audioOLEDDriftMaxX)
-		driftY = float32(math.Sin(phase*1.5+0.7) * audioOLEDDriftMaxY)
-	}
 
 	// Keep the outermost stage container 100% opaque Surface.Canvas so OLED pause
 	// dimming on the inner canvas never leaks underlying transparent window pixels.
@@ -266,10 +254,10 @@ func (p *PageContext) renderAudioStage(c *ui.Context, state app.PlaybackState, i
 			compact := p.Width < 1500
 
 			if len(cues) == 0 && s.content.subtitleQuery == nil {
-				p.renderAudioStageArtworkOnly(c, cover, title, sub, compact, driftX, driftY)
+				p.renderAudioStageArtworkOnly(c, cover, title, sub, compact)
 				return
 			}
-			p.renderAudioStageLyricsSplit(c, cover, title, sub, cues, state.Position, compact, driftX, driftY)
+			p.renderAudioStageLyricsSplit(c, cover, title, sub, cues, state.Position, compact)
 		})
 	})
 }
@@ -295,13 +283,13 @@ func (p *PageContext) renderAudioCoverSquare(c *ui.Context, key string, cover *u
 	})
 }
 
-func (p *PageContext) renderAudioStageArtworkOnly(c *ui.Context, cover *ui.Bitmap, title, sub string, compact bool, driftX, driftY float32) {
+func (p *PageContext) renderAudioStageArtworkOnly(c *ui.Context, cover *ui.Bitmap, title, sub string, compact bool) {
 	colors := p.Theme.Colors
 	coverSize := float32(490)
 	if compact {
 		coverSize = 420
 	}
-	ui.Column(c.Key("audio-stage-centered")).Absolute().Top(driftY).Left(driftX).Right(-driftX).Bottom(-driftY).
+	ui.Column(c.Key("audio-stage-centered")).Absolute().Top(0).Left(0).Fill().
 		Center().Padding(0, 80, 0, 80).Children(func() {
 		p.renderAudioCoverSquare(c, "audio-cover-hero", cover, coverSize, 22)
 		ui.Column(c).Margin(36, 0, 0, 0).Gap(12).AlignItems(ui.Center).Children(func() {
@@ -313,7 +301,7 @@ func (p *PageContext) renderAudioStageArtworkOnly(c *ui.Context, cover *ui.Bitma
 	})
 }
 
-func (p *PageContext) renderAudioStageLyricsSplit(c *ui.Context, cover *ui.Bitmap, title, sub string, cues []provider.SubtitleCue, position float64, compact bool, driftX, driftY float32) {
+func (p *PageContext) renderAudioStageLyricsSplit(c *ui.Context, cover *ui.Bitmap, title, sub string, cues []provider.SubtitleCue, position float64, compact bool) {
 	colors := p.Theme.Colors
 	coverSize := float32(490)
 	padLeft, padRight, gap := float32(140), float32(124), float32(108)
@@ -327,7 +315,7 @@ func (p *PageContext) renderAudioStageLyricsSplit(c *ui.Context, cover *ui.Bitma
 	startIdx := max(0, activeIdx-windowHalf)
 	endIdx := min(len(cues), activeIdx+windowHalf+1)
 
-	ui.Row(c.Key("audio-stage-split")).Absolute().Top(driftY).Left(driftX).Right(-driftX).Bottom(-driftY).
+	ui.Row(c.Key("audio-stage-split")).Absolute().Top(0).Left(0).Fill().
 		Padding(0, padRight, 0, padLeft).Gap(gap).AlignItems(ui.Center).Children(func() {
 		ui.Column(c.Key("audio-stage-left")).Width(coverSize).Shrink(0).Children(func() {
 			p.renderAudioCoverSquare(c, "audio-cover-square", cover, coverSize, 22)

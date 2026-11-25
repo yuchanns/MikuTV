@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/MoeForge/moejs"
+	"github.com/MoeForge/moejs/engine"
 )
 
 const (
@@ -212,8 +213,19 @@ func hostGunzipFunction(ctx context.Context, rt *moejs.Runtime) moejs.Value {
 		if len(out) > maxInflateBytes {
 			return moejs.Undefined(), errors.New("decompressed payload exceeds limit")
 		}
-		return rt.FromGo(out)
+		return newUint8ArrayValue(rt, out)
 	})
+}
+
+func newUint8ArrayValue(rt *moejs.Runtime, data []byte) (moejs.Value, error) {
+	if err := rt.Realm().ChargeMemory(len(data)); err != nil {
+		return moejs.Undefined(), err
+	}
+	arr, err := rt.Realm().NewUint8Array(data, nil)
+	if err != nil {
+		return moejs.Undefined(), err
+	}
+	return engine.ObjectValue(arr), nil
 }
 
 func readCryptoOptions(rt *moejs.Runtime, val moejs.Value) (map[string]any, error) {
@@ -316,7 +328,7 @@ func formatCryptoOutput(rt *moejs.Runtime, data []byte, encoding string) (moejs.
 	case "utf8":
 		return rt.FromGo(string(data))
 	case "bytes":
-		return rt.FromGo(data)
+		return newUint8ArrayValue(rt, data)
 	default:
 		return moejs.Undefined(), fmt.Errorf("unsupported outputEncoding %q", encoding)
 	}
