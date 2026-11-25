@@ -38,13 +38,13 @@ func (tab videoDetailTab) focusID() app.FocusID { return videoDetailTabFocus[tab
 func (p *PageContext) visibleVideoDetailTabs(detail *videoDetailState) []videoDetailTab {
 	info := detail.item.VideoDetails
 	tabs := []videoDetailTab{videoDetailOverview}
-	if info == nil || len(videoEpisodes(info)) > 0 {
+	if info != nil && len(videoEpisodes(info)) > 0 {
 		tabs = append(tabs, videoDetailEpisodes)
 	}
 	if p.canReadVideoDiscussion() || (info != nil && len(info.Discussion) > 0) {
 		tabs = append(tabs, videoDetailComments)
 	}
-	if info == nil || len(info.Related) > 0 {
+	if info != nil && len(info.Related) > 0 {
 		tabs = append(tabs, videoDetailRelated)
 	}
 	return tabs

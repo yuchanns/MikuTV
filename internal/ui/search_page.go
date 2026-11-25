@@ -109,11 +109,16 @@ func searchCreatorFocus(id string) app.FocusID {
 	return app.FocusID("search/creator/" + url.PathEscape(id))
 }
 
-func searchKindsList(snapshot app.SearchSnapshot) []provider.SearchKind {
+func searchKindsList(entry app.Entry, snapshot app.SearchSnapshot) []provider.SearchKind {
 	if len(snapshot.Kinds) != 0 {
 		return snapshot.Kinds
 	}
-	return defaultSearchKinds[:]
+	kinds := make([]provider.SearchKind, 0, len(defaultSearchKinds))
+	kinds = append(kinds, provider.SearchAll, provider.SearchVideo, provider.SearchCreator, provider.SearchSeries)
+	if entry.Capabilities.Has(provider.BrowseLive) {
+		kinds = append(kinds, provider.SearchLive)
+	}
+	return kinds
 }
 
 func searchKindSupportsFilters(kind provider.SearchKind) bool {
@@ -150,7 +155,7 @@ func (searchPage) Render(c *ui.Context, p *PageContext) {
 	if activeKind == "" {
 		activeKind = provider.SearchAll
 	}
-	kinds := searchKindsList(current)
+	kinds := searchKindsList(entry, current)
 	history := current.History[:min(len(current.History), searchMaxHistoryChips)]
 	var suggestions []string
 	if current.Request.Query != "" && len(current.Suggestions) != 0 {

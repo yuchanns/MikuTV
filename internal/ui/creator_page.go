@@ -38,13 +38,6 @@ const (
 	creatorPostCover   = 235
 )
 
-var defaultCreatorTabs = []provider.CreatorTab{
-	provider.CreatorTabVideos,
-	provider.CreatorTabPosts,
-	provider.CreatorTabCollections,
-	provider.CreatorTabAbout,
-}
-
 func creatorTabFocus(tab provider.CreatorTab) app.FocusID {
 	return app.FocusID("creator/tab/" + string(tab))
 }
@@ -145,7 +138,10 @@ func (s *creatorState) visibleTabs() []provider.CreatorTab {
 	if len(s.profile.Tabs) != 0 {
 		return s.profile.Tabs
 	}
-	return defaultCreatorTabs
+	if !s.profileLoaded {
+		return []provider.CreatorTab{provider.CreatorTabVideos}
+	}
+	return []provider.CreatorTab{provider.CreatorTabVideos, provider.CreatorTabAbout}
 }
 
 func (v *View) canOpenCreator(creator *provider.Creator) bool {
