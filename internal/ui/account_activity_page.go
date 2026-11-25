@@ -137,6 +137,7 @@ func syncLibrary(v *View) {
 func pauseLibraryHistory(v *View) {
 	if v.Activity != nil {
 		v.Activity.PauseHistoryViews()
+		v.Activity.MarkHistoryDirty()
 	}
 }
 

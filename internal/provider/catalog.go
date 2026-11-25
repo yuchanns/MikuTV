@@ -69,6 +69,7 @@ type SectionPresentation struct {
 	Library    string `json:"library,omitempty"`
 	History    string `json:"history,omitempty"`
 	Favorites  string `json:"favorites,omitempty"`
+	FolderUnit string `json:"folderUnit,omitempty"`
 	WatchLater string `json:"watchLater,omitempty"`
 	Tracking   string `json:"tracking,omitempty"`
 	Courses    string `json:"courses,omitempty"`

@@ -641,7 +641,7 @@ func (p *PageContext) followingMediaStrip(c *ui.Context, key, region string, ite
 					if live {
 						p.followingLiveCard(c, id, region, item, homeShelfCardSize)
 					} else {
-						p.catalogCard(c, id, region, item, homeShelfCardSize, nil)
+						p.catalogCardInList(c, id, region, item, items, i, homeShelfCardSize, nil)
 					}
 				})
 			}
@@ -867,7 +867,7 @@ func (followingAllPage) Render(c *ui.Context, p *PageContext) {
 			if kind == followingAllLive {
 				p.followingLiveCard(c, id, region, items[index], size)
 			} else {
-				p.catalogCard(c, id, region, items[index], size, nil)
+				p.catalogCardInList(c, id, region, items[index], items, index, size, nil)
 			}
 		},
 		emptyIcon:   emptyIcon,

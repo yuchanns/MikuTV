@@ -297,6 +297,19 @@ func (p *PageContext) libraryFoldersBackLabel() string {
 	return p.Assets.Text.Activity.FoldersBack
 }
 
+func (p *PageContext) sourceFolderText(raw string) string {
+	unit := strings.TrimSpace(p.sourcePresentation().Sections.FolderUnit)
+	if raw == "" || unit == "" {
+		return raw
+	}
+	raw = strings.ReplaceAll(raw, "收藏夹", unit)
+	raw = strings.ReplaceAll(raw, "Folders", unit+"s")
+	raw = strings.ReplaceAll(raw, "Folder", unit)
+	raw = strings.ReplaceAll(raw, "folders", strings.ToLower(unit)+"s")
+	raw = strings.ReplaceAll(raw, "folder", strings.ToLower(unit))
+	return raw
+}
+
 func (p *PageContext) libraryGuestText() (string, string) {
 	sections := p.sourcePresentation().Sections
 	title, note := p.Assets.Text.Activity.LibraryGuestTitle, p.Assets.Text.Activity.LibraryGuestNote

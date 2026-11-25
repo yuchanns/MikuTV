@@ -646,7 +646,7 @@ func (p *PageContext) searchResultsBody(c *ui.Context, current app.SearchSnapsho
 					if activeKind == provider.SearchCreator {
 						p.searchCreatorCard(c, current.Page.Creators[index], cardWidth, dir)
 					} else {
-						p.searchMediaCard(c, current.Page.Items[index], cardWidth, dir)
+						p.searchMediaCard(c, current.Page.Items[index], current.Page.Items, index, cardWidth, dir)
 					}
 				}
 			})
@@ -671,11 +671,11 @@ func (p *PageContext) searchResultsBody(c *ui.Context, current app.SearchSnapsho
 	}
 }
 
-func (p *PageContext) searchMediaCard(c *ui.Context, item provider.MediaItem, width float32, direction func(app.Direction) bool) {
+func (p *PageContext) searchMediaCard(c *ui.Context, item provider.MediaItem, list []provider.MediaItem, index int, width float32, direction func(app.Direction) bool) {
 	id := searchItemFocus(item.Ref)
 	size := catalogCardSize{width: width, height: searchCardHeight, cover: searchCoverHeight, title: 21}
 	if (item.Ref.Kind == provider.Video || item.Ref.Kind == provider.Series || item.Ref.Kind == provider.Course) && p.canOpenVideoDetail(item.Ref) {
-		p.catalogCard(c, id, searchResultsRegion, item, size, direction)
+		p.catalogCardInList(c, id, searchResultsRegion, item, list, index, size, direction)
 		return
 	}
 	colors, d := p.Theme.Colors, p.uiColors()

@@ -312,6 +312,18 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 	if v.PlaybackSettings != nil {
 		v.Playback.SetPreferences(v.PlaybackSettings)
 	}
+	v.Playback.SetOnReported(func() {
+		if v.Activity == nil {
+			return
+		}
+		v.Activity.MarkHistoryDirty()
+		if v.State.Page == app.Library {
+			query := libraryQuery(v)
+			if query.Section == provider.AccountHistory {
+				v.Activity.RefreshHistoryIfDirty(query)
+			}
+		}
+	})
 	v.Playback.Start(provider.PlaybackTarget{Ref: item.Ref, PartID: part}, owner, syncSource, start)
 	if v.Activity != nil {
 		v.Activity.MarkHistoryDirty()

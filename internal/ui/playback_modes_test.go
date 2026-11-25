@@ -423,3 +423,76 @@ func TestUnifiedHUDMediaKindSwitchButton(t *testing.T) {
 		t.Fatal("expected Switch to Audio button in video mode when both kinds available")
 	}
 }
+
+func TestOpenMediaFromListQueuesOnlyWithPlaybackModes(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	musicEntry := app.Entry{
+		ID: "music", SourceID: "music", Name: "Music",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.GetCatalogItem, provider.ResolvePlayback, provider.PlaybackModes},
+		Presentation: provider.SourcePresentation{Sections: provider.SectionPresentation{FolderUnit: "歌单"}},
+	}
+	videoEntry := app.Entry{
+		ID: "video", SourceID: "video", Name: "Video",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.GetCatalogItem, provider.ResolvePlayback},
+	}
+	state, err := app.NewState([]app.Entry{musicEntry, videoEntry}, "music", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := &modesTestSession{}
+	catalog := app.NewCatalog(func(string) provider.Session { return sess }, func(fn func()) { fn() }, func() {})
+	defer catalog.Close()
+	pb := app.NewPlayback(catalog, player.Engine{
+		Open:     func(string, float64) bool { return true },
+		SetRate:  func(float64) {},
+		Stop:     func() {},
+		Snapshot: func() player.Status { return player.Status{HasFrame: true} },
+	}, nil, func(fn func()) { fn() }, func() {})
+	defer pb.Close()
+
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
+	view.Playback = pb
+	view.SyncEntry()
+	page := view.context(state.Location, true, 1920, 1080)
+
+	if got := page.sourceFolderText(assets.Text.Activity.CreateFolder); got != "新建歌单" {
+		t.Fatalf("sourceFolderText(CreateFolder) = %q, want 新建歌单", got)
+	}
+	if got := page.sourceFolderText(assets.Text.Activity.FolderSettings); got != "歌单设置" {
+		t.Fatalf("sourceFolderText(FolderSettings) = %q, want 歌单设置", got)
+	}
+
+	tracks := []provider.MediaItem{
+		{Ref: provider.MediaRef{EntryID: "music", Kind: provider.Video, ID: "t1"}, Title: "Track 1"},
+		{Ref: provider.MediaRef{EntryID: "music", Kind: provider.Video, ID: "t2"}, Title: "Track 2"},
+		{Ref: provider.MediaRef{EntryID: "music", Kind: provider.Video, ID: "t3"}, Title: "Track 3"},
+	}
+	page.openMediaFromList(tracks[1], tracks, 1)
+	if len(view.videoDetail.queue) != 3 || view.videoDetail.queueIndex != 1 {
+		t.Fatalf("music list click must carry full 3-track queue at index 1, got len=%d idx=%d",
+			len(view.videoDetail.queue), view.videoDetail.queueIndex)
+	}
+
+	// Switch to video source without PlaybackModes -> must NOT attach list queue or rewrite Folder labels.
+	state.SelectEntry("video")
+	view.SyncEntry()
+	videoPage := view.context(state.Location, true, 1920, 1080)
+	if got := videoPage.sourceFolderText(assets.Text.Activity.CreateFolder); got != assets.Text.Activity.CreateFolder {
+		t.Fatalf("neutral video source altered CreateFolder label to %q", got)
+	}
+	vids := []provider.MediaItem{
+		{Ref: provider.MediaRef{EntryID: "video", Kind: provider.Video, ID: "v1"}, Title: "Video 1"},
+		{Ref: provider.MediaRef{EntryID: "video", Kind: provider.Video, ID: "v2"}, Title: "Video 2"},
+	}
+	videoPage.openMediaFromList(vids[1], vids, 1)
+	if len(view.videoDetail.queue) != 0 {
+		t.Fatalf("video source without PlaybackModes must NOT auto-queue list, got len=%d", len(view.videoDetail.queue))
+	}
+}

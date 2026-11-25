@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
@@ -36,8 +37,33 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 	if snapshot.Page.Total != nil {
 		total = *snapshot.Page.Total
 	}
+	activeTab := app.FocusID("library/tab/" + query.Section)
+	hasHeaderAction := available && p.canManageLibrary(query) && (directory || query.Folder != "" || managing || len(rows) != 0)
+	if p.active && !guest && available && !hasHeaderAction && p.State.Focus == app.ContentAction {
+		switch {
+		case query.Folder != "":
+			p.State.Focus = "favorites/back"
+		case query.Section == provider.AccountWatchLater && len(rows) > 0:
+			p.State.Focus = libraryPlayAll
+		default:
+			p.State.Focus = activeTab
+		}
+	}
 	belowHeader := focusDestination{Focus: libraryPlayAll, Region: favoriteCards}
+	if query.Section != provider.AccountWatchLater {
+		belowHeader = focusDestination{Region: favoriteCards}
+	}
 	aboveCards := focusDestination{Focus: app.ContentAction, Region: favoriteHeader}
+	if !hasHeaderAction {
+		switch {
+		case query.Section == provider.AccountWatchLater && len(rows) > 0:
+			aboveCards = focusDestination{Focus: libraryPlayAll, Region: libraryMeta}
+		case query.Folder != "":
+			aboveCards = focusDestination{Focus: "favorites/back", Region: favoriteHeader}
+		default:
+			aboveCards = focusDestination{Focus: activeTab, Region: favoriteTabs}
+		}
+	}
 	if managing {
 		belowHeader = focusDestination{Region: favoriteTools}
 		aboveCards = belowHeader
@@ -45,7 +71,6 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 	if len(rows) == 0 {
 		belowHeader = focusDestination{Region: favoriteStatus}
 	}
-	activeTab := app.FocusID("library/tab/" + query.Section)
 	if p.active && available && !directory && !managing && snapshot.Phase == app.CatalogReady &&
 		strings.HasPrefix(string(p.State.Focus), "account/") {
 		found := false
@@ -68,12 +93,22 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 	if query.Folder != "" {
 		emptyFocus = "library/empty-action"
 	}
-	p.region(favoriteTabs, focusEdges{app.Down: {Focus: app.ContentAction, Region: belowHeader.Region}})
+	tabsDown := focusDestination{Focus: app.ContentAction, Region: belowHeader.Region}
+	if !hasHeaderAction {
+		if query.Folder != "" {
+			tabsDown = focusDestination{Focus: "favorites/back", Region: favoriteHeader}
+		} else {
+			tabsDown = belowHeader
+		}
+	}
+	p.region(favoriteTabs, focusEdges{app.Down: tabsDown})
 	p.region(favoriteHeader, focusEdges{app.Up: {Focus: activeTab}, app.Down: belowHeader})
 	p.region(favoriteTools, focusEdges{app.Up: {Focus: libraryManageID(query.Folder != "")}, app.Down: {Region: favoriteCards}})
-	metaUp := focusDestination{Focus: app.ContentAction, Region: favoriteTabs}
-	if query.Folder != "" {
+	metaUp := focusDestination{Focus: activeTab, Region: favoriteTabs}
+	if hasHeaderAction {
 		metaUp = focusDestination{Focus: app.ContentAction, Region: favoriteHeader}
+	} else if query.Folder != "" {
+		metaUp = focusDestination{Focus: "favorites/back", Region: favoriteHeader}
 	}
 	p.region(libraryMeta, focusEdges{app.Up: metaUp, app.Down: {Region: favoriteCards}})
 	p.region(favoriteCards, focusEdges{app.Up: aboveCards, app.Down: {Region: favoriteStatus}})
@@ -189,7 +224,7 @@ func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSe
 				selected := section == active
 				background, foreground, width := ui.Transparent, paint(colors.Text.Muted), float32(148)
 				borderW, borderColor := float32(0), ui.Transparent
-				if section == provider.AccountFavorites {
+				if section == provider.AccountFavorites && utf8.RuneCountInString(title) <= 3 {
 					width = 123
 				}
 				if selected {
@@ -420,7 +455,11 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, al
 		}
 		button.OnClick(func() {
 			p.dispatch(func() {
-				if (query.Section == provider.AccountFavorites && query.Folder != "") || query.Section == provider.AccountWatchLater {
+				entry, _ := p.State.Current()
+				queueSection := (query.Section == provider.AccountFavorites && query.Folder != "") ||
+					query.Section == provider.AccountWatchLater ||
+					(query.Section == provider.AccountHistory && entry.Capabilities.Has(provider.PlaybackModes))
+				if queueSection {
 					queue := make([]playbackItem, 0, len(allRows))
 					clickedIdx := -1
 					for _, row := range allRows {

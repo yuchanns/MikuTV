@@ -223,6 +223,9 @@ func (s *Source) LocalizedMetadata(tag string) (name, description string, auth p
 	if strings.TrimSpace(ov.Presentation.Sections.Favorites) != "" {
 		pres.Sections.Favorites = ov.Presentation.Sections.Favorites
 	}
+	if strings.TrimSpace(ov.Presentation.Sections.FolderUnit) != "" {
+		pres.Sections.FolderUnit = ov.Presentation.Sections.FolderUnit
+	}
 	if strings.TrimSpace(ov.Presentation.Sections.WatchLater) != "" {
 		pres.Sections.WatchLater = ov.Presentation.Sections.WatchLater
 	}

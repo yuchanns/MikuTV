@@ -100,6 +100,7 @@ type Playback struct {
 	prefs   *PlaybackSettings
 	post    func(func())
 	changed func()
+	onReported func()
 
 	state            PlaybackState
 	owner            string
@@ -1745,6 +1746,12 @@ func (p *Playback) savePosition(syncWait bool) {
 	p.sendProgress()
 }
 
+func (p *Playback) SetOnReported(fn func()) {
+	if p != nil {
+		p.onReported = fn
+	}
+}
+
 func (p *Playback) sendProgress() {
 	if p.reporting || len(p.reports) == 0 {
 		return
@@ -1760,9 +1767,12 @@ func (p *Playback) sendProgress() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
-		_ = item.reporter.ReportPlayback(ctx, item.report)
+		err := item.reporter.ReportPlayback(ctx, item.report)
 		p.post(func() {
 			p.reporting = false
+			if err == nil && p.onReported != nil {
+				p.onReported()
+			}
 			p.sendProgress()
 		})
 	}()

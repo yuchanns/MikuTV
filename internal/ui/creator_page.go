@@ -1011,7 +1011,7 @@ func (p *PageContext) creatorVideosSection(c *ui.Context, state *creatorState) {
 								return false
 							}
 						}
-						p.catalogCard(c, creatorVideoFocus(item.Ref), creatorContentRegion, item, size, dir)
+						p.catalogCardInList(c, creatorVideoFocus(item.Ref), creatorContentRegion, item, data.items, index, size, dir)
 					}
 				})
 			}

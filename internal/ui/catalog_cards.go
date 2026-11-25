@@ -127,10 +127,10 @@ func (p *PageContext) catalogGridRow(c *ui.Context, section catalogSection, wind
 				}
 			}
 			if grid.podium != 0 {
-				p.catalogRankingRow(c, section.cards[index], section.group.Items[index], index+1, size.width, direction)
+				p.catalogRankingRow(c, section.cards[index], section.group.Items[index], section.group.Items, index, index+1, size.width, direction)
 				continue
 			}
-			p.catalogCard(c, section.cards[index], homeCards, section.group.Items[index], size, direction)
+			p.catalogCardInList(c, section.cards[index], homeCards, section.group.Items[index], section.group.Items, index, size, direction)
 		}
 	}
 	key := "catalog-row/" + strconv.Itoa(row)
@@ -232,7 +232,11 @@ func (p *PageContext) catalogStrip(c *ui.Context, shelf string, items []provider
 				id := catalogCardFocus(shelf, item.Ref)
 				ui.Box(c.Key("strip-card/"+string(id))).Absolute().Top(top).Left(left+float32(i)*stride).
 					Size(cardWidth, homeCardHeight).Children(func() {
-					p.catalogCard(c, id, region, item, homeShelfCardSize, nil)
+					if shelf != videoDetailRelatedShelf {
+						p.catalogCardInList(c, id, region, item, items, i, homeShelfCardSize, nil)
+					} else {
+						p.catalogCard(c, id, region, item, homeShelfCardSize, nil)
+					}
 				})
 			}
 			for i := first; i < end; i++ {
@@ -250,12 +254,16 @@ func (p *PageContext) catalogStrip(c *ui.Context, shelf string, items []provider
 }
 
 func (p *PageContext) catalogCard(c *ui.Context, id app.FocusID, region string, item provider.MediaItem, size catalogCardSize, direction func(app.Direction) bool) {
+	p.catalogCardInList(c, id, region, item, nil, 0, size, direction)
+}
+
+func (p *PageContext) catalogCardInList(c *ui.Context, id app.FocusID, region string, item provider.MediaItem, list []provider.MediaItem, index int, size catalogCardSize, direction func(app.Direction) bool) {
 	colors, d := p.Theme.Colors, p.uiColors()
 	related := region == videoDetailRelatedRegion
 	card := ui.Button(c.Key(string(id)), "").Size(size.width, size.height).Shrink(0).Padding(0, 0).
 		Border(0, ui.Transparent).Background(ui.Transparent).Label(item.Title)
 	if p.canOpenVideoDetail(item.Ref) {
-		card.OnClick(func() { p.dispatch(func() { p.openVideoDetail(item) }) })
+		card.OnClick(func() { p.dispatch(func() { p.openMediaFromList(item, list, index) }) })
 	}
 	p.bindDirection(card, id, region, direction)
 	card.Children(func() {

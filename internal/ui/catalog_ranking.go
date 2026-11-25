@@ -25,7 +25,7 @@ func (p *PageContext) catalogPodium(c *ui.Context, section catalogSection) {
 					SingleLine().TextAlign(ui.End).FontFeatures("pnum").FontSize(56).FontWeight(350).
 					LetterSpacing(-4).TextColor(paint(colors.Accent.Soft))
 				ui.Box(c).Absolute().Top(0).Left(numberWidth).Children(func() {
-					p.catalogCard(c, section.cards[index], homeCards, item, size, nil)
+					p.catalogCardInList(c, section.cards[index], homeCards, item, section.group.Items, index, size, nil)
 				})
 				if item.RankScore != nil {
 					ui.Text(c, fmt.Sprintf("%s %s", labels.RankingHeat, catalogViews(*item.RankScore, labels))).
@@ -36,7 +36,7 @@ func (p *PageContext) catalogPodium(c *ui.Context, section catalogSection) {
 	})
 }
 
-func (p *PageContext) catalogRankingRow(c *ui.Context, id app.FocusID, item provider.MediaItem, rank int, width float32, direction func(app.Direction) bool) {
+func (p *PageContext) catalogRankingRow(c *ui.Context, id app.FocusID, item provider.MediaItem, list []provider.MediaItem, index, rank int, width float32, direction func(app.Direction) bool) {
 	colors, d, labels := p.Theme.Colors, p.uiColors(), p.Assets.Text.Home
 	background, foreground, secondary := ui.Transparent, paint(colors.Text.Primary), paint(colors.Text.Secondary)
 	if p.paintFocus() == id {
@@ -45,7 +45,7 @@ func (p *PageContext) catalogRankingRow(c *ui.Context, id app.FocusID, item prov
 	row := ui.Button(c.Key(string(id)), "").Label(item.Title).Size(width, rankingGridMetrics.height).
 		Radius(8).Border(0, ui.Transparent).Padding(0, 0).Shrink(0).Background(background).TextColor(foreground)
 	if p.canOpenVideoDetail(item.Ref) {
-		row.OnClick(func() { p.dispatch(func() { p.openVideoDetail(item) }) })
+		row.OnClick(func() { p.dispatch(func() { p.openMediaFromList(item, list, index) }) })
 	}
 	p.animateFocus(row, background, foreground)
 	p.bindDirection(row, id, homeCards, direction)

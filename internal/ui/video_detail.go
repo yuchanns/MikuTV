@@ -118,6 +118,32 @@ func (p *PageContext) openVideoDetail(item provider.MediaItem) {
 	p.openVideoDetailInQueue(item, nil, 0)
 }
 
+func (p *PageContext) openMediaFromList(item provider.MediaItem, list []provider.MediaItem, index int) {
+	entry, ok := p.State.Current()
+	if !ok || !entry.Capabilities.Has(provider.PlaybackModes) || len(list) <= 1 || item.Ref.Kind != provider.Video {
+		p.openVideoDetail(item)
+		return
+	}
+	queue := make([]playbackItem, 0, len(list))
+	clickedIdx := -1
+	for i, cand := range list {
+		if cand.Ref.Kind != provider.Video || !p.canPlay(cand.Ref) {
+			continue
+		}
+		if i == index || (clickedIdx < 0 && cand.Ref == item.Ref) {
+			clickedIdx = len(queue)
+			queue = append(queue, playbackItem{item: item})
+			continue
+		}
+		queue = append(queue, playbackItem{item: cand})
+	}
+	if clickedIdx >= 0 && len(queue) > 1 {
+		p.openVideoDetailInQueue(item, queue, clickedIdx)
+		return
+	}
+	p.openVideoDetail(item)
+}
+
 func (p *PageContext) openVideoDetailInQueue(item provider.MediaItem, queue []playbackItem, queueIndex int) {
 	if p.State.Page == app.VideoDetail {
 		p.openRelatedVideoDetail(item)
