@@ -240,8 +240,13 @@ func (b *directBuffer) runPump(ctx context.Context, cancel context.CancelFunc, e
 			if ctx.Err() != nil {
 				return
 			}
+			b.mu.Lock()
+			canRetryOpen := b.probed && !b.passthrough
+			b.mu.Unlock()
+			code := provider.CodeOf(err)
+			terminalAuth := code == provider.Expired || code == provider.NeedsSignIn || code == provider.Denied
 			retries++
-			if retries <= directPumpMaxRetries && b.probed && !b.passthrough {
+			if !terminalAuth && retries <= directPumpMaxRetries && canRetryOpen {
 				if !sleepWithContext(ctx, time.Duration(retries)*150*time.Millisecond) {
 					return
 				}
@@ -368,8 +373,9 @@ func (b *directBuffer) runPump(ctx context.Context, cancel context.CancelFunc, e
 }
 
 func (b *directBuffer) finishPumpError(epoch uint64, err error) {
+	record := false
 	b.mu.Lock()
-	if b.pumpEpoch == epoch {
+	if !b.closed && b.pumpEpoch == epoch {
 		if !b.probed {
 			b.probed = true
 			b.probeErr = err
@@ -378,8 +384,12 @@ func (b *directBuffer) finishPumpError(epoch uint64, err error) {
 		b.pumpRunning = false
 		b.pumpDone = true
 		b.cond.Broadcast()
+		record = err != nil
 	}
 	b.mu.Unlock()
+	if record {
+		b.media.recordFailure(err)
+	}
 }
 
 func (b *directBuffer) waitForBudget(ctx context.Context, epoch uint64, offset int64) bool {

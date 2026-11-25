@@ -349,3 +349,56 @@ func TestDirectBufferForwardBackpressureAndBackwardSeekIntoEvictedBytes(t *testi
 	// The pump must restart cleanly and serve exact bytes within timeout.
 	fetchRange(2<<20, (3<<20)-1)
 }
+
+type directExpireOnResumeTransport struct {
+	directMockTransport
+	expireAfterFirstOpen atomic.Bool
+}
+
+func (tr *directExpireOnResumeTransport) OpenResource(ctx context.Context, res provider.PlaybackResource, method, byteRange string) (*http.Response, error) {
+	if method != http.MethodHead && tr.expireAfterFirstOpen.Swap(true) {
+		return nil, &provider.Error{Code: provider.Expired}
+	}
+	return tr.directMockTransport.OpenResource(ctx, res, method, byteRange)
+}
+
+func TestDirectBufferPropagatesPostProbeExpiredFailure(t *testing.T) {
+	payload := makePatternBytes(2 << 20)
+	tr := &directExpireOnResumeTransport{
+		directMockTransport: directMockTransport{
+			data:        payload,
+			contentType: "audio/mpeg",
+			dropFirstAt: 512 << 10, // drop first open after 512 KiB; resume returns provider.Expired
+		},
+	}
+	media, err := OpenMedia(context.Background(), provider.Playback{
+		Plan: provider.PlaybackPlan{
+			Streams: []provider.PlaybackStream{{
+				Format: provider.PlaybackDirect,
+				Audio: &provider.PlaybackTrack{
+					ContentType: "audio/mpeg",
+					Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/expiring.mp3"}},
+				},
+			}},
+		},
+		Transport: tr,
+	})
+	if err != nil {
+		t.Fatalf("OpenMedia: %v", err)
+	}
+	defer media.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, media.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET expiring stream: %v", err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if got := media.Failure(); got != provider.Expired {
+		t.Fatalf("media.Failure() = %q, want %q", got, provider.Expired)
+	}
+}
