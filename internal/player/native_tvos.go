@@ -207,7 +207,8 @@ var (
 		selInitWithPixelBufferAttrs, selAddOutput, selRemoveOutput objc.SEL
 		selPause, selSetRate, selSeekToTime, selCancelPendingSeeks objc.SEL
 		selCurrentTime, selDuration, selLoadedTimeRanges           objc.SEL
-		selCMTimeRangeValue, selStatus, selError, selCode          objc.SEL
+		selCMTimeRangeValue, selStatus, selError, selCode            objc.SEL
+		selDomain, selLocalizedDescription                            objc.SEL
 		selTimeControlStatus, selReasonForWaitingToPlay            objc.SEL
 		selIsReadyForDisplay                                       objc.SEL
 		selAccessLog, selEvents, selLastObject                     objc.SEL
@@ -493,6 +494,8 @@ func loadTVOSPlayer() error {
 		n.selStatus = sel("status")
 		n.selError = sel("error")
 		n.selCode = sel("code")
+		n.selDomain = sel("domain")
+		n.selLocalizedDescription = sel("localizedDescription")
 		n.selTimeControlStatus = sel("timeControlStatus")
 		n.selReasonForWaitingToPlay = sel("reasonForWaitingToPlay")
 		n.selIsReadyForDisplay = sel("isReadyForDisplay")
@@ -1732,12 +1735,23 @@ func (p *tvosPlayer) open(address string, position float64) bool {
 			}
 			var errObj objc.ID
 			status := n.statusForKey(asset, n.selStatusOfValueForKey, n.strPlayable, &errObj)
-			if status != avKeyValueStatusLoaded || !n.getBool(asset, n.selIsPlayable) {
+			playable := n.getBool(asset, n.selIsPlayable)
+			if status != avKeyValueStatusLoaded || !playable {
 				code := int64(-1)
+				domain := ""
+				desc := ""
 				if errObj != 0 {
 					if c := n.getInt64(errObj, n.selCode); c != 0 {
 						code = c
 					}
+					if p.trace {
+						domain = goString(n.getObj(errObj, n.selDomain))
+						desc = goString(n.getObj(errObj, n.selLocalizedDescription))
+					}
+				}
+				if p.trace {
+					log.Printf("player-playable: status=%d playable=%t code=%d domain=%q desc=%q",
+						status, playable, code, domain, desc)
 				}
 				p.errorCode = code
 				p.clearDisplayCriteria()

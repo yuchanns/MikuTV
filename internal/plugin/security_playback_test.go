@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"image"
 	"image/color"
@@ -278,6 +279,214 @@ export function resolvePlayback() {
 	_ = resp3.Body.Close()
 	if len(hosts) != 1 || hosts[0] != "cdn1.cdn-a.media.example" {
 		t.Fatalf("expected rotation to cdn1 after reporting cdn2 slow, got %v", hosts)
+	}
+}
+
+func TestManifestValidatesAuthenticatedArtworkPermissions(t *testing.T) {
+	baseScript := `export function browse() { return {collections:[]}; }
+export function beginSignIn() { return {url:"https://drive.media.example/qr",key:"k",expiresAt:Date.now()+60000}; }
+export function pollSignIn() { return {status:"waiting"}; }
+export function restoreAccount() { return {account:{id:"1",name:"User"},secret:{ok:true}}; }
+export function signOut() { return {}; }`
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*sourceManifest)
+	}{
+		{
+			name: "requires sign-in capability",
+			mutate: func(m *sourceManifest) {
+				m.Permissions.Network = []string{"*.media.example"}
+				m.Permissions.Artwork.Hosts = []string{"drive.media.example"}
+			},
+		},
+		{
+			name: "rejects wildcard host",
+			mutate: func(m *sourceManifest) {
+				m.Capabilities = append(m.Capabilities, provider.SignIn)
+				m.Authentication.Methods = []string{string(provider.AuthMethodQRCode)}
+				m.Permissions.Network = []string{"*.media.example"}
+				m.Permissions.Artwork.Hosts = []string{"*.media.example"}
+			},
+		},
+		{
+			name: "rejects host outside network permissions",
+			mutate: func(m *sourceManifest) {
+				m.Capabilities = append(m.Capabilities, provider.SignIn)
+				m.Authentication.Methods = []string{string(provider.AuthMethodQRCode)}
+				m.Permissions.Network = []string{"api.media.example"}
+				m.Permissions.Artwork.Hosts = []string{"other.media.example"}
+			},
+		},
+		{
+			name: "rejects non-https referer",
+			mutate: func(m *sourceManifest) {
+				m.Capabilities = append(m.Capabilities, provider.SignIn)
+				m.Authentication.Methods = []string{string(provider.AuthMethodQRCode)}
+				m.Permissions.Network = []string{"*.media.example"}
+				m.Permissions.Artwork.Hosts = []string{"drive.media.example"}
+				m.Permissions.Artwork.Referer = "http://pan.media.example/"
+			},
+		},
+		{
+			name: "rejects referer outside network permissions",
+			mutate: func(m *sourceManifest) {
+				m.Capabilities = append(m.Capabilities, provider.SignIn)
+				m.Authentication.Methods = []string{string(provider.AuthMethodQRCode)}
+				m.Permissions.Network = []string{"drive.media.example"}
+				m.Permissions.Artwork.Hosts = []string{"drive.media.example"}
+				m.Permissions.Artwork.Referer = "https://evil.example/"
+			},
+		},
+		{
+			name: "rejects referer without hosts",
+			mutate: func(m *sourceManifest) {
+				m.Capabilities = append(m.Capabilities, provider.SignIn)
+				m.Authentication.Methods = []string{string(provider.AuthMethodQRCode)}
+				m.Permissions.Network = []string{"*.media.example"}
+				m.Permissions.Artwork.Referer = "https://pan.media.example/"
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := zipFiles(t, map[string][]byte{
+				"plugin.json": manifestForTest(t, tc.mutate),
+				"index.js":    []byte(baseScript),
+			})
+			if _, err := Open(t.Context(), data, testVersion); err == nil {
+				t.Fatalf("expected Open to reject %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestAuthenticatedArtworkScopesCookiesAndStripsOnCrossOriginRedirect(t *testing.T) {
+	var jpg bytes.Buffer
+	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	img.Set(0, 0, color.RGBA{R: 40, G: 180, B: 220, A: 255})
+	if err := jpeg.Encode(&jpg, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	script := `export function browse() { return {collections:[]}; }
+export function beginSignIn() { return {url:"https://drive.media.example/qr",key:"k",expiresAt:Date.now()+60000}; }
+export function pollSignIn() { return {status:"waiting"}; }
+export function restoreAccount() { return {account:{id:"1",name:"User"},secret:{ok:true}}; }
+export function signOut() { return {}; }`
+	source := openForTest(t, script, func(m *sourceManifest) {
+		m.Capabilities = append(m.Capabilities, provider.SignIn)
+		m.Authentication.Methods = []string{string(provider.AuthMethodQRCode)}
+		m.Permissions.Network = []string{"*.media.example", "*.cdn.example"}
+		m.Permissions.Artwork.Hosts = []string{"drive.media.example"}
+		m.Permissions.Artwork.Referer = "https://web.media.example/"
+	})
+	session := source.NewSession("entry", memoryStorageForTest(t))
+	defer session.Close()
+
+	var seenAuthCookie, seenCDNCookie, seenPublicCookie, seenCDNReferer string
+	session.client.Transport = testRoundTripper(func(req *http.Request) (*http.Response, error) {
+		switch req.URL.Hostname() {
+		case "drive.media.example":
+			seenAuthCookie = req.Header.Get("Cookie")
+			if req.Header.Get("Referer") != "https://web.media.example/" {
+				return &http.Response{StatusCode: http.StatusForbidden, Body: readCloserBuffer{bytes.NewReader(nil)}, Request: req}, nil
+			}
+			switch req.URL.Path {
+			case "/thumb/redirect":
+				return &http.Response{
+					StatusCode: http.StatusFound,
+					Header:     http.Header{"Location": {"https://img.cdn.example/signed.jpg"}},
+					Body:       readCloserBuffer{bytes.NewReader(nil)},
+					Request:    req,
+				}, nil
+			case "/thumb/evil":
+				return &http.Response{
+					StatusCode: http.StatusFound,
+					Header:     http.Header{"Location": {"https://blocked.outside.example/x.jpg"}},
+					Body:       readCloserBuffer{bytes.NewReader(nil)},
+					Request:    req,
+				}, nil
+			case "/thumb/loop":
+				return &http.Response{
+					StatusCode: http.StatusFound,
+					Header:     http.Header{"Location": {"https://drive.media.example/thumb/loop"}},
+					Body:       readCloserBuffer{bytes.NewReader(nil)},
+					Request:    req,
+				}, nil
+			}
+		case "img.cdn.example":
+			seenCDNCookie = req.Header.Get("Cookie")
+			seenCDNReferer = req.Header.Get("Referer")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"image/jpeg"}},
+				Body:       readCloserBuffer{bytes.NewReader(jpg.Bytes())},
+				Request:    req,
+			}, nil
+		case "avatar.media.example":
+			seenPublicCookie = req.Header.Get("Cookie")
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": {"image/jpeg"}},
+				Body:       readCloserBuffer{bytes.NewReader(jpg.Bytes())},
+				Request:    req,
+			}, nil
+		}
+		return &http.Response{StatusCode: http.StatusNotFound, Body: readCloserBuffer{bytes.NewReader(nil)}, Request: req}, nil
+	})
+
+	stored, err := json.Marshal(storedCredential{
+		Secret: json.RawMessage(`{"ok":true}`),
+		Cookies: []storedCookie{{
+			URL: "https://drive.media.example",
+			Cookie: &http.Cookie{
+				Name:   "SID",
+				Value:  "topsecret",
+				Domain: ".media.example",
+				Path:   "/",
+				Secure: true,
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SetAccount(&provider.Credential{
+		Account: provider.Account{ID: "u1", Name: "User"},
+		Data:    stored,
+	}); err != nil {
+		t.Fatalf("SetAccount: %v", err)
+	}
+
+	// 1. Declared artwork host receives session cookie + referer, redirects to allowed CDN without leaking cookies.
+	if _, err := session.LoadCatalogArtwork(t.Context(), "https://drive.media.example/thumb/redirect"); err != nil {
+		t.Fatalf("LoadCatalogArtwork authenticated redirect: %v", err)
+	}
+	if seenAuthCookie != "SID=topsecret" {
+		t.Fatalf("expected session cookie on declared artwork host, got %q", seenAuthCookie)
+	}
+	if seenCDNCookie != "" {
+		t.Fatalf("expected cookie stripped on cross-origin redirect, got %q", seenCDNCookie)
+	}
+	if seenCDNReferer != "https://web.media.example/" {
+		t.Fatalf("expected safe referer preserved across redirect, got %q", seenCDNReferer)
+	}
+
+	// 2. Non-declared host (same .media.example cookie domain!) MUST still receive zero cookies.
+	if _, err := session.LoadAccountAvatar(t.Context(), "https://avatar.media.example/u1.jpg"); err != nil {
+		t.Fatalf("LoadAccountAvatar: %v", err)
+	}
+	if seenPublicCookie != "" {
+		t.Fatalf("expected public host to receive no cookies, got %q", seenPublicCookie)
+	}
+
+	// 3. Redirect to host outside permissions.network MUST be denied.
+	if _, err := session.LoadCatalogArtwork(t.Context(), "https://drive.media.example/thumb/evil"); err == nil {
+		t.Fatal("expected redirect outside permissions.network to fail")
+	}
+
+	// 4. Excessive redirect loop MUST be rejected.
+	if _, err := session.LoadCatalogArtwork(t.Context(), "https://drive.media.example/thumb/loop"); err == nil {
+		t.Fatal("expected redirect loop to fail")
 	}
 }
 

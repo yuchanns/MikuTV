@@ -419,6 +419,15 @@ func audioCodecFamily(codec string) string {
 }
 
 func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStream, selectedAudioID string) (string, error) {
+	if mediaTrace {
+		host := ""
+		if len(stream.Video.Resource.URLs) > 0 {
+			if u, err := url.Parse(stream.Video.Resource.URLs[0]); err == nil {
+				host = u.Hostname()
+			}
+		}
+		log.Printf("player-media: open format=%s host=%s ct=%q", stream.Format, host, stream.Video.ContentType)
+	}
 	switch stream.Format {
 	case provider.PlaybackDirect:
 		m.primaryURLs = stream.Video.Resource.URLs
