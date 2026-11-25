@@ -124,6 +124,7 @@ type Playback struct {
 	bufferedAt       time.Time
 	pausedAt         time.Time
 	loaded           bool
+	reportedStart    bool
 	didEnd           bool
 	liveEndChecked   bool
 	previewConfirmed bool
@@ -284,7 +285,7 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 		position = *start
 	}
 	p.state = PlaybackState{Target: target, Playing: true, Position: position, Revision: revision}
-	p.loaded, p.didEnd, p.refreshed = false, false, false
+	p.loaded, p.reportedStart, p.didEnd, p.refreshed = false, false, false, false
 	p.liveEndChecked, p.pausedAt = false, time.Time{}
 	p.previewConfirmed, p.hdrBlocked = false, false
 	p.branchID, p.branchState, p.branchTriggered = "", "", false
@@ -328,6 +329,7 @@ func (p *Playback) Close() {
 		p.engine.Fullscreen(false)
 	}
 	p.active = false
+	p.reportedStart = false
 	p.branchID, p.branchState, p.branchTriggered = "", "", false
 	p.selectedAudio = ""
 	p.mediaKind = ""
@@ -866,7 +868,14 @@ func (p *Playback) Tick(now time.Time) {
 	}
 	if p.positionAt.IsZero() {
 		p.positionAt = now
-	} else if p.state.Playing && now.Sub(p.positionAt) >= 30*time.Second {
+	}
+	if p.state.AudioOnly && p.loaded && !p.reportedStart && p.state.Playing &&
+		p.state.Target.Ref.ID != "" && p.state.Resolution.Plan.Branch == nil && p.state.BranchHistory == 0 &&
+		(p.state.Position >= 1 || now.Sub(p.positionAt) >= 2*time.Second) {
+		p.reportedStart = true
+		p.queueReport(p.state.Target, 0, false)
+	}
+	if p.state.Playing && now.Sub(p.positionAt) >= 30*time.Second {
 		p.saveAsync()
 		p.positionAt = now
 	}
@@ -1729,6 +1738,10 @@ func (p *Playback) savePosition(syncWait bool) {
 	}
 	p.lastSaved, p.savedAsEnd = seconds, finished
 	p.enqueuePositionSave(p.owner, target, float64(seconds), syncWait)
+	p.queueReport(target, seconds, finished)
+}
+
+func (p *Playback) queueReport(target provider.PlaybackTarget, seconds int64, finished bool) {
 	reporter, _ := p.catalog.session.(provider.PlaybackReporter)
 	if !p.syncSource || p.owner == "" || reporter == nil || !p.catalog.CanReportPlayback() {
 		return

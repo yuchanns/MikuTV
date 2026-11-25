@@ -157,7 +157,7 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 				case app.CatalogIdle, app.CatalogLoading:
 					p.libraryEmpty(c, "spinner", text.LoadingTitle, "", "", "", "", nil)
 				case app.CatalogFailed:
-					p.libraryEmpty(c, "", text.FailedTitle, p.authError(snapshot.Error), text.Retry, "", emptyFocus, func() { activity.Retry(query) })
+					p.libraryEmpty(c, "", text.FailedTitle, p.requestError(snapshot.Error), text.Retry, "", emptyFocus, func() { activity.Retry(query) })
 				case app.CatalogCanceled:
 					p.libraryEmpty(c, "", text.CanceledTitle, "", text.Retry, "", emptyFocus, func() { activity.Retry(query) })
 				default:

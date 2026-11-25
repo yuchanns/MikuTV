@@ -100,10 +100,17 @@ func syncFollowing(v *View) {
 	}
 }
 
+func followingSupportsLive(entry app.Entry, snapshot app.FollowingSnapshot) bool {
+	if snapshot.Loaded {
+		return snapshot.SupportsLive
+	}
+	return entry.Capabilities.Has(provider.BrowseLive)
+}
+
 func (v *View) showFollowingTab(tab followingTab) {
 	if tab == followingViewLive && v.Following != nil {
-		snap := v.Following.Snapshot()
-		if snap.Loaded && !snap.SupportsLive {
+		entry, _ := v.State.Current()
+		if !followingSupportsLive(entry, v.Following.Snapshot()) {
 			tab = followingViewAll
 		}
 	}
@@ -119,13 +126,12 @@ func (v *View) backFromFollowing() bool {
 	if v.State.Area != app.ContentArea || scroll == nil {
 		return false
 	}
-	supportsLive := true
+	entry, _ := v.State.Current()
+	var snap app.FollowingSnapshot
 	if v.Following != nil {
-		snap := v.Following.Snapshot()
-		if snap.Loaded {
-			supportsLive = snap.SupportsLive
-		}
+		snap = v.Following.Snapshot()
 	}
+	supportsLive := followingSupportsLive(entry, snap)
 	tab := followingTabFocus(v.following.activeTab(supportsLive))
 	if target := v.focus.item(tab); target == nil || target.group != followingHeaderRegion {
 		return false
@@ -158,7 +164,7 @@ func (followingPage) Render(c *ui.Context, p *PageContext) {
 	}
 	snapshot := feed.Snapshot()
 	signedIn := feed.SignedIn()
-	supportsLive := !snapshot.Loaded || snapshot.SupportsLive
+	supportsLive := followingSupportsLive(entry, snapshot)
 	view := &p.host.following
 	activeTab := view.activeTab(supportsLive)
 	if view.tab != activeTab {
@@ -749,7 +755,7 @@ func (p *PageContext) followingFailedState(c *ui.Context, code provider.ErrorCod
 			})
 		return
 	}
-	p.followingStateBlock(c, "following", text.Following.LoadFailed, p.authError(code), text.Retry, "refresh", followingRetryFocus, func() {
+	p.followingStateBlock(c, "following", text.Following.LoadFailed, p.requestError(code), text.Retry, "refresh", followingRetryFocus, func() {
 		p.host.Following.Retry()
 	})
 }

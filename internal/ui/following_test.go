@@ -332,3 +332,90 @@ func TestFollowingGuestTabsCreatorUnfollowSyncAndAccountSwitch(t *testing.T) {
 		t.Fatal("expected live tab hidden when SupportsLive=false")
 	}
 }
+
+type failingFollowingSession struct {
+	uiFollowingSession
+	err error
+}
+
+func (s *failingFollowingSession) ReadFollowing(_ context.Context, _ provider.FollowingRequest) (provider.FollowingPage, error) {
+	return provider.FollowingPage{}, s.err
+}
+
+func TestFollowingHidesLiveTabWithoutLiveCapabilityAndUsesRequestError(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := app.Entry{
+		ID: "music-source", SourceID: "music-source", Name: "MusicSource",
+		Capabilities: provider.Capabilities{
+			provider.BrowseCatalog, provider.BrowseFollowing, provider.SignIn,
+		},
+	}
+	state, err := app.NewState([]app.Entry{entry}, entry.ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := &failingFollowingSession{err: &provider.Error{Code: provider.RateLimited}}
+	queue := make(chan func(), 32)
+	post := func(fn func()) { queue <- fn }
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	catalog := app.NewCatalog(func(string) provider.Session { return sess }, post, func() {})
+	t.Cleanup(catalog.Close)
+	creds := newMemoryCreds()
+	_ = creds.Save(entry.SourceID, entry.ID, []byte(`{"selected":"u1","accounts":[{"account":{"id":"u1","name":"Listener"},"data":{}}]}`))
+	var view *View
+	auth := app.NewAuth(creds, post, func() {}, func() {
+		if view != nil {
+			view.SyncAccountActivity()
+		}
+	}, func() {})
+	t.Cleanup(auth.Close)
+	following := app.NewFollowingFeed(post, func() {})
+	t.Cleanup(following.Close)
+
+	view = newTestView(t, Options{
+		State: state, Catalog: catalog, Auth: auth, Following: following,
+		Pages: pages, Assets: assets, Theme: theme.Default(),
+	})
+	if !state.Navigate(app.Route{Page: app.Following}) {
+		t.Fatal("failed to navigate to Following")
+	}
+	view.SyncEntry()
+	for !auth.Accounts().Ready || following.Snapshot().Phase != app.CatalogFailed {
+		(<-queue)()
+	}
+	drain()
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	tester.Frame()
+
+	// Without BrowseLive, Live tab must stay hidden even when Following fails before load.
+	if view.focus.item(followingTabLive) != nil {
+		t.Fatal("expected live tab hidden when entry lacks BrowseLive and Following failed")
+	}
+	if view.focus.item(followingRetryFocus) == nil {
+		t.Fatal("expected retry CTA on Following failure")
+	}
+	// requestError must NOT surface sign-in error text on content failures.
+	p := PageContext{Assets: assets}
+	if got := p.requestError(provider.RateLimited); got != assets.Text.Home.RateLimited || got == assets.Text.Auth.NetworkFailed {
+		t.Fatalf("requestError(RateLimited) = %q, want %q", got, assets.Text.Home.RateLimited)
+	}
+	if got := p.requestError(provider.Network); got != assets.Text.Plugins.InstallErrNetwork || got == assets.Text.Auth.NetworkFailed {
+		t.Fatalf("requestError(Network) = %q, want %q", got, assets.Text.Plugins.InstallErrNetwork)
+	}
+}

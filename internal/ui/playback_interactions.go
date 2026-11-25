@@ -255,7 +255,7 @@ func (p *PageContext) drawFavoriteChooser(c *ui.Context, chooser *playerFavorite
 		p.drawerHeader(c, "COLLECTION \u00b7 SAVE", p.sourceFolderText(text.PickFavoriteFolders), "", p.host.player.current().item.Title)
 		switch {
 		case chooser.failure != "":
-			ui.Text(c, p.authError(chooser.failure)).FontSize(18).TextColor(paint(colors.Status.Error.Foreground))
+			ui.Text(c, p.requestError(chooser.failure)).FontSize(18).TextColor(paint(colors.Status.Error.Foreground))
 		case chooser.cancel != nil && !chooser.writing:
 			ui.Text(c, p.Assets.Text.LoadingTitle).FontSize(18).TextColor(paint(colors.Text.Secondary))
 		default:

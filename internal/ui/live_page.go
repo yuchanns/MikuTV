@@ -135,7 +135,7 @@ func (livePage) Render(c *ui.Context, p *PageContext) {
 				p.liveStateBlock(c, "live", p.Assets.Text.Live.Loading, "", "", "", "", nil)
 				return
 			case snap.Phase == app.CatalogFailed && !snap.Loaded:
-				p.liveStateBlock(c, "live", p.Assets.Text.Live.LoadFailed, p.authError(snap.Error), p.Assets.Text.Retry, "refresh", liveRetryFocus, func() {
+				p.liveStateBlock(c, "live", p.Assets.Text.Live.LoadFailed, p.requestError(snap.Error), p.Assets.Text.Retry, "refresh", liveRetryFocus, func() {
 					catalog.Retry()
 				})
 				return

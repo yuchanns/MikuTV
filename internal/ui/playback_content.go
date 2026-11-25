@@ -622,7 +622,7 @@ func (p *PageContext) playbackDanmakuOptions(c *ui.Context) {
 			}).FillWidth().Center()
 	}
 	if code := v.player.content.danmakuStatus; code != "" {
-		ui.Text(c, p.authError(code)).Margin(8).FontSize(15).TextColor(paint(p.Theme.Colors.Playback.Secondary))
+		ui.Text(c, p.requestError(code)).Margin(8).FontSize(15).TextColor(paint(p.Theme.Colors.Playback.Secondary))
 	}
 }
 

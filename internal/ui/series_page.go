@@ -148,7 +148,7 @@ func (seriesPage) Render(c *ui.Context, p *PageContext) {
 				p.seriesStateBlock(c, "series", p.Assets.Text.Series.Loading, "", "", "", "", seriesStatusRegion, nil)
 				return
 			case snap.Phase == app.CatalogFailed && !snap.Loaded:
-				p.seriesStateBlock(c, "series", p.Assets.Text.Series.LoadFailed, p.authError(snap.Error), p.Assets.Text.Retry, "refresh", seriesRetryFocus, seriesStatusRegion, func() {
+				p.seriesStateBlock(c, "series", p.Assets.Text.Series.LoadFailed, p.requestError(snap.Error), p.Assets.Text.Retry, "refresh", seriesRetryFocus, seriesStatusRegion, func() {
 					catalog.RetryHub()
 				})
 				return

@@ -161,7 +161,7 @@ func (p *PageContext) favoritePageStatus(c *ui.Context, query provider.AccountQu
 	if snapshot.Phase == app.CatalogFailed || snapshot.Phase == app.CatalogCanceled {
 		ui.Column(c).FillWidth().Padding(0, 83, 0, 103).Gap(15).Children(func() {
 			if snapshot.Error != "" {
-				ui.Text(c, p.authError(snapshot.Error)).FontSize(19).TextColor(paint(p.Theme.Colors.Text.Secondary))
+				ui.Text(c, p.requestError(snapshot.Error)).FontSize(19).TextColor(paint(p.Theme.Colors.Text.Secondary))
 			}
 			p.favoriteAction(c, text.Retry, "", "favorites/retry", favoriteStatus, func() {
 				p.State.Focus = app.ContentAction
@@ -191,7 +191,7 @@ func (p *PageContext) favoriteManagementBar(c *ui.Context, snapshot app.AccountS
 	ui.Row(c).Absolute().Top(top).Left(103).Right(83).Height(58).Gap(18).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, fmt.Sprintf(text.SelectedFavorites, len(resources))).FontSize(21).TextColor(paint(p.Theme.Colors.Text.Secondary))
 		if m.err != "" {
-			ui.Text(c, p.authError(m.err)).FontSize(19).TextColor(paint(p.Theme.Colors.Status.Error.Foreground))
+			ui.Text(c, p.requestError(m.err)).FontSize(19).TextColor(paint(p.Theme.Colors.Status.Error.Foreground))
 		}
 		ui.Box(c).Grow(1)
 		p.libraryManagementButton(c, all, "", favoriteSelectAll, func() {
@@ -586,7 +586,7 @@ func (p *PageContext) saveFavoriteDialog() {
 	dialog.pending = activity.EditFavoriteFolder(edit, func(completed int, err error) {
 		dialog.pending = false
 		if err != nil {
-			dialog.errorText = p.authError(provider.CodeOf(err))
+			dialog.errorText = p.requestError(provider.CodeOf(err))
 			dialog.resources = dialog.resources[completed:]
 			return
 		}

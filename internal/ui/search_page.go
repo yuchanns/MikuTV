@@ -586,10 +586,7 @@ func (p *PageContext) searchResultsBody(c *ui.Context, current app.SearchSnapsho
 				ui.Text(c, text.LoadingTitle).FontSize(25).TextColor(paint(colors.Text.Secondary))
 			})
 		case app.CatalogFailed:
-			note := p.authError(current.Error)
-			if current.Error == provider.RateLimited {
-				note = text.Home.RateLimited
-			}
+			note := p.requestError(current.Error)
 			ui.Column(c.Key("search-failed")).FillWidth().Padding(90, 20, 40, 20).AlignItems(ui.Center).Gap(18).Children(func() {
 				ui.Text(c, text.FailedTitle).FontSize(25).TextColor(paint(colors.Text.Secondary))
 				if note != "" {

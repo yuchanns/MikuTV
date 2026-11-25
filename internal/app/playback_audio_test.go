@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,6 +19,23 @@ type audioPlaybackSession struct {
 	availableKinds []string
 	lastReq        provider.PlaybackRequest
 	resolveCount   atomic.Int32
+	reportMu       sync.Mutex
+	reports        []provider.PlaybackProgress
+}
+
+func (s *audioPlaybackSession) ReportPlayback(_ context.Context, report provider.PlaybackProgress) error {
+	s.reportMu.Lock()
+	s.reports = append(s.reports, report)
+	s.reportMu.Unlock()
+	return nil
+}
+
+func (s *audioPlaybackSession) reported() []provider.PlaybackProgress {
+	s.reportMu.Lock()
+	defer s.reportMu.Unlock()
+	out := make([]provider.PlaybackProgress, len(s.reports))
+	copy(out, s.reports)
+	return out
 }
 
 func (s *audioPlaybackSession) Close() {}
@@ -258,5 +276,93 @@ func TestSwitchMediaKindPreservesPosition(t *testing.T) {
 	}
 	if got := sess.resolveCount.Load(); got != beforeBack {
 		t.Fatalf("expected cached alternate audio reuse without ResolvePlayback, got %d -> %d", beforeBack, got)
+	}
+}
+
+func TestAudioPlaybackReportsStartAndFinishWithoutPollutingResume(t *testing.T) {
+	sess := &audioPlaybackSession{audioOnly: true}
+	queue := make(chan func(), 32)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	catalog := NewCatalog(func(string) provider.Session { return sess }, func(fn func()) { queue <- fn }, func() {})
+	defer catalog.Close()
+	catalog.Open(Entry{
+		ID:           "demo",
+		SourceID:     "demo",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.ResolvePlayback, provider.ReportPlayback},
+	})
+
+	clock := player.Status{HasFrame: true, AudioOnly: true, Position: 2.0, Duration: 240}
+	store := new(playbackTestStore)
+	pb := NewPlayback(catalog, player.Engine{
+		Open:     func(string, float64) bool { return true },
+		SetRate:  func(float64) {},
+		Stop:     func() {},
+		Snapshot: func() player.Status { return clock },
+	}, store, func(fn func()) { queue <- fn }, func() {})
+	defer pb.Close()
+
+	var onReportedCount atomic.Int32
+	pb.SetOnReported(func() { onReportedCount.Add(1) })
+
+	waitReports := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			drain()
+			if len(sess.reported()) >= want && int(onReportedCount.Load()) >= want {
+				return
+			}
+			select {
+			case fn := <-queue:
+				fn()
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		t.Fatalf("timed out waiting for %d reports (got %d, onReported=%d)", want, len(sess.reported()), onReportedCount.Load())
+	}
+
+	target := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "demo", Kind: provider.Video, ID: "song-1"}}
+	pb.Start(target, "user-1", true, nil)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		drain()
+		if !pb.State().Loading && pb.State().AudioOnly {
+			break
+		}
+		select {
+		case fn := <-queue:
+			fn()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	now := time.Now()
+	pb.Tick(now)
+	waitReports(1)
+	reports := sess.reported()
+	if reports[0].Seconds != 0 || reports[0].Finished {
+		t.Fatalf("start report = %+v, want Seconds=0 Finished=false", reports[0])
+	}
+	if store.saved != 0 {
+		t.Fatalf("start report must not pollute local resume position, got saved=%v", store.saved)
+	}
+
+	// Natural completion sends Finished=true and triggers onReported again.
+	clock.Position = 240
+	clock.Ended = true
+	pb.Tick(now.Add(4 * time.Minute))
+	waitReports(2)
+	reports = sess.reported()
+	if !reports[1].Finished {
+		t.Fatalf("end report = %+v, want Finished=true", reports[1])
 	}
 }
