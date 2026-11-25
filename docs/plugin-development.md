@@ -97,6 +97,31 @@ Source plugins are ES modules (`.js` or `.mjs`) executed inside MikuTV's isolate
 - Wildcards (`*.example.com`) require a valid eTLD+1 base domain.
 - **Self-Hosted User Server Origin (`authentication.serverURL`)**: When a source declares `"methods": ["credentials"]` and `"serverURL": "required"` (or `"optional"`), `permissions.network` may be empty. At sign-in time, MikuTV validates the user-entered `http://` or `https://` address and grants a strict **per-session single-origin allowlist** (exact `scheme://host:port` only) for `fetch`, artwork, and playback requests — including LAN servers — while still blocking every other LAN IP, port, or undeclared domain.
 
+### Authenticated Artwork Loading (`permissions.artwork`)
+
+By default, MikuTV fetches external artwork URLs without cookies and without following redirects. Starting in host version `0.1.4`, sign-in source plugins whose thumbnails or backdrops live behind cookie-authenticated HTTPS endpoints (such as cloud drives) may opt in via `permissions.artwork`:
+
+```json
+"minAppVersion": "0.1.4",
+"permissions": {
+  "network": [
+    "api.example.com",
+    "*.cdn.example.com"
+  ],
+  "artwork": {
+    "hosts": [
+      "api.example.com"
+    ],
+    "referer": "https://api.example.com/"
+  }
+}
+```
+
+- Requires the `account.signIn` capability and `"minAppVersion": "0.1.4"` (or higher).
+- `hosts` accepts 1–16 exact public HTTPS hostnames (wildcards such as `*.example.com` are rejected), and every host MUST also be permitted by `permissions.network`.
+- Optional `referer` MUST be a valid `https://` URL (max 512 characters) whose host is permitted by `permissions.network`.
+- At runtime, MikuTV attaches the active session's cookies and declared `Referer` **only** to exact declared `artwork.hosts`, follows up to 5 validated HTTPS redirects, and strips cookies on any cross-origin redirect. Non-declared hosts and plugins without `permissions.artwork` keep the zero-cookie, no-redirect default.
+
 ### Credentials & Self-Hosted Authentication
 
 Source plugins targeting self-hosted media servers (e.g. Jellyfin) or username/password accounts declare `"credentials"` in `authentication.methods`:

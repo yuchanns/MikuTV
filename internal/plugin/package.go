@@ -201,6 +201,27 @@ func (s *Source) LocalizedMetadata(tag string) (name, description string, auth p
 	if strings.TrimSpace(ov.Presentation.MobileApp) != "" {
 		pres.MobileApp = ov.Presentation.MobileApp
 	}
+	if strings.TrimSpace(ov.Presentation.Sections.Tracking) != "" {
+		pres.Sections.Tracking = ov.Presentation.Sections.Tracking
+	}
+	if strings.TrimSpace(ov.Presentation.Sections.Courses) != "" {
+		pres.Sections.Courses = ov.Presentation.Sections.Courses
+	}
+	if strings.TrimSpace(ov.Presentation.Search.Hint) != "" {
+		pres.Search.Hint = ov.Presentation.Search.Hint
+	}
+	if strings.TrimSpace(ov.Presentation.Search.CreatorLabel) != "" {
+		pres.Search.CreatorLabel = ov.Presentation.Search.CreatorLabel
+	}
+	if strings.TrimSpace(ov.Presentation.Search.SeriesLabel) != "" {
+		pres.Search.SeriesLabel = ov.Presentation.Search.SeriesLabel
+	}
+	if strings.TrimSpace(ov.Presentation.Series.TrackLabel) != "" {
+		pres.Series.TrackLabel = ov.Presentation.Series.TrackLabel
+	}
+	if strings.TrimSpace(ov.Presentation.Series.TrackedLabel) != "" {
+		pres.Series.TrackedLabel = ov.Presentation.Series.TrackedLabel
+	}
 	return
 }
 

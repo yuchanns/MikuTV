@@ -78,10 +78,40 @@ func TestHostLocaleCurrentAndManifestLocales(t *testing.T) {
 			"minAppVersion": "0.1.0",
 			"main": "index.js",
 			"capabilities": ["catalog.browse"],
+			"presentation": {
+				"creatorGroupTitle": "Default Group",
+				"sections": {
+					"tracking": "Default Tracking",
+					"courses": "Default Courses"
+				},
+				"search": {
+					"hint": "Default search hint",
+					"creatorLabel": "Creator",
+					"seriesLabel": "Collection"
+				},
+				"series": {
+					"trackLabel": "Follow",
+					"trackedLabel": "Following"
+				}
+			},
 			"locales": {
 				"ja": {
 					"name": "デモソース",
-					"description": "日本語の説明"
+					"description": "日本語の説明",
+					"presentation": {
+						"creatorGroupTitle": "フォルダ",
+						"sections": {
+							"tracking": "視聴中"
+						},
+						"search": {
+							"hint": "動画を検索",
+							"seriesLabel": "コレクション"
+						},
+						"series": {
+							"trackLabel": "追加",
+							"trackedLabel": "追加済み"
+						}
+					}
 				},
 				"en": {
 					"name": "Demo English",
@@ -100,13 +130,26 @@ func TestHostLocaleCurrentAndManifestLocales(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open source: %v", err)
 	}
-	nameJA, descJA, _, _ := src.LocalizedMetadata("ja-JP")
+	nameJA, descJA, _, presJA := src.LocalizedMetadata("ja-JP")
 	if nameJA != "デモソース" || descJA != "日本語の説明" {
 		t.Fatalf("LocalizedMetadata(ja-JP) = %q / %q", nameJA, descJA)
 	}
-	nameEN, descEN, _, _ := src.LocalizedMetadata("en-US")
+	if presJA.CreatorGroupTitle != "フォルダ" ||
+		presJA.Sections.Tracking != "視聴中" ||
+		presJA.Sections.Courses != "Default Courses" ||
+		presJA.Search.Hint != "動画を検索" ||
+		presJA.Search.CreatorLabel != "Creator" ||
+		presJA.Search.SeriesLabel != "コレクション" ||
+		presJA.Series.TrackLabel != "追加" ||
+		presJA.Series.TrackedLabel != "追加済み" {
+		t.Fatalf("LocalizedMetadata(ja-JP) presentation = %+v", presJA)
+	}
+	nameEN, descEN, _, presEN := src.LocalizedMetadata("en-US")
 	if nameEN != "Demo English" || descEN != "English description" {
 		t.Fatalf("LocalizedMetadata(en-US) = %q / %q", nameEN, descEN)
+	}
+	if presEN.Search.Hint != "Default search hint" || presEN.Search.SeriesLabel != "Collection" {
+		t.Fatalf("LocalizedMetadata(en-US) presentation fallback = %+v", presEN)
 	}
 
 	active := "en"
