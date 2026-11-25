@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/netip"
+	"net/url"
 	"path"
 	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/MoeForge/moejs/webapi"
 	"github.com/yuchanns/MikuTV/internal/provider"
 	"golang.org/x/mod/semver"
 	"golang.org/x/net/publicsuffix"
@@ -49,6 +52,11 @@ type LocalizedSource struct {
 	Presentation provider.SourcePresentation `json:"presentation,omitzero"`
 }
 
+type artworkPermission struct {
+	Hosts   []string `json:"hosts,omitempty"`
+	Referer string   `json:"referer,omitempty"`
+}
+
 type sourceManifest struct {
 	Manifest
 	Main           string `json:"main"`
@@ -58,7 +66,8 @@ type sourceManifest struct {
 		Presentation provider.AuthPresentation `json:"presentation,omitzero"`
 	} `json:"authentication,omitempty"`
 	Permissions struct {
-		Network []string `json:"network,omitempty"`
+		Network []string          `json:"network,omitempty"`
+		Artwork artworkPermission `json:"artwork,omitzero"`
 	} `json:"permissions,omitempty"`
 	Presentation provider.SourcePresentation  `json:"presentation,omitzero"`
 	Capabilities provider.Capabilities        `json:"capabilities,omitempty"`
@@ -204,6 +213,45 @@ func decodeSource(data []byte, appVersion string) (sourceManifest, error) {
 			return sourceManifest{}, fmt.Errorf("invalid network host %q", host)
 		}
 		manifest.Permissions.Network[i] = host
+	}
+	if len(manifest.Permissions.Artwork.Hosts) > 0 || manifest.Permissions.Artwork.Referer != "" {
+		if !manifest.Capabilities.Has(provider.SignIn) {
+			return sourceManifest{}, fmt.Errorf("%w: authenticated artwork requires sign-in", ErrIncompatible)
+		}
+		if len(manifest.Permissions.Artwork.Hosts) == 0 || len(manifest.Permissions.Artwork.Hosts) > 16 {
+			return sourceManifest{}, fmt.Errorf("invalid artwork hosts count")
+		}
+		allowNet := webapi.AllowHosts(manifest.Permissions.Network...)
+		seenHosts := make(map[string]bool, len(manifest.Permissions.Artwork.Hosts))
+		cleanedHosts := make([]string, 0, len(manifest.Permissions.Artwork.Hosts))
+		for _, rawHost := range manifest.Permissions.Artwork.Hosts {
+			host := strings.ToLower(strings.TrimSpace(rawHost))
+			if host == "" || strings.HasPrefix(host, "*.") || !validHostPattern(host) {
+				return sourceManifest{}, fmt.Errorf("invalid artwork host %q", rawHost)
+			}
+			hostAddr := host
+			if ip, err := netip.ParseAddr(host); err == nil && ip.Is6() {
+				hostAddr = "[" + host + "]"
+			}
+			if err := allowNet(&http.Request{URL: &url.URL{Scheme: "https", Host: hostAddr, Path: "/"}}); err != nil {
+				return sourceManifest{}, fmt.Errorf("artwork host %q must be permitted by network permissions", host)
+			}
+			if !seenHosts[host] {
+				seenHosts[host] = true
+				cleanedHosts = append(cleanedHosts, host)
+			}
+		}
+		manifest.Permissions.Artwork.Hosts = cleanedHosts
+		if ref := strings.TrimSpace(manifest.Permissions.Artwork.Referer); ref != "" {
+			refURL := httpsURL(ref)
+			if len(ref) > 512 || refURL == nil {
+				return sourceManifest{}, fmt.Errorf("invalid artwork referer %q", ref)
+			}
+			if err := allowNet(&http.Request{URL: refURL}); err != nil {
+				return sourceManifest{}, fmt.Errorf("artwork referer %q must be permitted by network permissions", ref)
+			}
+			manifest.Permissions.Artwork.Referer = refURL.String()
+		}
 	}
 	if !modulePath(manifest.Main) {
 		return sourceManifest{}, fmt.Errorf("invalid source entry path")

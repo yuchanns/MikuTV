@@ -8,9 +8,12 @@ import (
 	"image"
 	"image/draw"
 	"io"
+	"log"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,7 +29,11 @@ const (
 	signOut               = "signOut"
 	maxAvatarBytes        = 512 << 10
 	maxAvatarSide         = 1024
+	maxArtworkRedirects   = 5
+	artworkUserAgent      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 )
+
+var artworkTrace = os.Getenv("MIKUTV_NAV_TRACE") == "1"
 
 type qrResult struct {
 	URL       string `json:"url"`
@@ -324,29 +331,128 @@ func (s *Session) LoadCatalogBackdrop(ctx context.Context, location string) (ima
 	return s.loadArtwork(ctx, location, 2<<20, 2048)
 }
 
+func (s *Session) artworkAuthHost(u *url.URL) bool {
+	if s == nil || s.source == nil || u == nil || u.Scheme != "https" {
+		return false
+	}
+	hosts := s.source.manifest.Permissions.Artwork.Hosts
+	if len(hosts) == 0 {
+		return false
+	}
+	return slices.Contains(hosts, strings.ToLower(u.Hostname()))
+}
+
 func (s *Session) loadArtwork(ctx context.Context, location string, maxBytes int64, maxSide int) (image.Image, error) {
 	target := s.allowedURL(location)
 	if target == nil || s.client == nil {
 		return nil, &provider.Error{Code: provider.Denied}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	allow := s.allowRequestForSession(true)
+	checkReq, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.allowRequestForSession(true)(request); err != nil {
+	if err := allow(checkReq); err != nil {
 		return nil, &provider.Error{Code: provider.Denied, Cause: err}
 	}
 
-	// Public artwork never receives the account's cookies.
-	client := *s.client
-	client.Jar = nil
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
+	noRedirect := func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	publicClient := *s.client
+	publicClient.Jar = nil
+	publicClient.CheckRedirect = noRedirect
+
+	// Public artwork never receives the account's cookies or follows redirects.
+	// Only hosts explicitly declared in permissions.artwork.hosts for a signed-in
+	// source may receive the active session's HTTPS cookie jar, and cross-origin
+	// redirects immediately drop cookies while still enforcing network permissions.
+	useAuthFlow := s.artworkAuthHost(target)
+	var authClient *http.Client
+	referer := ""
+	if useAuthFlow {
+		auth := s.snapshotAuth()
+		if auth.signedIn() && auth.client != nil && auth.client.Jar != nil {
+			cloned := *auth.client
+			cloned.CheckRedirect = noRedirect
+			authClient = &cloned
+		}
+		referer = s.source.manifest.Permissions.Artwork.Referer
+	}
+
+	cur := target
+	sameOrigin := true
+	var response *http.Response
+	maxHops := 0
+	if useAuthFlow {
+		maxHops = maxArtworkRedirects
+	}
+	for hop := 0; hop <= maxHops; hop++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, cur.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+		if err := allow(req); err != nil {
+			return nil, &provider.Error{Code: provider.Denied, Cause: err}
+		}
+		client := &publicClient
+		if useAuthFlow {
+			req.Header.Set("Accept", "image/*")
+			req.Header.Set("User-Agent", artworkUserAgent)
+			if referer != "" {
+				req.Header.Set("Referer", referer)
+			}
+			if sameOrigin && authClient != nil && s.artworkAuthHost(cur) {
+				client = authClient
+			}
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			if artworkTrace && !errors.Is(err, context.Canceled) {
+				log.Printf("artwork: host=%s hop=%d failed", cur.Hostname(), hop)
+			}
+			return nil, err
+		}
+		if useAuthFlow && (resp.StatusCode == http.StatusMovedPermanently ||
+			resp.StatusCode == http.StatusFound ||
+			resp.StatusCode == http.StatusSeeOther ||
+			resp.StatusCode == http.StatusTemporaryRedirect ||
+			resp.StatusCode == http.StatusPermanentRedirect) {
+			loc := resp.Header.Get("Location")
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+			resp.Body.Close()
+			if loc == "" || hop == maxHops {
+				if artworkTrace {
+					log.Printf("artwork: host=%s hop=%d redirect rejected status=%d", cur.Hostname(), hop, resp.StatusCode)
+				}
+				return nil, errors.New("artwork redirect limit exceeded")
+			}
+			resolved, err := cur.Parse(loc)
+			if err != nil {
+				return nil, errors.New("invalid artwork redirect")
+			}
+			next := s.allowedURL(resolved.String())
+			if next == nil {
+				if artworkTrace {
+					log.Printf("artwork: host=%s redirect denied nextHost=%s", cur.Hostname(), resolved.Hostname())
+				}
+				return nil, &provider.Error{Code: provider.Denied}
+			}
+			if !sameHTTPOrigin(next, target) {
+				sameOrigin = false
+			}
+			cur = next
+			continue
+		}
+		response = resp
+		break
+	}
+	if response == nil {
+		return nil, errors.New("artwork request failed")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
+		if artworkTrace {
+			log.Printf("artwork: host=%s status=%d", cur.Hostname(), response.StatusCode)
+		}
 		return nil, errors.New("artwork request failed")
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
@@ -354,10 +460,17 @@ func (s *Session) loadArtwork(ctx context.Context, location string, maxBytes int
 		return nil, err
 	}
 	if int64(len(data)) > maxBytes {
+		if artworkTrace {
+			log.Printf("artwork: host=%s oversized bytes>%d", cur.Hostname(), maxBytes)
+		}
 		return nil, errors.New("artwork exceeds size limit")
 	}
-	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || config.Width <= 0 || config.Height <= 0 || config.Width > maxSide || config.Height > maxSide {
+		if artworkTrace {
+			log.Printf("artwork: host=%s invalid format=%q dims=%dx%d maxSide=%d err=%v",
+				cur.Hostname(), format, config.Width, config.Height, maxSide, err)
+		}
 		return nil, errors.New("invalid artwork dimensions or format")
 	}
 	artwork, _, err := image.Decode(bytes.NewReader(data))
