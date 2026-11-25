@@ -4,12 +4,6 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -150,30 +144,6 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, ext
 		}
 		return moejs.Undefined(), store.delete(moejs.Arg(args, 0).String())
 	})
-	digest := rt.Function("sha256", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-		input := moejs.Arg(args, 0).String()
-		sum := sha256.Sum256([]byte(input))
-		return rt.FromGo(hex.EncodeToString(sum[:]))
-	})
-	encrypt := rt.Function("encryptRSAOAEP", 2, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-		der, err := base64.StdEncoding.DecodeString(moejs.Arg(args, 0).String())
-		if err != nil {
-			return moejs.Undefined(), err
-		}
-		public, err := x509.ParsePKIXPublicKey(der)
-		if err != nil {
-			return moejs.Undefined(), err
-		}
-		key, ok := public.(*rsa.PublicKey)
-		if !ok {
-			return moejs.Undefined(), errors.New("RSA public key required")
-		}
-		ciphertext, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, key, []byte(moejs.Arg(args, 1).String()), nil)
-		if err != nil {
-			return moejs.Undefined(), err
-		}
-		return rt.FromGo(hex.EncodeToString(ciphertext))
-	})
 	inflateZlib := rt.Function("inflateZlib", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
@@ -200,6 +170,7 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, ext
 		}
 		return rt.FromGo(out)
 	})
+	gunzip := hostGunzipFunction(ctx, rt)
 	currentLocale := rt.Function("current", 0, func(_ *moejs.Realm, _ moejs.Value, _ []moejs.Value) (moejs.Value, error) {
 		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
@@ -208,8 +179,8 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, ext
 	})
 	hostObj := map[string]any{
 		"storage":  map[string]any{"get": get, "set": set, "delete": remove},
-		"crypto":   map[string]any{"sha256": digest, "encryptRSAOAEP": encrypt},
-		"compress": map[string]any{"inflateZlib": inflateZlib},
+		"crypto":   hostCryptoFunctions(ctx, rt),
+		"compress": map[string]any{"inflateZlib": inflateZlib, "gunzip": gunzip},
 		"locale":   map[string]any{"current": currentLocale},
 	}
 	for k, v := range extra {
