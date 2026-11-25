@@ -261,20 +261,22 @@ func (b *directBuffer) runPump(ctx context.Context, cancel context.CancelFunc, e
 			b.media.lastURL.Store(&u)
 		}
 
-		totalSize, acceptRanges, ct, ok := inspectDirectResponse(resp, offset, b.mediaType)
+		totalSize, acceptRanges, ct, ok := inspectDirectResponse(resp, b.mediaType)
 		if !ok {
 			resp.Body.Close()
 			b.mu.Lock()
-			if b.pumpEpoch == epoch {
-				if !b.probed {
-					b.probed = true
-					b.passthrough = true
-				}
+			alreadyProbed := b.probed
+			if !alreadyProbed && b.pumpEpoch == epoch {
+				b.probed = true
+				b.passthrough = true
 				b.pumpRunning = false
 				b.pumpDone = true
 				b.cond.Broadcast()
 			}
 			b.mu.Unlock()
+			if alreadyProbed {
+				b.finishPumpError(epoch, fmt.Errorf("unexpected direct response status %d", resp.StatusCode))
+			}
 			return
 		}
 
@@ -663,7 +665,7 @@ func (b *directBuffer) ensureProbed(ctx context.Context) bool {
 	return ok
 }
 
-func inspectDirectResponse(resp *http.Response, reqOffset int64, fallbackCT string) (totalSize int64, acceptRanges bool, contentType string, ok bool) {
+func inspectDirectResponse(resp *http.Response, fallbackCT string) (totalSize int64, acceptRanges bool, contentType string, ok bool) {
 	if resp == nil || (resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent) {
 		return 0, false, "", false
 	}
@@ -684,7 +686,7 @@ func inspectDirectResponse(resp *http.Response, reqOffset int64, fallbackCT stri
 			}
 		}
 	}
-	if totalSize <= 0 && resp.StatusCode == http.StatusOK && reqOffset == 0 {
+	if totalSize <= 0 && resp.StatusCode == http.StatusOK {
 		if cl := strings.TrimSpace(resp.Header.Get("Content-Length")); cl != "" {
 			if n, err := strconv.ParseInt(cl, 10, 64); err == nil && n > 0 {
 				totalSize = n

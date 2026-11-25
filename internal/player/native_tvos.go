@@ -1795,7 +1795,8 @@ func (p *tvosPlayer) open(address string, position float64) bool {
 		p.clearDisplayCriteria()
 		return false
 	}
-	replacing := n.getObj(p.player, n.selCurrentItem) != 0
+	curItem := n.getObj(p.player, n.selCurrentItem)
+	replacing := curItem != 0 && p.errorCode == 0 && p.cachedItemStatus != avPlayerItemStatusFailed && !p.ended
 	if !replacing {
 		p.clearItem()
 	} else {
@@ -2075,6 +2076,7 @@ func (p *tvosPlayer) snapshot() Status {
 				tcs, reason, position, max(0, p.cachedBuffer-position), p.seeking, p.rate, p.appliedForwardBuffer, p.audioOnly)
 		}
 	}
+	pendingReplace := p.pendingAsset != 0
 	return Status{
 		Position:            position,
 		Duration:            p.cachedDuration,
@@ -2083,8 +2085,8 @@ func (p *tvosPlayer) snapshot() Status {
 		AudioOnly:           p.audioOnly,
 		Buffering:           item == 0 || itemStatus == avPlayerItemStatusUnknown || p.seeking || (p.rate > 0 && tcs == avPlayerTimeControlWaiting),
 		Seeking:             p.seeking,
-		Ended:               p.ended,
-		Failed:              p.errorCode != 0 || (item != 0 && itemStatus == avPlayerItemStatusFailed),
+		Ended:               !pendingReplace && p.ended,
+		Failed:              p.errorCode != 0 || (!pendingReplace && item != 0 && itemStatus == avPlayerItemStatusFailed),
 		DisplayIncompatible: p.errorCode == avErrorNoCompatibleAlternates,
 		AudioActive:         p.audioActive,
 		HDRVideo:            p.hdrVideo,

@@ -402,3 +402,67 @@ func TestDirectBufferPropagatesPostProbeExpiredFailure(t *testing.T) {
 		t.Fatalf("media.Failure() = %q, want %q", got, provider.Expired)
 	}
 }
+
+type directIgnoreRangeTransport struct {
+	data  []byte
+	opens atomic.Int32
+}
+
+func (tr *directIgnoreRangeTransport) OpenResource(_ context.Context, _ provider.PlaybackResource, method, _ string) (*http.Response, error) {
+	if method != http.MethodHead {
+		tr.opens.Add(1)
+	}
+	return &http.Response{
+		StatusCode:    http.StatusOK,
+		ContentLength: int64(len(tr.data)),
+		Header: http.Header{
+			"Content-Type":   []string{"audio/mpeg"},
+			"Content-Length": []string{strconv.Itoa(len(tr.data))},
+		},
+		Body: io.NopCloser(bytes.NewReader(tr.data)),
+	}, nil
+}
+
+func TestDirectBufferHandlesHTTP200OnNonZeroRangeSeek(t *testing.T) {
+	// Server ignores Range on a >4 MiB seek and returns 200 OK with full Content-Length.
+	// Pump must recognize totalSize, restart cleanly from byte 0, and serve the sought range
+	// without looping upstream opens.
+	const total = 6 << 20
+	payload := makePatternBytes(total)
+	tr := &directIgnoreRangeTransport{data: payload}
+	media, err := OpenMedia(context.Background(), provider.Playback{
+		Plan: provider.PlaybackPlan{
+			Streams: []provider.PlaybackStream{{
+				Format: provider.PlaybackDirect,
+				Audio: &provider.PlaybackTrack{
+					ContentType: "audio/mpeg",
+					Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/full200.mp3"}},
+				},
+			}},
+		},
+		Transport: tr,
+	})
+	if err != nil {
+		t.Fatalf("OpenMedia: %v", err)
+	}
+	defer media.Close()
+
+	// Jump directly to 5 MiB (> directSeekJumpThreshold = 4 MiB) before byte 0 finishes.
+	start, end := int64(5<<20), int64(total-1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, media.URL, nil)
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET range on full-200 server: %v", err)
+	}
+	got, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil || !bytes.Equal(got, payload[start:end+1]) {
+		t.Fatalf("full-200 seek mismatch: err=%v len=%d/%d", err, len(got), end-start+1)
+	}
+	if opens := tr.opens.Load(); opens > 3 {
+		t.Fatalf("expected bounded upstream opens on full-200 seek, got %d", opens)
+	}
+}
