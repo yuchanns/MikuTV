@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.4 - 2026-11-25
+
+## What's Changed
+* Support opt-in authenticated artwork loading for sign-in source plugins by @yuchanns in https://github.com/yuchanns/MikuTV/pull/8
+
+
+**Full Changelog**: https://github.com/yuchanns/MikuTV/compare/v0.1.3...v0.1.4
+
 ## 0.1.3 - 2026-11-24
 
 ## What's Changed
