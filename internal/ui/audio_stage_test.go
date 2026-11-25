@@ -626,4 +626,34 @@ func TestRelatedVideoDetailPreservesAndUpdatesPlaybackQueue(t *testing.T) {
 	if len(view.videoDetail.queue) != 2 || view.videoDetail.queueIndex != 0 || view.videoDetail.queue[0].item.Ref != songA.Ref {
 		t.Fatalf("restored queue = %+v idx=%d", view.videoDetail.queue, view.videoDetail.queueIndex)
 	}
+
+	// Non-removable rows in a removable section must not claim a header action button.
+	if hasRemovableLibraryRows([]provider.AccountRow{{ID: "h1", Title: "Played"}}, false) {
+		t.Fatal("expected rows without RemovalID not to advertise Manage header action")
+	}
+	if !hasRemovableLibraryRows([]provider.AccountRow{{ID: "h1", Title: "Played", RemovalID: "h1"}}, false) {
+		t.Fatal("expected row with RemovalID to advertise Manage header action")
+	}
+
+	// Hero queue playback with keepQueue=true must keep featured queue even if plan returns Episodes.
+	view.player = playbackView{
+		items:     []playbackItem{{item: songA}, {item: songB}},
+		index:     0,
+		keepQueue: true,
+	}
+	view.player.updatePlan(view, app.PlaybackState{
+		Revision: 1,
+		Resolution: provider.Playback{
+			Plan: provider.PlaybackPlan{
+				PartID: "p1",
+				Episodes: []provider.VideoSegment{
+					{PartID: "p1", Title: "Ep 1"},
+					{PartID: "p2", Title: "Ep 2"},
+				},
+			},
+		},
+	})
+	if len(view.player.items) != 2 || view.player.items[1].item.Ref != songB.Ref {
+		t.Fatalf("keepQueue=true Hero queue was overwritten by Episodes: %+v", view.player.items)
+	}
 }

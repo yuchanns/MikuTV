@@ -184,8 +184,11 @@ func (b *directBuffer) startPumpLocked(startOffset int64) {
 	}
 	// Align pump start to chunk boundary so chunk slices stay contiguous from offset 0.
 	startOffset = (startOffset / directChunkSize) * directChunkSize
-	if b.pumpRunning && !b.pumpDone && b.pumpStart <= startOffset && startOffset <= b.pumpOffset+directSeekJumpThreshold {
-		return
+	currentChunkStart := (b.pumpOffset / directChunkSize) * directChunkSize
+	if b.pumpRunning && !b.pumpDone && startOffset >= currentChunkStart && startOffset <= b.pumpOffset+directSeekJumpThreshold {
+		if startOffset > currentChunkStart || b.pumpOffset == currentChunkStart || len(b.chunks[currentChunkStart/directChunkSize]) > 0 {
+			return
+		}
 	}
 	if b.pumpCancel != nil {
 		b.pumpCancel()
@@ -474,17 +477,15 @@ func (b *directBuffer) evictOneBehindLocked(protectIdx int64) bool {
 		}
 	}
 	if victim < 0 && protectIdx >= 0 {
-		// After a backward seek, evict the chunk furthest ahead of protectIdx so the
-		// repositioned pump can always make forward progress under tight budgets.
+		// After a backward seek, evict stale chunks sitting strictly ahead of the
+		// repositioned pump so forward progress never stalls under tight budgets,
+		// without discarding unread chunks behind a normal forward-moving pump.
 		for idx := range b.chunks {
-			if b.pinned[idx] || idx == protectIdx || idx <= cursorIdx+1 {
+			if b.pinned[idx] || idx <= protectIdx || idx <= cursorIdx+1 {
 				continue
 			}
 			dist := idx - protectIdx
-			if dist < 0 {
-				dist = -dist
-			}
-			if dist > int64(directSeekJumpThreshold/directChunkSize) && (victim < 0 || dist > bestDist) {
+			if victim < 0 || dist > bestDist {
 				victim, bestDist = idx, dist
 			}
 		}

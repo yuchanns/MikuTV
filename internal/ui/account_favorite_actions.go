@@ -112,6 +112,18 @@ func libraryManageID(inFolder bool) app.FocusID {
 	return app.ContentAction
 }
 
+func hasRemovableLibraryRows(rows []provider.AccountRow, managing bool) bool {
+	if managing {
+		return true
+	}
+	for _, row := range rows {
+		if row.RemovalID != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *PageContext) libraryHeaderActions(c *ui.Context, query provider.AccountQuery, rows []provider.AccountRow, managing bool) {
 	text := p.Assets.Text.Activity
 	if !p.canManageLibrary(query) {
@@ -124,30 +136,21 @@ func (p *PageContext) libraryHeaderActions(c *ui.Context, query provider.Account
 		})
 		return
 	}
-	if managing || len(rows) != 0 {
-		hasRemovable := managing
-		for _, row := range rows {
-			if row.RemovalID != "" {
-				hasRemovable = true
-				break
-			}
+	if hasRemovableLibraryRows(rows, managing) {
+		label, icon := text.ManageFolder, "settings"
+		if managing {
+			label, icon = text.DoneManaging, "check"
 		}
-		if hasRemovable {
-			label, icon := text.ManageFolder, "settings"
+		p.favoriteAction(c, label, icon, libraryManageID(query.Folder != ""), favoriteHeader, func() {
+			if p.host.favorites.management.pending {
+				return
+			}
 			if managing {
-				label, icon = text.DoneManaging, "check"
+				p.host.favorites.management = favoriteManagement{}
+			} else {
+				p.host.favorites.management = favoriteManagement{query: query, picked: make(map[string]bool)}
 			}
-			p.favoriteAction(c, label, icon, libraryManageID(query.Folder != ""), favoriteHeader, func() {
-				if p.host.favorites.management.pending {
-					return
-				}
-				if managing {
-					p.host.favorites.management = favoriteManagement{}
-				} else {
-					p.host.favorites.management = favoriteManagement{query: query, picked: make(map[string]bool)}
-				}
-			})
-		}
+		})
 	}
 	if query.Folder != "" {
 		p.favoriteAction(c, p.sourceFolderText(text.FolderSettings), "folder", app.ContentAction, favoriteHeader, func() {

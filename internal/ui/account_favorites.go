@@ -38,7 +38,7 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 		total = *snapshot.Page.Total
 	}
 	activeTab := app.FocusID("library/tab/" + query.Section)
-	hasHeaderAction := available && p.canManageLibrary(query) && (directory || query.Folder != "" || managing || len(rows) != 0)
+	hasHeaderAction := available && p.canManageLibrary(query) && (directory || query.Folder != "" || hasRemovableLibraryRows(rows, managing))
 	if p.active && !guest && available && !hasHeaderAction && p.State.Focus == app.ContentAction {
 		switch {
 		case query.Folder != "":

@@ -258,3 +258,94 @@ func TestDirectBufferWarmupPromoteAndUnknownLengthFallback(t *testing.T) {
 		t.Fatalf("unknownLen passthrough failed: err=%v got=%q", err, string(got3))
 	}
 }
+
+type directReadTrackingTransport struct {
+	directMockTransport
+	readBytes int64
+}
+
+type trackingReadCloser struct {
+	rc    io.ReadCloser
+	count *int64
+}
+
+func (t *trackingReadCloser) Read(p []byte) (int, error) {
+	n, err := t.rc.Read(p)
+	if n > 0 {
+		atomic.AddInt64(t.count, int64(n))
+	}
+	return n, err
+}
+
+func (t *trackingReadCloser) Close() error { return t.rc.Close() }
+
+func (tr *directReadTrackingTransport) OpenResource(ctx context.Context, res provider.PlaybackResource, method, byteRange string) (*http.Response, error) {
+	resp, err := tr.directMockTransport.OpenResource(ctx, res, method, byteRange)
+	if err != nil || resp == nil || resp.Body == nil || method == http.MethodHead {
+		return resp, err
+	}
+	resp.Body = &trackingReadCloser{rc: resp.Body, count: &tr.readBytes}
+	return resp, nil
+}
+
+func TestDirectBufferForwardBackpressureAndBackwardSeekIntoEvictedBytes(t *testing.T) {
+	// 24 MiB video exceeds the 16 MiB directVideoBudget so both forward backpressure
+	// and backward-seek recovery into evicted chunks are exercised deterministically.
+	const total = 24 << 20
+	payload := makePatternBytes(total)
+	tr := &directReadTrackingTransport{
+		directMockTransport: directMockTransport{data: payload, contentType: "video/mp4"},
+	}
+	media, err := OpenMedia(context.Background(), provider.Playback{
+		Plan: provider.PlaybackPlan{
+			Streams: []provider.PlaybackStream{{
+				Format: provider.PlaybackDirect,
+				Video: provider.PlaybackTrack{
+					ContentType: "video/mp4",
+					Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/movie.mp4"}},
+				},
+			}},
+		},
+		Transport: tr,
+	})
+	if err != nil {
+		t.Fatalf("OpenMedia: %v", err)
+	}
+	defer media.Close()
+
+	fetchRange := func(start, end int64) []byte {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, media.URL, nil)
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("GET range %d-%d: %v", start, end, err)
+		}
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("ReadAll range %d-%d: %v", start, end, err)
+		}
+		if !bytes.Equal(b, payload[start:end+1]) {
+			t.Fatalf("range %d-%d content mismatch", start, end)
+		}
+		return b
+	}
+
+	// 1. Read only the first 1 MiB and let the pump run briefly; backpressure must keep
+	// upstream downloads bounded by the 16 MiB budget instead of draining all 24 MiB.
+	fetchRange(0, (1<<20)-1)
+	time.Sleep(150 * time.Millisecond)
+	if downloaded := atomic.LoadInt64(&tr.readBytes); downloaded >= total-directChunkSize {
+		t.Fatalf("forward backpressure broken: downloaded %d of %d bytes after reading only 1 MiB", downloaded, total)
+	}
+
+	// 2. Advance sequentially past 20 MiB so early chunks (e.g. offset 2 MiB) are evicted.
+	fetchRange(1<<20, (20<<20)-1)
+
+	// 3. Seek backward into an evicted chunk between pumpStart (0) and pumpOffset (>=20 MiB).
+	// The pump must restart cleanly and serve exact bytes within timeout.
+	fetchRange(2<<20, (3<<20)-1)
+}

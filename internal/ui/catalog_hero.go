@@ -417,7 +417,7 @@ func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem
 		p.styledButton(c, text.Play, "play-filled", homePlayAction, homeHero, func() {
 			if item != nil && p.canPlay(item.Ref) {
 				if queue, idx := p.playbackQueueFromList(*item, p.host.home.featured, p.host.home.selected); len(queue) > 1 {
-					p.openPlayback(queue, idx, false, nil)
+					p.openPlayback(queue, idx, true, nil)
 					return
 				}
 				p.openPlayback([]playbackItem{{item: *item}}, 0, false, nil)
