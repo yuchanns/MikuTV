@@ -34,6 +34,7 @@ const (
 	preloadExpiryMarginSec    = 10
 	inlinePreviewStallTimeout = 12 * time.Second
 	seekAutoQualityGrace      = 2 * time.Second
+	audioPauseDimDelay        = 5 * time.Minute
 )
 
 var playbackTrace = os.Getenv("MIKUTV_NAV_TRACE") == "1"
@@ -44,12 +45,13 @@ type savedPositionKey struct {
 }
 
 type InlinePreviewState struct {
-	Target   provider.PlaybackTarget
-	Active   bool
-	Loading  bool
-	HasFrame bool
-	Playing  bool
-	Failed   bool
+	Target    provider.PlaybackTarget
+	Active    bool
+	Loading   bool
+	HasFrame  bool
+	AudioOnly bool
+	Playing   bool
+	Failed    bool
 }
 
 type preloadedPlayback struct {
@@ -82,6 +84,8 @@ type PlaybackState struct {
 	Switching      bool
 	NeedsReload    bool
 	VideoRange      string
+	AudioOnly       bool
+	AudioDimmed     bool
 	PreviewPending  bool
 	BranchPending   bool
 	BranchDismissed bool
@@ -167,6 +171,36 @@ func NewPlayback(catalog *Catalog, native player.Engine, store PlaybackStore, po
 
 func (p *Playback) SetPreferences(prefs *PlaybackSettings) {
 	p.prefs = prefs
+	if p.engine.SetAllowScreensaver != nil {
+		p.engine.SetAllowScreensaver(p.allowAudioScreensaver())
+	}
+}
+
+func (p *Playback) allowAudioScreensaver() bool {
+	if p.prefs == nil {
+		return false
+	}
+	return p.prefs.Preferences().AllowAudioScreensaver
+}
+
+func (p *Playback) SetNowPlaying(info player.NowPlayingInfo) {
+	if p != nil && p.engine.SetNowPlaying != nil {
+		p.engine.SetNowPlaying(info)
+	}
+}
+
+func (p *Playback) SetRemoteHandlers(handlers player.RemoteHandlers) {
+	if p != nil && p.engine.SetRemoteHandlers != nil {
+		p.engine.SetRemoteHandlers(handlers)
+	}
+}
+
+// SetFullscreen updates the native fullscreen presentation state without stopping
+// audio playback when leaving the Player page for in-app background listening.
+func (p *Playback) SetFullscreen(active bool) {
+	if p != nil && p.engine.Fullscreen != nil {
+		p.engine.Fullscreen(active)
+	}
 }
 
 func (p *Playback) preferredQuality() string {
@@ -278,6 +312,12 @@ func (p *Playback) Close() {
 	p.save()
 	p.clearPreload()
 	p.clearStream()
+	if p.engine.SetNowPlaying != nil {
+		p.engine.SetNowPlaying(player.NowPlayingInfo{Active: false})
+	}
+	if p.engine.SetAudioOnly != nil {
+		p.engine.SetAudioOnly(false)
+	}
 	if p.engine.Fullscreen != nil {
 		p.engine.Fullscreen(false)
 	}
@@ -588,6 +628,12 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 			position = 0
 		}
 	}
+	if p.engine.SetAllowScreensaver != nil {
+		p.engine.SetAllowScreensaver(p.allowAudioScreensaver())
+	}
+	if p.engine.SetAudioOnly != nil {
+		p.engine.SetAudioOnly(media != nil && media.AudioOnly)
+	}
 	if p.engine.Open == nil || media == nil || !p.engine.Open(media.URL, position) {
 		if media != nil {
 			media.CloseAsync()
@@ -633,7 +679,9 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	}
 	p.state.SelectedAudio = p.selectedAudio
 	p.state.Position, p.state.Duration, p.state.VideoRange = position, plan.Duration, media.VideoRange
-	p.state.Clock = player.Status{Position: position, Buffering: true}
+	p.state.AudioOnly = media.AudioOnly
+	p.state.AudioDimmed = false
+	p.state.Clock = player.Status{Position: position, Buffering: true, AudioOnly: media.AudioOnly}
 	p.startedAt = time.Now()
 	p.positionAt, p.bufferedAt = time.Time{}, time.Time{}
 	p.state.Revision++
@@ -702,6 +750,22 @@ func (p *Playback) Tick(now time.Time) {
 		} else {
 			p.save()
 		}
+	}
+	if p.state.AudioOnly {
+		if p.engine.SetAllowScreensaver != nil {
+			p.engine.SetAllowScreensaver(p.allowAudioScreensaver())
+		}
+		if !p.state.Playing && !p.state.Loading && !p.state.Switching {
+			if p.pausedAt.IsZero() {
+				p.pausedAt = now
+			}
+			p.state.AudioDimmed = now.Sub(p.pausedAt) >= audioPauseDimDelay
+		} else {
+			p.pausedAt = time.Time{}
+			p.state.AudioDimmed = false
+		}
+	} else {
+		p.state.AudioDimmed = false
 	}
 	if p.state.Loading || p.state.Switching || p.state.PreviewPending || p.state.Failure != "" || p.didEnd {
 		return
@@ -1345,11 +1409,17 @@ func (p *Playback) StartInlinePreview(target provider.PlaybackTarget) {
 				}
 				return
 			}
+			if p.engine.SetAudioOnly != nil {
+				p.engine.SetAudioOnly(media.AudioOnly)
+			}
 			if p.engine.Preview != nil {
 				p.engine.Preview(true)
 			}
 			if p.engine.Open == nil || !p.engine.Open(media.URL, 0) {
 				media.CloseAsync()
+				if p.engine.SetAudioOnly != nil {
+					p.engine.SetAudioOnly(false)
+				}
 				if p.engine.Preview != nil {
 					p.engine.Preview(false)
 				}
@@ -1363,6 +1433,7 @@ func (p *Playback) StartInlinePreview(target provider.PlaybackTarget) {
 			p.inlineMedia = media
 			p.inlineStartedAt = time.Now()
 			p.inlineState.Loading = false
+			p.inlineState.AudioOnly = media.AudioOnly
 			if p.engine.SetRate != nil {
 				p.engine.SetRate(1)
 			}
@@ -1399,6 +1470,9 @@ func (p *Playback) StopInlinePreview() {
 			p.engine.Preview(false)
 			previewDur = time.Since(t0)
 		}
+		if p.engine.SetAudioOnly != nil {
+			p.engine.SetAudioOnly(false)
+		}
 	}
 	if media := p.inlineMedia; media != nil {
 		t0 := time.Now()
@@ -1419,7 +1493,14 @@ func (p *Playback) TickInlinePreview(now time.Time) {
 	}
 	clock := p.engine.Snapshot()
 	prevHasFrame := p.inlineState.HasFrame
-	p.inlineState.HasFrame = clock.HasFrame
+	// Audio-only inline preview plays audio without video frames, so keep HasFrame=false
+	// to avoid clearing the Home Hero static artwork.
+	if p.inlineState.AudioOnly || clock.AudioOnly {
+		p.inlineState.AudioOnly = true
+		p.inlineState.HasFrame = false
+	} else {
+		p.inlineState.HasFrame = clock.HasFrame
+	}
 	p.inlineState.Playing = clock.HasFrame && !clock.Buffering && !clock.Ended && !clock.Failed
 	if clock.Failed || (!clock.HasFrame && !p.inlineStartedAt.IsZero() && now.Sub(p.inlineStartedAt) > inlinePreviewStallTimeout) {
 		target := p.inlineState.Target
@@ -1438,7 +1519,7 @@ func (p *Playback) TickInlinePreview(now time.Time) {
 			p.engine.SetRate(1)
 		}
 	}
-	if clock.HasFrame && !prevHasFrame && p.changed != nil {
+	if p.inlineState.HasFrame && !prevHasFrame && p.changed != nil {
 		p.changed()
 	}
 }

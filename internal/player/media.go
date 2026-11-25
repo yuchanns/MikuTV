@@ -155,6 +155,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 type Media struct {
 	URL          string
 	VideoRange   string
+	AudioOnly    bool
 	server       *http.Server
 	transport    provider.PlaybackTransport
 	prefix       string
@@ -212,7 +213,7 @@ func OpenMediaWithAudio(ctx context.Context, playback provider.Playback, selecte
 		if len(playback.Plan.Streams) > 1 && stream.Format == provider.PlaybackHLS {
 			streamCtx, streamStop = context.WithTimeout(ctx, 4*time.Second)
 		}
-		name, err := m.prepareStream(streamCtx, stream, selectedAudioID)
+		name, isAudio, err := m.prepareStream(streamCtx, stream, selectedAudioID)
 		if streamStop != nil {
 			streamStop()
 		}
@@ -225,6 +226,7 @@ func OpenMediaWithAudio(ctx context.Context, playback provider.Playback, selecte
 			m.recordFailure(err)
 			continue
 		}
+		m.AudioOnly = isAudio
 		m.URL = "http://" + listener.Addr().String() + m.prefix + name
 		m.failure.Store(nil)
 		m.server = &http.Server{
@@ -418,40 +420,105 @@ func audioCodecFamily(codec string) string {
 	}
 }
 
-func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStream, selectedAudioID string) (string, error) {
+func directMediaEndpoint(contentType string, urls []string, hintAudio bool) (name, resolvedCT string, isAudio bool, supported bool) {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if idx := strings.IndexByte(ct, ';'); idx >= 0 {
+		ct = strings.TrimSpace(ct[:idx])
+	}
+	var ext string
+	for _, raw := range urls {
+		if u, err := url.Parse(raw); err == nil {
+			if e := strings.ToLower(path.Ext(u.Path)); e != "" {
+				ext = e
+				break
+			}
+		}
+	}
+	// tvOS AVPlayer does not natively decode Ogg containers (.ogg / audio/ogg).
+	if ct == "audio/ogg" || ct == "application/ogg" || ext == ".ogg" || ext == ".oga" {
+		return "", "", true, false
+	}
+	switch ct {
+	case "audio/mpeg", "audio/mp3":
+		return "audio.mp3", "audio/mpeg", true, true
+	case "audio/flac", "audio/x-flac":
+		return "audio.flac", "audio/flac", true, true
+	case "audio/mp4", "audio/m4a", "audio/x-m4a":
+		return "audio.m4a", "audio/mp4", true, true
+	case "audio/aac", "audio/aacp":
+		return "audio.aac", "audio/aac", true, true
+	case "audio/wav", "audio/x-wav", "audio/wave":
+		return "audio.wav", "audio/wav", true, true
+	case "audio/x-caf", "audio/caf":
+		return "audio.caf", "audio/x-caf", true, true
+	}
+	switch ext {
+	case ".mp3":
+		return "audio.mp3", "audio/mpeg", true, true
+	case ".flac":
+		return "audio.flac", "audio/flac", true, true
+	case ".m4a":
+		return "audio.m4a", "audio/mp4", true, true
+	case ".aac":
+		return "audio.aac", "audio/aac", true, true
+	case ".wav":
+		return "audio.wav", "audio/wav", true, true
+	case ".caf":
+		return "audio.caf", "audio/x-caf", true, true
+	}
+	if hintAudio || strings.HasPrefix(ct, "audio/") {
+		if ct == "" {
+			ct = "audio/mp4"
+		}
+		return "audio.m4a", ct, true, true
+	}
+	return "video.mp4", contentType, false, true
+}
+
+func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStream, selectedAudioID string) (string, bool, error) {
+	primary := stream.Video
+	audioOnly := false
+	if len(primary.Resource.URLs) == 0 && stream.Audio != nil {
+		primary = *stream.Audio
+		audioOnly = true
+	}
 	if mediaTrace {
 		host := ""
-		if len(stream.Video.Resource.URLs) > 0 {
-			if u, err := url.Parse(stream.Video.Resource.URLs[0]); err == nil {
+		if len(primary.Resource.URLs) > 0 {
+			if u, err := url.Parse(primary.Resource.URLs[0]); err == nil {
 				host = u.Hostname()
 			}
 		}
-		log.Printf("player-media: open format=%s host=%s ct=%q", stream.Format, host, stream.Video.ContentType)
+		log.Printf("player-media: open format=%s audioOnly=%t host=%s ct=%q", stream.Format, audioOnly, host, primary.ContentType)
 	}
 	switch stream.Format {
 	case provider.PlaybackDirect:
-		m.primaryURLs = stream.Video.Resource.URLs
-		m.bandwidthBps = float64(max(stream.Video.Bandwidth, 0)) / 8.0
-		m.registerResource("video.mp4", stream.Video.Resource, stream.Video.ContentType, false)
-		return "video.mp4", nil
-	case provider.PlaybackHLS:
-		body, err := m.fetchPlaylist(ctx, stream.Video.Resource)
-		if err != nil {
-			return "", err
+		name, ct, isAudio, supported := directMediaEndpoint(primary.ContentType, primary.Resource.URLs, audioOnly)
+		if !supported {
+			return "", isAudio, &provider.Error{Code: provider.Unsupported}
 		}
-		m.primaryURLs = stream.Video.Resource.URLs
-		m.bandwidthBps = float64(max(stream.Video.Bandwidth, 0)) / 8.0
+		m.primaryURLs = primary.Resource.URLs
+		m.bandwidthBps = float64(max(primary.Bandwidth, 0)) / 8.0
+		m.registerResource(name, primary.Resource, ct, false)
+		return name, isAudio, nil
+	case provider.PlaybackHLS:
+		body, err := m.fetchPlaylist(ctx, primary.Resource)
+		if err != nil {
+			return "", audioOnly, err
+		}
+		m.primaryURLs = primary.Resource.URLs
+		m.bandwidthBps = float64(max(primary.Bandwidth, 0)) / 8.0
 		m.mu.Lock()
 		m.hlsLive = stream.Live
 		m.hlsPrefetchBody = body
 		m.hlsPrefetchUntil = time.Now().Add(750 * time.Millisecond)
 		m.mu.Unlock()
-		m.registerResource("stream.m3u8", stream.Video.Resource, stream.Video.ContentType, true)
-		return "stream.m3u8", nil
+		m.registerResource("stream.m3u8", primary.Resource, primary.ContentType, true)
+		return "stream.m3u8", audioOnly, nil
 	case provider.PlaybackDASH:
 		video, initData, initCR, dynamicRange, err := m.readTrack(ctx, stream.Video, true)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		rawAudio := stream.AudioTracks
 		if len(rawAudio) == 0 && stream.Audio != nil {
@@ -517,7 +584,7 @@ func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStrea
 		for i, track := range candidates {
 			if results[i].err != nil {
 				if i == desiredIdx {
-					return "", results[i].err
+					return "", false, results[i].err
 				}
 				continue
 			}
@@ -528,7 +595,7 @@ func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStrea
 			audioFragments = append(audioFragments, results[i].fragments)
 		}
 		if len(candidates) > 0 && len(audioTracks) == 0 {
-			return "", results[desiredIdx].err
+			return "", false, results[desiredIdx].err
 		}
 		if activeIdx < 0 && len(audioTracks) > 0 {
 			activeIdx = 0
@@ -577,9 +644,9 @@ func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStrea
 		playlistBody, optionNames := buildMasterPlaylist(stream, audioTracks, activeIdx, dynamicRange)
 		m.audioOptionNames = optionNames
 		m.registerPlaylist("stream.m3u8", playlistBody)
-		return "stream.m3u8", nil
+		return "stream.m3u8", false, nil
 	}
-	return "", &provider.Error{Code: provider.Unsupported}
+	return "", false, &provider.Error{Code: provider.Unsupported}
 }
 
 func (m *Media) readTrack(ctx context.Context, track provider.PlaybackTrack, video bool) ([]fragment, []byte, string, string, error) {

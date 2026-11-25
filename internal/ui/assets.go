@@ -191,6 +191,7 @@ type playbackSettingsLabels struct {
 	Speed                                                 string
 	Subtitles, SubtitlesOff, SubtitlesChinese, SubtitlesEnglish string
 	Autoplay, AutoplayNote                                string
+	AudioScreensaver, AudioScreensaverNote                string
 }
 
 type danmakuSettingsLabels struct {

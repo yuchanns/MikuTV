@@ -29,10 +29,11 @@ const (
 var supportedPlaybackSpeeds = [...]float64{0.75, 1.0, 1.25, 1.5, 2.0}
 
 type PlaybackPreferences struct {
-	Quality  PlaybackQualityPref  `json:"quality"`
-	Speed    float64              `json:"speed"`
-	Subtitle PlaybackSubtitlePref `json:"subtitle"`
-	Autoplay bool                 `json:"autoplay"`
+	Quality               PlaybackQualityPref  `json:"quality"`
+	Speed                 float64              `json:"speed"`
+	Subtitle              PlaybackSubtitlePref `json:"subtitle"`
+	Autoplay              bool                 `json:"autoplay"`
+	AllowAudioScreensaver bool                 `json:"allowAudioScreensaver,omitempty"`
 }
 
 func DefaultPlaybackPreferences() PlaybackPreferences {

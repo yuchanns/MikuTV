@@ -127,7 +127,9 @@
     "SubtitlesChinese": "Chinese",
     "SubtitlesEnglish": "English",
     "Autoplay": "Autoplay Next",
-    "AutoplayNote": "Automatically play the next video when playback finishes."
+    "AutoplayNote": "Automatically play the next video when playback finishes.",
+    "AudioScreensaver": "Allow Screensaver During Audio",
+    "AudioScreensaverNote": "Let Apple TV enter its screensaver to protect OLED displays while music continues playing."
   },
   "Danmaku": {
     "Title": "Danmaku",

@@ -18,8 +18,9 @@ const (
 const (
 	playbackPrefQuality   app.FocusID = "settings/playback/quality"
 	playbackPrefSpeed     app.FocusID = "settings/playback/speed"
-	playbackPrefSubtitles app.FocusID = "settings/playback/subtitles"
-	playbackPrefAutoplay  app.FocusID = "settings/playback/autoplay"
+	playbackPrefSubtitles       app.FocusID = "settings/playback/subtitles"
+	playbackPrefAutoplay        app.FocusID = "settings/playback/autoplay"
+	playbackPrefAudioScreensaver app.FocusID = "settings/playback/audio-screensaver"
 )
 
 func playbackPickerOptionID(index int) app.FocusID {
@@ -139,6 +140,13 @@ func (playbackSettingsPage) Render(c *ui.Context, p *PageContext) {
 	p.settingsToggleRow(c, playbackPrefAutoplay, "skip-forward", l.Autoplay, l.AutoplayNote, prefs.Autoplay, func() {
 		if v.PlaybackSettings != nil {
 			if err := v.PlaybackSettings.Update(func(cfg *app.PlaybackPreferences) { cfg.Autoplay = !cfg.Autoplay }); err != nil {
+				v.showSettingsFeedback(p.Assets.Text.SaveFailed)
+			}
+		}
+	})
+	p.settingsToggleRow(c, playbackPrefAudioScreensaver, "moon", l.AudioScreensaver, l.AudioScreensaverNote, prefs.AllowAudioScreensaver, func() {
+		if v.PlaybackSettings != nil {
+			if err := v.PlaybackSettings.Update(func(cfg *app.PlaybackPreferences) { cfg.AllowAudioScreensaver = !cfg.AllowAudioScreensaver }); err != nil {
 				v.showSettingsFeedback(p.Assets.Text.SaveFailed)
 			}
 		}

@@ -155,16 +155,27 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 	}
 	for index := range plan.Streams {
 		stream := &plan.Streams[index]
-		if !s.ownPlaybackResource(&stream.Video.Resource, allow) {
-			return false
-		}
 		switch stream.Format {
 		case provider.PlaybackDirect, provider.PlaybackHLS:
-			if stream.Audio != nil || len(stream.AudioTracks) != 0 {
+			if len(stream.AudioTracks) != 0 {
+				return false
+			}
+			hasVideo := len(stream.Video.Resource.URLs) > 0
+			hasAudio := stream.Audio != nil && len(stream.Audio.Resource.URLs) > 0
+			switch {
+			case hasVideo && stream.Audio == nil:
+				if !s.ownPlaybackResource(&stream.Video.Resource, allow) {
+					return false
+				}
+			case !hasVideo && hasAudio:
+				if !s.ownPlaybackResource(&stream.Audio.Resource, allow) {
+					return false
+				}
+			default:
 				return false
 			}
 		case provider.PlaybackDASH:
-			if !validDASHTrack(stream.Video, true) {
+			if !s.ownPlaybackResource(&stream.Video.Resource, allow) || !validDASHTrack(stream.Video, true) {
 				return false
 			}
 			if stream.Audio != nil && (!validDASHTrack(*stream.Audio, false) || !s.ownPlaybackResource(&stream.Audio.Resource, allow)) {
