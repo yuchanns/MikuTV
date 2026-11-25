@@ -120,7 +120,8 @@
     "ModeRepeatOne": "\u5355\u66f2\u5faa\u73af",
     "ModeShuffle": "\u968f\u673a\u64ad\u653e",
     "SwitchToVideo": "\u5207\u6362\u81f3\u89c6\u9891",
-    "SwitchToAudio": "\u5207\u6362\u81f3\u97f3\u9891"
+    "SwitchToAudio": "\u5207\u6362\u81f3\u97f3\u9891",
+    "NowPlaying": "\u6b63\u5728\u64ad\u653e"
   },
   "PlaybackPrefs": {
     "Title": "\u64ad\u653e",

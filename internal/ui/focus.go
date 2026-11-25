@@ -111,6 +111,9 @@ func (v *View) move(direction app.Direction) {
 }
 
 func (v *View) selectRailFocus(next app.FocusID) {
+	if next == railNowPlaying {
+		return
+	}
 	raw, ok := strings.CutPrefix(string(next), "rail/")
 	if !ok || raw == "" {
 		return
@@ -152,6 +155,10 @@ func (v *View) bind(element ui.Element, id app.FocusID, group string, active boo
 			return false
 		}
 		if handle := v.Pages.components[v.State.Route].HandleKey; handle != nil && handle(v, event, group) {
+			return true
+		}
+		if event.Key == ui.KeySpace && !event.Repeat && v.HasBackgroundAudio() && v.backgroundAudioPlayPauseAllowed() {
+			v.dispatch(func() { v.Playback.Toggle() })
 			return true
 		}
 		switch event.Key {

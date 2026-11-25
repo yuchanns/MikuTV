@@ -634,6 +634,7 @@ func (rt *hostRuntime) start(bundledSources []*plugin.Source) {
 			rt.invalidate()
 		})
 		rt.view.Playback.SetPreferences(rt.playbackSettings)
+		rt.view.Playback.SetRemoteHandlers(rt.view.RemoteHandlers(mygo.RunOnMain, rt.invalidate))
 		rt.flushPendingOpenURL()
 		rt.view.FlushPendingTopShelfURL()
 		rt.invalidate()

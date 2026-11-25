@@ -120,7 +120,8 @@
     "ModeRepeatOne": "Repeat One",
     "ModeShuffle": "Shuffle",
     "SwitchToVideo": "Switch to Video",
-    "SwitchToAudio": "Switch to Audio"
+    "SwitchToAudio": "Switch to Audio",
+    "NowPlaying": "Now Playing"
   },
   "PlaybackPrefs": {
     "Title": "Playback",

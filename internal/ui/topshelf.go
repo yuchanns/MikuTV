@@ -333,7 +333,7 @@ func (v *View) OpenTopShelfURL(raw string) bool {
 
 	seed := v.topShelfSeedItem(link)
 	if v.Playback != nil && v.Playback.Active() {
-		v.leavePlayback()
+		v.closePlayback()
 	}
 	v.closeAllVideoDetails()
 	v.closeAllCreators()
