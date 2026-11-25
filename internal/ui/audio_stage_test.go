@@ -567,3 +567,63 @@ func TestPlaybackDrawerVirtualizesLargePlaylistAndRelatedAutoplay(t *testing.T) 
 			len(view.player.items), view.player.index, view.player.items)
 	}
 }
+
+func TestRelatedVideoDetailPreservesAndUpdatesPlaybackQueue(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []app.Entry{{
+		ID: "music", SourceID: "music", Name: "Music",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.GetCatalogItem, provider.ResolvePlayback, provider.PlaybackModes},
+	}}
+	state, err := app.NewState(entries, "music", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := &audioStageTestSession{audioOnly: true}
+	catalog := app.NewCatalog(func(string) provider.Session { return sess }, func(fn func()) { fn() }, func() {})
+	defer catalog.Close()
+	catalog.Open(entries[0])
+	pb := app.NewPlayback(catalog, player.Engine{
+		Open:     func(string, float64) bool { return true },
+		Stop:     func() {},
+		Snapshot: func() player.Status { return player.Status{} },
+	}, nil, func(fn func()) { fn() }, func() {})
+	defer pb.Close()
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
+	view.Playback = pb
+	ctx := PageContext{host: view, State: state, Assets: assets, Theme: theme.Default()}
+
+	songA := provider.MediaItem{Ref: provider.MediaRef{EntryID: "music", Kind: provider.Video, ID: "a"}, Title: "A"}
+	songB := provider.MediaItem{Ref: provider.MediaRef{EntryID: "music", Kind: provider.Video, ID: "b"}, Title: "B"}
+	rel1 := provider.MediaItem{Ref: provider.MediaRef{EntryID: "music", Kind: provider.Video, ID: "r1"}, Title: "R1"}
+	rel2 := provider.MediaItem{Ref: provider.MediaRef{EntryID: "music", Kind: provider.Video, ID: "r2"}, Title: "R2"}
+
+	// Hero/list queue builder includes all playable tracks centered on selected index.
+	if q, idx := ctx.playbackQueueFromList(songB, []provider.MediaItem{songA, songB}, 1); len(q) != 2 || idx != 1 || q[idx].item.Ref != songB.Ref {
+		t.Fatalf("playbackQueueFromList = %+v idx=%d", q, idx)
+	}
+
+	// Open songA with playlist queue [songA, songB]
+	ctx.openMediaFromList(songA, []provider.MediaItem{songA, songB}, 0)
+	if len(view.videoDetail.queue) != 2 || view.videoDetail.queueIndex != 0 || view.videoDetail.queue[0].item.Ref != songA.Ref {
+		t.Fatalf("initial queue = %+v idx=%d", view.videoDetail.queue, view.videoDetail.queueIndex)
+	}
+	// Open rel2 from Related list [rel1, rel2] while on VideoDetail
+	ctx.openMediaFromList(rel2, []provider.MediaItem{rel1, rel2}, 1)
+	if len(view.videoDetail.queue) != 2 || view.videoDetail.queueIndex != 1 || view.videoDetail.queue[1].item.Ref != rel2.Ref {
+		t.Fatalf("related queue = %+v idx=%d", view.videoDetail.queue, view.videoDetail.queueIndex)
+	}
+	// Back restores songA's original playlist queue [songA, songB]
+	if !view.backFromVideoDetail() {
+		t.Fatal("expected backFromVideoDetail to restore previous detail")
+	}
+	if len(view.videoDetail.queue) != 2 || view.videoDetail.queueIndex != 0 || view.videoDetail.queue[0].item.Ref != songA.Ref {
+		t.Fatalf("restored queue = %+v idx=%d", view.videoDetail.queue, view.videoDetail.queueIndex)
+	}
+}

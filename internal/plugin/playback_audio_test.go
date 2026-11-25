@@ -170,3 +170,118 @@ func TestPlaybackSubtitlesAcceptsURLlessLyricsTrack(t *testing.T) {
 		t.Fatalf("cues = %+v", cues)
 	}
 }
+
+func TestSessionPassesSecretAcrossAllReadOperations(t *testing.T) {
+	manifest := `{
+		"id": "secret-audit",
+		"name": "Secret Audit",
+		"description": "Verifies session secret forwarding",
+		"kind": "source",
+		"version": "1.0.0",
+		"apiVersion": 1,
+		"minAppVersion": "0.1.0",
+		"main": "index.js",
+		"permissions": {"network": ["api.example"]},
+		"authentication": {"methods": ["qrCode"]},
+		"capabilities": [
+			"account.signIn",
+			"catalog.browse",
+			"catalog.creator",
+			"catalog.series",
+			"catalog.live",
+			"catalog.videoComments",
+			"account.videoFavorites",
+			"playback.danmaku",
+			"account.danmakuRules"
+		]
+	}`
+	code := `
+		function requireToken(input, name) {
+			if (!input || !input.secret || input.secret.token !== "tok-123") {
+				throw { code: "plugin", message: name + " missing secret" };
+			}
+		}
+		export async function beginSignIn() { return { url: "https://api.example/qr", key: "k1" }; }
+		export async function pollSignIn() { return { status: "waiting" }; }
+		export async function restoreAccount() { return { account: { id: "u1", name: "User" }, secret: { token: "tok-123" } }; }
+		export async function signOut() { return {}; }
+		export async function browse() { return { collections: [] }; }
+		export async function readCreator(input) {
+			requireToken(input, "readCreator");
+			return { profile: { creator: { id: input.creatorID, name: "Artist" }, tabs: ["videos"] }, items: [] };
+		}
+		export async function videoFavoriteFolders(input) {
+			requireToken(input, "videoFavoriteFolders");
+			return { folders: [{ id: "f1", title: "Fav", count: 1, selected: true }] };
+		}
+		export async function editVideoFavoriteFolders() { return {}; }
+		export async function videoComments(input) {
+			requireToken(input, "videoComments");
+			return { comments: [] };
+		}
+		export async function readSeries(input) {
+			requireToken(input, "readSeries");
+			return { items: [] };
+		}
+		export async function readLive(input) {
+			requireToken(input, "readLive");
+			return { rooms: [] };
+		}
+		export async function readDanmaku(input) {
+			requireToken(input, "readDanmaku");
+			return { items: [] };
+		}
+		export async function readDanmakuRules(input) {
+			requireToken(input, "readDanmakuRules");
+			return { rules: [] };
+		}
+		export async function addDanmakuRule() { return { rule: { kind: "keyword", pattern: "x" } }; }
+		export async function removeDanmakuRule() { return {}; }
+	`
+	src, err := Open(t.Context(), zipFiles(t, map[string][]byte{
+		"plugin.json": []byte(manifest),
+		"index.js":    []byte(code),
+	}), testVersion)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	store, err := NewStorage(nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := src.NewSession("secret-audit", store)
+	defer sess.Close()
+	cred, err := sess.credential(authResult{
+		Status:  provider.QRApproved,
+		Account: provider.Account{ID: "u1", Name: "User"},
+		Secret:  []byte(`{"token":"tok-123"}`),
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.SetAccount(&cred); err != nil {
+		t.Fatal(err)
+	}
+	ref := provider.MediaRef{EntryID: "secret-audit", Kind: provider.Video, ID: "v1"}
+	if _, err := sess.ReadCreator(t.Context(), provider.CreatorRequest{CreatorID: "c1", Tab: provider.CreatorTabVideos, IncludeProfile: true}); err != nil {
+		t.Fatalf("ReadCreator: %v", err)
+	}
+	if _, err := sess.VideoFavoriteFolders(t.Context(), ref); err != nil {
+		t.Fatalf("VideoFavoriteFolders: %v", err)
+	}
+	if _, err := sess.VideoComments(t.Context(), provider.VideoCommentQuery{Ref: ref, Order: provider.VideoCommentsHot}); err != nil {
+		t.Fatalf("VideoComments: %v", err)
+	}
+	if _, err := sess.ReadSeries(t.Context(), provider.SeriesRequest{Mode: provider.SeriesModeHub}); err != nil {
+		t.Fatalf("ReadSeries: %v", err)
+	}
+	if _, err := sess.ReadLive(t.Context(), provider.LiveRequest{Section: provider.LiveSectionHub}); err != nil {
+		t.Fatalf("ReadLive: %v", err)
+	}
+	if _, err := sess.Danmaku(t.Context(), provider.DanmakuQuery{PlaybackTarget: provider.PlaybackTarget{Ref: ref}, Segment: 1}); err != nil {
+		t.Fatalf("Danmaku: %v", err)
+	}
+	if _, err := sess.DanmakuRules(t.Context()); err != nil {
+		t.Fatalf("DanmakuRules: %v", err)
+	}
+}

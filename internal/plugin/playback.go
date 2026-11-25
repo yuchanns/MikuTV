@@ -691,9 +691,13 @@ func (s *Session) Danmaku(ctx context.Context, query provider.DanmakuQuery) ([]p
 		Items []provider.Danmaku `json:"items"`
 	}
 	s.requests.RLock()
-	client, scope := s.active, s.scope
+	client, scope, secret := s.active, s.scope, s.secret
 	s.requests.RUnlock()
-	if err := s.invoke(ctx, scope, client, provider.ReadDanmaku, "readDanmaku", query, &result); err != nil {
+	input := struct {
+		provider.DanmakuQuery
+		Secret json.RawMessage `json:"secret,omitempty"`
+	}{query, secret}
+	if err := s.invoke(ctx, scope, client, provider.ReadDanmaku, "readDanmaku", input, &result); err != nil {
 		return nil, err
 	}
 	for i := range result.Items {
@@ -715,7 +719,7 @@ func (s *Session) Danmaku(ctx context.Context, query provider.DanmakuQuery) ([]p
 
 func (s *Session) DanmakuRules(ctx context.Context) ([]provider.DanmakuRule, error) {
 	s.requests.RLock()
-	client, scope, owner := s.active, s.scope, s.accountID
+	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
 	s.requests.RUnlock()
 	if owner == "" {
 		return nil, &provider.Error{Code: provider.NeedsSignIn}
@@ -723,7 +727,10 @@ func (s *Session) DanmakuRules(ctx context.Context) ([]provider.DanmakuRule, err
 	var result struct {
 		Rules []provider.DanmakuRule `json:"rules"`
 	}
-	if err := s.invoke(ctx, scope, client, provider.DanmakuRules, "readDanmakuRules", struct{}{}, &result); err != nil {
+	input := struct {
+		Secret json.RawMessage `json:"secret,omitempty"`
+	}{secret}
+	if err := s.invoke(ctx, scope, client, provider.DanmakuRules, "readDanmakuRules", input, &result); err != nil {
 		return nil, err
 	}
 	cleaned := make([]provider.DanmakuRule, 0, len(result.Rules))

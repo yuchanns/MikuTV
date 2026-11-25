@@ -416,7 +416,7 @@ func (p *PageContext) videoEpisode(c *ui.Context, detail *videoDetailState, segm
 				})
 			} else if segment.Ref != nil && *segment.Ref != detail.item.Ref {
 				p.dispatch(func() {
-					p.openRelatedVideoDetail(provider.MediaItem{Ref: *segment.Ref, Title: segment.Title})
+					p.openRelatedVideoDetail(provider.MediaItem{Ref: *segment.Ref, Title: segment.Title}, nil, 0)
 				})
 			}
 		})
