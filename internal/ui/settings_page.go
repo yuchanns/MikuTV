@@ -8,9 +8,67 @@ import (
 	"github.com/yuchanns/MikuTV/internal/theme"
 )
 
+func (v *View) settingsSectionAvailable(section string) bool {
+	switch section {
+	case "danmaku":
+		return v.hasDanmakuSettingsCapability()
+	case "privacy":
+		showSync, showSearch, showHistory := v.privacyRowAvailability()
+		return showSync || showSearch || showHistory
+	default:
+		return true
+	}
+}
+
+func (v *View) visibleSettingsSections(sections []Registration) []Registration {
+	out := make([]Registration, 0, len(sections))
+	for _, section := range sections {
+		if v.settingsSectionAvailable(section.Policy.Route.Section) {
+			out = append(out, section)
+		}
+	}
+	return out
+}
+
+func (v *View) fallbackSettingsSection() string {
+	if v.Pages != nil {
+		for _, section := range v.Pages.children(app.Route{Page: app.Settings}) {
+			if v.settingsSectionAvailable(section.Policy.Route.Section) {
+				return section.Policy.Route.Section
+			}
+		}
+	}
+	return "playback"
+}
+
+func (v *View) ensureAvailableSettingsSection() {
+	if v.State == nil {
+		return
+	}
+	switch v.State.Page {
+	case app.Settings:
+		if v.State.Section != "" && !v.settingsSectionAvailable(v.State.Section) {
+			fallback := v.fallbackSettingsSection()
+			if v.State.Navigate(app.Route{Page: app.Settings, Section: fallback}) {
+				v.State.Focus, v.State.Area, v.reveal = app.SectionFocus(fallback), app.ContentArea, true
+			}
+		}
+	case app.DanmakuSettingPicker, app.DanmakuRuleEditor:
+		if !v.settingsSectionAvailable("danmaku") {
+			v.State.Back()
+			v.ensureAvailableSettingsSection()
+		}
+	case app.PrivacyConfirm:
+		if !v.settingsSectionAvailable("privacy") {
+			v.State.Back()
+			v.ensureAvailableSettingsSection()
+		}
+	}
+}
+
 func (v *View) selectSettingsSection(next app.FocusID) {
 	section, ok := strings.CutPrefix(string(next), "section/")
-	if !ok || section == "" {
+	if !ok || section == "" || !v.settingsSectionAvailable(section) {
 		return
 	}
 	route := app.Route{Page: app.Settings, Section: section}
@@ -27,7 +85,26 @@ type settingsLayout struct{}
 func (settingsLayout) Render(c *ui.Context, p *PageContext) {
 	text := p.Assets.Text
 	p.region("sections", focusEdges{app.Right: {Region: "content"}})
-	sections := p.Pages.children(p.Node)
+	sections := p.host.visibleSettingsSections(p.Pages.children(p.Node))
+	activeRoute := p.Location.Route
+	renderOutlet := p.Outlet
+	if activeRoute.Page == app.Settings && activeRoute.Section != "" && !p.host.settingsSectionAvailable(activeRoute.Section) {
+		fallback := p.host.fallbackSettingsSection()
+		fallbackRoute := app.Route{Page: app.Settings, Section: fallback}
+		if p.active {
+			p.host.ensureAvailableSettingsSection()
+		}
+		activeRoute = fallbackRoute
+		if reg, ok := p.Pages.components[fallbackRoute]; ok {
+			fallbackCtx := *p
+			fallbackCtx.Location.Route = fallbackRoute
+			fallbackCtx.Node = fallbackRoute
+			fallbackCtx.Title = reg.Title
+			renderOutlet = func(c *ui.Context) {
+				reg.Component.Render(c, &fallbackCtx)
+			}
+		}
+	}
 	colors, d := p.Theme.Colors, p.uiColors()
 	ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 		ui.Box(c).FillWidth().Height(187).Children(func() {
@@ -39,7 +116,7 @@ func (settingsLayout) Render(c *ui.Context, p *PageContext) {
 			ui.Column(c).Width(265).Shrink(0).Gap(10).Children(func() {
 				for _, section := range sections {
 					id := section.Policy.Initial.Focus
-					selected := p.Pages.contains(section.Policy.Route, p.Location.Route)
+					selected := p.Pages.contains(section.Policy.Route, activeRoute)
 					background, foreground := ui.Transparent, paint(colors.Text.Secondary)
 					borderW, borderColor := float32(0), ui.Transparent
 					if selected {
@@ -70,7 +147,7 @@ func (settingsLayout) Render(c *ui.Context, p *PageContext) {
 					p.bind(e, id, "sections")
 				}
 			})
-			ui.Column(c.Key("settings-section/" + p.Location.Section)).Grow(1).MaxWidth(1145).Padding(8, 0, 0, 0).Children(func() { p.Outlet(c) })
+			ui.Column(c.Key("settings-section/" + activeRoute.Section)).Grow(1).MaxWidth(1145).Padding(8, 0, 0, 0).Children(func() { renderOutlet(c) })
 		})
 	})
 }

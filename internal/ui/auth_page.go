@@ -410,3 +410,16 @@ func (p *PageContext) authError(code provider.ErrorCode) string {
 		return p.Assets.Text.Auth.Failed
 	}
 }
+
+func (p *PageContext) requestError(code provider.ErrorCode) string {
+	switch code {
+	case provider.RateLimited:
+		return p.Assets.Text.Home.RateLimited
+	case provider.Network, provider.Timeout:
+		return p.Assets.Text.Plugins.InstallErrNetwork
+	case provider.NeedsSignIn, provider.Expired:
+		return p.Assets.Text.Auth.AccountExpired
+	default:
+		return p.Assets.Text.Detail.UpdateFailed
+	}
+}

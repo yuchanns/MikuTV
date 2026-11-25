@@ -344,24 +344,26 @@ func (p *PageContext) playbackTextLayers(c *ui.Context, state app.PlaybackState)
 		if v.danmakuDisplay().Show {
 			p.drawDanmaku(c, state)
 		}
-		for _, cue := range s.content.cues {
-			if cue.Start > state.Position {
+		if !state.AudioOnly {
+			for _, cue := range s.content.cues {
+				if cue.Start > state.Position {
+					break
+				}
+				if cue.End <= state.Position {
+					continue
+				}
+				bottom := float32(73)
+				if s.visible {
+					bottom = 212
+				} else if s.trick.hudVisible(c.Now()) {
+					bottom = 168
+				}
+				ui.Column(c).Absolute().Left(p.Width * 0.17).Right(p.Width * 0.17).Bottom(bottom).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, cue.Text).Padding(6, 12).Radius(5).FontSize(30).FontWeight(550).
+						TextColor(paint(colors.Playback.Subtitle)).Background(withAlpha(colors.Playback.SubtitleOutline, 0xc0))
+				})
 				break
 			}
-			if cue.End <= state.Position {
-				continue
-			}
-			bottom := float32(73)
-			if s.visible {
-				bottom = 212
-			} else if s.trick.hudVisible(c.Now()) {
-				bottom = 168
-			}
-			ui.Column(c).Absolute().Left(p.Width * 0.17).Right(p.Width * 0.17).Bottom(bottom).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, cue.Text).Padding(6, 12).Radius(5).FontSize(30).FontWeight(550).
-					TextColor(paint(colors.Playback.Subtitle)).Background(withAlpha(colors.Playback.SubtitleOutline, 0xc0))
-			})
-			break
 		}
 	}
 	message, expiry := s.content.message, s.content.messageUntil
@@ -620,7 +622,7 @@ func (p *PageContext) playbackDanmakuOptions(c *ui.Context) {
 			}).FillWidth().Center()
 	}
 	if code := v.player.content.danmakuStatus; code != "" {
-		ui.Text(c, p.authError(code)).Margin(8).FontSize(15).TextColor(paint(p.Theme.Colors.Playback.Secondary))
+		ui.Text(c, p.requestError(code)).Margin(8).FontSize(15).TextColor(paint(p.Theme.Colors.Playback.Secondary))
 	}
 }
 

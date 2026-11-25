@@ -109,11 +109,16 @@ func searchCreatorFocus(id string) app.FocusID {
 	return app.FocusID("search/creator/" + url.PathEscape(id))
 }
 
-func searchKindsList(snapshot app.SearchSnapshot) []provider.SearchKind {
+func searchKindsList(entry app.Entry, snapshot app.SearchSnapshot) []provider.SearchKind {
 	if len(snapshot.Kinds) != 0 {
 		return snapshot.Kinds
 	}
-	return defaultSearchKinds[:]
+	kinds := make([]provider.SearchKind, 0, len(defaultSearchKinds))
+	kinds = append(kinds, provider.SearchAll, provider.SearchVideo, provider.SearchCreator, provider.SearchSeries)
+	if entry.Capabilities.Has(provider.BrowseLive) {
+		kinds = append(kinds, provider.SearchLive)
+	}
+	return kinds
 }
 
 func searchKindSupportsFilters(kind provider.SearchKind) bool {
@@ -124,7 +129,7 @@ func (p *PageContext) searchKindLabel(kind provider.SearchKind) string {
 	text := p.Assets.Text.Search
 	switch kind {
 	case provider.SearchVideo:
-		return text.KindVideo
+		return p.sourceSearchVideoLabel()
 	case provider.SearchCreator:
 		return p.sourceSearchCreatorLabel()
 	case provider.SearchSeries:
@@ -150,7 +155,7 @@ func (searchPage) Render(c *ui.Context, p *PageContext) {
 	if activeKind == "" {
 		activeKind = provider.SearchAll
 	}
-	kinds := searchKindsList(current)
+	kinds := searchKindsList(entry, current)
 	history := current.History[:min(len(current.History), searchMaxHistoryChips)]
 	var suggestions []string
 	if current.Request.Query != "" && len(current.Suggestions) != 0 {
@@ -368,7 +373,7 @@ func (p *PageContext) restoreSearchFocus(current app.SearchSnapshot, history, su
 }
 
 func (p *PageContext) searchBox(c *ui.Context, current app.SearchSnapshot) {
-	colors, d, text := p.Theme.Colors, p.uiColors(), p.Assets.Text.Search
+	colors, d := p.Theme.Colors, p.uiColors()
 	state := &p.host.search
 	if state.editing {
 		ui.Row(c.Key("search-box-edit")).Width(searchLeftWidth).Height(72).Padding(0, 20).Gap(15).
@@ -378,7 +383,7 @@ func (p *PageContext) searchBox(c *ui.Context, current app.SearchSnapshot) {
 			field := ui.TextInput(c.Key("search-input"), &state.input).Grow(1).MinWidth(0).Height(50).
 				Padding(0, 0).Border(0, ui.Transparent).Background(ui.Transparent).
 				FontSize(27).TextColor(paint(colors.Text.Primary)).
-				Label(text.Placeholder).Placeholder(text.Placeholder).PlaceholderColor(paint(colors.Text.Muted)).
+				Label(p.sourceSearchPlaceholder()).Placeholder(p.sourceSearchPlaceholder()).PlaceholderColor(paint(colors.Text.Muted)).
 				MaxLength(searchQueryMaxLength).ReturnKey(ui.ReturnSearch).
 				OnChange(func() {
 					if p.host.Search != nil {
@@ -414,7 +419,7 @@ func (p *PageContext) searchBox(c *ui.Context, current app.SearchSnapshot) {
 	display := current.Request.Query
 	ink := paint(colors.Text.Primary)
 	if display == "" {
-		display = text.Placeholder
+		display = p.sourceSearchPlaceholder()
 		ink = paint(colors.Text.Muted)
 	}
 	focused := p.paintFocus() == searchInputFocus
@@ -586,10 +591,7 @@ func (p *PageContext) searchResultsBody(c *ui.Context, current app.SearchSnapsho
 				ui.Text(c, text.LoadingTitle).FontSize(25).TextColor(paint(colors.Text.Secondary))
 			})
 		case app.CatalogFailed:
-			note := p.authError(current.Error)
-			if current.Error == provider.RateLimited {
-				note = text.Home.RateLimited
-			}
+			note := p.requestError(current.Error)
 			ui.Column(c.Key("search-failed")).FillWidth().Padding(90, 20, 40, 20).AlignItems(ui.Center).Gap(18).Children(func() {
 				ui.Text(c, text.FailedTitle).FontSize(25).TextColor(paint(colors.Text.Secondary))
 				if note != "" {
@@ -646,7 +648,7 @@ func (p *PageContext) searchResultsBody(c *ui.Context, current app.SearchSnapsho
 					if activeKind == provider.SearchCreator {
 						p.searchCreatorCard(c, current.Page.Creators[index], cardWidth, dir)
 					} else {
-						p.searchMediaCard(c, current.Page.Items[index], cardWidth, dir)
+						p.searchMediaCard(c, current.Page.Items[index], current.Page.Items, index, cardWidth, dir)
 					}
 				}
 			})
@@ -671,11 +673,11 @@ func (p *PageContext) searchResultsBody(c *ui.Context, current app.SearchSnapsho
 	}
 }
 
-func (p *PageContext) searchMediaCard(c *ui.Context, item provider.MediaItem, width float32, direction func(app.Direction) bool) {
+func (p *PageContext) searchMediaCard(c *ui.Context, item provider.MediaItem, list []provider.MediaItem, index int, width float32, direction func(app.Direction) bool) {
 	id := searchItemFocus(item.Ref)
 	size := catalogCardSize{width: width, height: searchCardHeight, cover: searchCoverHeight, title: 21}
 	if (item.Ref.Kind == provider.Video || item.Ref.Kind == provider.Series || item.Ref.Kind == provider.Course) && p.canOpenVideoDetail(item.Ref) {
-		p.catalogCard(c, id, searchResultsRegion, item, size, direction)
+		p.catalogCardInList(c, id, searchResultsRegion, item, list, index, size, direction)
 		return
 	}
 	colors, d := p.Theme.Colors, p.uiColors()
@@ -789,7 +791,7 @@ func (p *PageContext) searchCreatorMeta(item provider.SearchCreatorItem) string 
 		parts = append(parts, catalogViews(*item.Followers, text.Home)+text.Search.Followers)
 	}
 	if item.Videos != nil {
-		parts = append(parts, fmt.Sprintf(text.Search.VideoCount, *item.Videos))
+		parts = append(parts, p.sourceSearchItemCount(*item.Videos))
 	}
 	if len(parts) != 0 {
 		return strings.Join(parts, " \u00b7 ")

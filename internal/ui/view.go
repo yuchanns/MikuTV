@@ -223,6 +223,9 @@ func (v *View) Render(c *ui.Context) {
 	} else if v.Playback != nil && v.Playback.InlinePreviewState().Active {
 		v.Playback.TickInlinePreview(c.Now())
 	}
+	if v.hasBackgroundPlaybackSession() {
+		v.tickBackgroundAudio(c)
+	}
 	v.advanceCatalogHold(c, height, len(layers) == 1 && layers[0].Page == app.Home)
 	v.focus.begin(c)
 	v.activeScroll = nil
@@ -539,8 +542,8 @@ func (v *View) SyncEntry() {
 		v.series.signInAction = nil
 		v.series.feedback = videoDetailFeedback{}
 		v.stopHomePreview()
-		if v.Playback != nil && v.Playback.Active() {
-			v.leavePlayback()
+		if v.Playback != nil && v.Playback.Active() && (v.home.entry != "" || v.Playback.State().Target.Ref.EntryID != entry.ID) {
+			v.closePlayback()
 		}
 		v.home.featureInfo.stop()
 		if prev, ok := v.homeStates[entry.ID]; ok && entry.ID != v.home.entry {
@@ -648,9 +651,13 @@ func (v *View) SyncAccountActivity() {
 			}
 		}
 	}
+	if v.HasBackgroundAudio() && v.Playback.Owner() != owner {
+		v.closePlayback()
+	}
 	if v.State.Page == app.PrivacyConfirm && (v.privacyUI.confirmEntry != entry.ID || v.privacyUI.confirmOwner != owner) {
 		v.State.Back()
 	}
+	v.ensureAvailableSettingsSection()
 	if sync := v.Pages.components[v.State.Route].Sync; sync != nil {
 		sync(v)
 	}

@@ -21,8 +21,9 @@ func (s *Session) ReadCreator(ctx context.Context, request provider.CreatorReque
 	auth := s.snapshotAuth()
 	input := struct {
 		provider.CreatorRequest
-		SignedIn bool `json:"signedIn,omitempty"`
-	}{request, auth.signedIn()}
+		SignedIn bool            `json:"signedIn,omitempty"`
+		Secret   json.RawMessage `json:"secret,omitempty"`
+	}{request, auth.signedIn(), auth.secret}
 	var page provider.CreatorPage
 	if err := s.invoke(ctx, auth.scope, auth.client, provider.ReadCreator, "readCreator", input, &page); err != nil {
 		return provider.CreatorPage{}, err

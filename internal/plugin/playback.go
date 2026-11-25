@@ -27,10 +27,18 @@ func validPreferredQuality(pref string) bool {
 	return false
 }
 
+func validPlaybackMediaKind(kind string) bool {
+	switch kind {
+	case "", provider.PlaybackMediaAudio, provider.PlaybackMediaVideo:
+		return true
+	}
+	return false
+}
+
 func (s *Session) ResolvePlayback(ctx context.Context, request provider.PlaybackRequest) (provider.Playback, error) {
 	var result provider.Playback
 	if !s.ownsPlayback(request.PlaybackTarget) || len(request.Quality) > 512 || !validPreferredQuality(request.PreferredQuality) ||
-		len(request.Line) > 128 || len(request.BranchID) > 256 || len(request.BranchState) > 4096 {
+		len(request.Line) > 128 || !validPlaybackMediaKind(request.MediaKind) || len(request.BranchID) > 256 || len(request.BranchState) > 4096 {
 		return result, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
@@ -153,18 +161,44 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 	if plan.Line != "" && !lines[plan.Line] {
 		return false
 	}
+	if len(plan.AvailableKinds) > 0 {
+		seenKinds := make(map[string]bool, len(plan.AvailableKinds))
+		kinds := plan.AvailableKinds[:0]
+		for _, k := range plan.AvailableKinds {
+			k = strings.TrimSpace(k)
+			if k != provider.PlaybackMediaAudio && k != provider.PlaybackMediaVideo {
+				return false
+			}
+			if !seenKinds[k] {
+				seenKinds[k] = true
+				kinds = append(kinds, k)
+			}
+		}
+		plan.AvailableKinds = kinds
+	}
 	for index := range plan.Streams {
 		stream := &plan.Streams[index]
-		if !s.ownPlaybackResource(&stream.Video.Resource, allow) {
-			return false
-		}
 		switch stream.Format {
 		case provider.PlaybackDirect, provider.PlaybackHLS:
-			if stream.Audio != nil || len(stream.AudioTracks) != 0 {
+			if len(stream.AudioTracks) != 0 {
+				return false
+			}
+			hasVideo := len(stream.Video.Resource.URLs) > 0
+			hasAudio := stream.Audio != nil && len(stream.Audio.Resource.URLs) > 0
+			switch {
+			case hasVideo && stream.Audio == nil:
+				if !s.ownPlaybackResource(&stream.Video.Resource, allow) {
+					return false
+				}
+			case !hasVideo && hasAudio:
+				if !s.ownPlaybackResource(&stream.Audio.Resource, allow) {
+					return false
+				}
+			default:
 				return false
 			}
 		case provider.PlaybackDASH:
-			if !validDASHTrack(stream.Video, true) {
+			if !s.ownPlaybackResource(&stream.Video.Resource, allow) || !validDASHTrack(stream.Video, true) {
 				return false
 			}
 			if stream.Audio != nil && (!validDASHTrack(*stream.Audio, false) || !s.ownPlaybackResource(&stream.Audio.Resource, allow)) {
@@ -214,7 +248,7 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 		if track.ID == "" || track.Label == "" {
 			return false
 		}
-		if s.ownPlaybackResource(&track.Resource, allow) {
+		if len(track.Resource.URLs) == 0 || s.ownPlaybackResource(&track.Resource, allow) {
 			tracks = append(tracks, track)
 		}
 	}
@@ -657,9 +691,13 @@ func (s *Session) Danmaku(ctx context.Context, query provider.DanmakuQuery) ([]p
 		Items []provider.Danmaku `json:"items"`
 	}
 	s.requests.RLock()
-	client, scope := s.active, s.scope
+	client, scope, secret := s.active, s.scope, s.secret
 	s.requests.RUnlock()
-	if err := s.invoke(ctx, scope, client, provider.ReadDanmaku, "readDanmaku", query, &result); err != nil {
+	input := struct {
+		provider.DanmakuQuery
+		Secret json.RawMessage `json:"secret,omitempty"`
+	}{query, secret}
+	if err := s.invoke(ctx, scope, client, provider.ReadDanmaku, "readDanmaku", input, &result); err != nil {
 		return nil, err
 	}
 	for i := range result.Items {
@@ -681,7 +719,7 @@ func (s *Session) Danmaku(ctx context.Context, query provider.DanmakuQuery) ([]p
 
 func (s *Session) DanmakuRules(ctx context.Context) ([]provider.DanmakuRule, error) {
 	s.requests.RLock()
-	client, scope, owner := s.active, s.scope, s.accountID
+	client, scope, owner, secret := s.active, s.scope, s.accountID, s.secret
 	s.requests.RUnlock()
 	if owner == "" {
 		return nil, &provider.Error{Code: provider.NeedsSignIn}
@@ -689,7 +727,10 @@ func (s *Session) DanmakuRules(ctx context.Context) ([]provider.DanmakuRule, err
 	var result struct {
 		Rules []provider.DanmakuRule `json:"rules"`
 	}
-	if err := s.invoke(ctx, scope, client, provider.DanmakuRules, "readDanmakuRules", struct{}{}, &result); err != nil {
+	input := struct {
+		Secret json.RawMessage `json:"secret,omitempty"`
+	}{secret}
+	if err := s.invoke(ctx, scope, client, provider.DanmakuRules, "readDanmakuRules", input, &result); err != nil {
 		return nil, err
 	}
 	cleaned := make([]provider.DanmakuRule, 0, len(result.Rules))
@@ -797,7 +838,8 @@ func (s *Session) invokePlaybackWrite(ctx context.Context, capability provider.C
 }
 
 func (s *Session) PlaybackSubtitles(ctx context.Context, query provider.PlaybackSubtitleQuery) ([]provider.SubtitleCue, error) {
-	if !s.ownsPlayback(query.PlaybackTarget) || !s.ownPlaybackResource(&query.Track.Resource, s.allowRequestForSession(true)) {
+	if !s.ownsPlayback(query.PlaybackTarget) || strings.TrimSpace(query.Track.ID) == "" ||
+		(len(query.Track.Resource.URLs) > 0 && !s.ownPlaybackResource(&query.Track.Resource, s.allowRequestForSession(true))) {
 		return nil, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()

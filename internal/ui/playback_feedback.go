@@ -156,7 +156,11 @@ func (p *PageContext) playbackFeedbackScreen(c *ui.Context, kind playbackFeedbac
 			p.playbackStatusLine(c, text.Buffering, 5, 41, 450, paint(colors.Playback.Foreground)).Role(ui.RoleStatus)
 			return
 		}
-		title, note, icon, action, glyph := text.Failed, text.FailedNote, "playback-offline", text.Reconnect, "refresh"
+		failedNote := text.FailedNote
+		if state.AudioOnly && text.AudioFailedNote != "" {
+			failedNote = text.AudioFailedNote
+		}
+		title, note, icon, action, glyph := text.Failed, failedNote, "playback-offline", text.Reconnect, "refresh"
 		primaryRun := func() {
 			v.Playback.Retry()
 			s.show(v)
@@ -174,7 +178,11 @@ func (p *PageContext) playbackFeedbackScreen(c *ui.Context, kind playbackFeedbac
 				p.leaveLiveToBrowse()
 			}
 		} else if kind == playbackFeedbackEnded {
-			title, note, icon, action, glyph = text.Ended, text.EndedNote, "playback-complete", text.Replay, "play-filled"
+			endedNote := text.EndedNote
+			if state.AudioOnly && text.AudioEndedNote != "" {
+				endedNote = text.AudioEndedNote
+			}
+			title, note, icon, action, glyph = text.Ended, endedNote, "playback-complete", text.Replay, "play-filled"
 		}
 		ui.Icon(c.Key("status-icon"), p.Assets.Icon(icon)).Absolute().Left(p.Width/2-32.5).Top(p.Height/2-155).
 			Size(65, 65).TextColor(paint(colors.Accent.Soft))

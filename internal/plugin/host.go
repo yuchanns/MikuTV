@@ -4,19 +4,16 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/MoeForge/moejs"
 	"github.com/MoeForge/moejs/webapi"
@@ -125,13 +122,16 @@ func installHost(ctx context.Context, rt *moejs.Runtime, store *Storage, extra .
 	if len(extra) > 0 {
 		extras = extra[0]
 	}
-	return installHostWith(ctx, rt, store, extras)
+	return installHostWith(ctx, rt, store, nil, extras)
 }
 
-func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, extra map[string]any) error {
+func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, cache *SessionCache, extra map[string]any) error {
 	get := rt.Function("get", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
+		}
+		if store == nil {
+			return moejs.Undefined(), nil
 		}
 		if value, ok := store.get(moejs.Arg(args, 0).String()); ok {
 			return rt.FromGo(value)
@@ -142,37 +142,58 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, ext
 		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
 		}
+		if store == nil {
+			return moejs.Undefined(), nil
+		}
 		return moejs.Undefined(), store.set(moejs.Arg(args, 0).String(), moejs.Arg(args, 1).String())
 	})
 	remove := rt.Function("delete", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
 		}
+		if store == nil {
+			return moejs.Undefined(), nil
+		}
 		return moejs.Undefined(), store.delete(moejs.Arg(args, 0).String())
 	})
-	digest := rt.Function("sha256", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-		input := moejs.Arg(args, 0).String()
-		sum := sha256.Sum256([]byte(input))
-		return rt.FromGo(hex.EncodeToString(sum[:]))
+	cacheGet := rt.Function("get", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		if err := ctx.Err(); err != nil {
+			return moejs.Undefined(), err
+		}
+		if value, ok := cache.Get(moejs.Arg(args, 0).String()); ok {
+			return rt.FromGo(value)
+		}
+		return moejs.Undefined(), nil
 	})
-	encrypt := rt.Function("encryptRSAOAEP", 2, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
-		der, err := base64.StdEncoding.DecodeString(moejs.Arg(args, 0).String())
-		if err != nil {
+	cacheSet := rt.Function("set", 3, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
 		}
-		public, err := x509.ParsePKIXPublicKey(der)
-		if err != nil {
+		var ttl time.Duration
+		if len(args) >= 3 && !args[2].IsUndefined() && !args[2].IsNull() {
+			sec, err := strconv.ParseFloat(strings.TrimSpace(args[2].String()), 64)
+			if err != nil || math.IsNaN(sec) || math.IsInf(sec, 0) || sec < 0 {
+				return moejs.Undefined(), errors.New("invalid cache ttl")
+			}
+			if sec > 0 {
+				ttl = time.Duration(sec * float64(time.Second))
+			}
+		}
+		return moejs.Undefined(), cache.Set(moejs.Arg(args, 0).String(), moejs.Arg(args, 1).String(), ttl)
+	})
+	cacheDelete := rt.Function("delete", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
 		}
-		key, ok := public.(*rsa.PublicKey)
-		if !ok {
-			return moejs.Undefined(), errors.New("RSA public key required")
-		}
-		ciphertext, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, key, []byte(moejs.Arg(args, 1).String()), nil)
-		if err != nil {
+		cache.Delete(moejs.Arg(args, 0).String())
+		return moejs.Undefined(), nil
+	})
+	cacheClear := rt.Function("clear", 0, func(_ *moejs.Realm, _ moejs.Value, _ []moejs.Value) (moejs.Value, error) {
+		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
 		}
-		return rt.FromGo(hex.EncodeToString(ciphertext))
+		cache.Clear()
+		return moejs.Undefined(), nil
 	})
 	inflateZlib := rt.Function("inflateZlib", 1, func(_ *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 		if err := ctx.Err(); err != nil {
@@ -200,6 +221,7 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, ext
 		}
 		return rt.FromGo(out)
 	})
+	gunzip := hostGunzipFunction(ctx, rt)
 	currentLocale := rt.Function("current", 0, func(_ *moejs.Realm, _ moejs.Value, _ []moejs.Value) (moejs.Value, error) {
 		if err := ctx.Err(); err != nil {
 			return moejs.Undefined(), err
@@ -208,8 +230,9 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, ext
 	})
 	hostObj := map[string]any{
 		"storage":  map[string]any{"get": get, "set": set, "delete": remove},
-		"crypto":   map[string]any{"sha256": digest, "encryptRSAOAEP": encrypt},
-		"compress": map[string]any{"inflateZlib": inflateZlib},
+		"cache":    map[string]any{"get": cacheGet, "set": cacheSet, "delete": cacheDelete, "clear": cacheClear},
+		"crypto":   hostCryptoFunctions(ctx, rt),
+		"compress": map[string]any{"inflateZlib": inflateZlib, "gunzip": gunzip},
 		"locale":   map[string]any{"current": currentLocale},
 	}
 	for k, v := range extra {

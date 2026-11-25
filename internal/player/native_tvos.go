@@ -168,6 +168,7 @@ var (
 		avLayerVideoGravityResizeAspectFill     objc.ID
 		avAudioSessionCategoryPlayback          objc.ID
 		avAudioSessionModeMoviePlayback         objc.ID
+		avAudioSessionModeDefault               objc.ID
 		avAudioSessionInterruptionNotification  objc.ID
 		avAudioSessionInterruptionTypeKey       objc.ID
 		avAudioSessionInterruptionOptionKey     objc.ID
@@ -398,6 +399,7 @@ func loadTVOSPlayer() error {
 			{avLib, "AVLayerVideoGravityResizeAspectFill", &n.avLayerVideoGravityResizeAspectFill},
 			{avAudioLib, "AVAudioSessionCategoryPlayback", &n.avAudioSessionCategoryPlayback},
 			{avAudioLib, "AVAudioSessionModeMoviePlayback", &n.avAudioSessionModeMoviePlayback},
+			{avAudioLib, "AVAudioSessionModeDefault", &n.avAudioSessionModeDefault},
 			{avAudioLib, "AVAudioSessionInterruptionNotification", &n.avAudioSessionInterruptionNotification},
 			{avAudioLib, "AVAudioSessionInterruptionTypeKey", &n.avAudioSessionInterruptionTypeKey},
 			{avAudioLib, "AVAudioSessionInterruptionOptionKey", &n.avAudioSessionInterruptionOptionKey},
@@ -772,6 +774,7 @@ type tvosPlayer struct {
 	view            objc.ID
 	layer           objc.ID
 	asset           objc.ID
+	pendingAsset    objc.ID
 	observedItem    objc.ID
 	displayCriteria objc.ID
 	videoOutput     objc.ID
@@ -798,6 +801,8 @@ type tvosPlayer struct {
 	foreground             bool
 	fullscreen             bool
 	preview                bool
+	audioOnly              bool
+	allowAudioScreensaver  bool
 	audioInterrupted       bool
 	idleHeld               bool
 	idleDisabled           bool
@@ -813,14 +818,20 @@ type tvosPlayer struct {
 	trace                  bool
 	errorCode              int64
 
-	audioMu         sync.Mutex
-	audioWorking    bool
-	audioDirty      bool
-	audioDesired    bool
-	audioForce      bool
-	audioSessionSet bool
-	audioSessionOn  bool
-	audioClosed     bool
+	audioMu               sync.Mutex
+	audioWorking          bool
+	audioDirty            bool
+	audioDesired          bool
+	audioDesiredMusicMode bool
+	audioForce            bool
+	audioSessionSet       bool
+	audioSessionOn        bool
+	audioSessionMusicMode bool
+	audioClosed           bool
+
+	remoteTargets      []remoteCommandTarget
+	nowPlayingArtImg   objc.ID
+	nowPlayingArtBlock objc.Block
 }
 
 // NewNative is owned by the UIKit main thread, including its disposal.
@@ -834,17 +845,21 @@ func NewNative(window uintptr) (Engine, func()) {
 	}
 	p := newTVOSPlayer(objc.ID(window))
 	return Engine{
-		Open:         p.open,
-		Seek:         p.seek,
-		SetRate:      p.setRate,
-		SelectAudio:  p.selectAudio,
-		Snapshot:     p.snapshot,
-		Stop:         p.stop,
-		Fullscreen:   p.setFullscreen,
-		Preview:      p.setPreview,
-		Viewport:     p.setViewport,
-		ViewportRect: p.setViewportRect,
-		BackdropBlur: func(radius float32) bool { return p.blurBackdrop(float64(radius)) },
+		Open:                p.open,
+		Seek:                p.seek,
+		SetRate:             p.setRate,
+		SelectAudio:         p.selectAudio,
+		SetAudioOnly:        p.setAudioOnly,
+		SetAllowScreensaver: p.setAllowScreensaver,
+		SetNowPlaying:       p.setNowPlaying,
+		SetRemoteHandlers:   p.setRemoteHandlers,
+		Snapshot:            p.snapshot,
+		Stop:                p.stop,
+		Fullscreen:          p.setFullscreen,
+		Preview:             p.setPreview,
+		Viewport:            p.setViewport,
+		ViewportRect:        p.setViewportRect,
+		BackdropBlur:        func(radius float32) bool { return p.blurBackdrop(float64(radius)) },
 		Capabilities: func() Capabilities {
 			return Capabilities{HDR: tvosHDRSupported(), HEVC: tvosHEVCSupported()}
 		},
@@ -951,6 +966,9 @@ func (p *tvosPlayer) destroy() {
 		n.setBool(app, n.selSetIdleTimerDisabled, p.previousIdleDisabled)
 		p.idleDisabled = p.previousIdleDisabled
 	}
+	p.clearRemoteCommands()
+	p.setNowPlaying(NowPlayingInfo{Active: false})
+	p.clearNowPlayingArtwork()
 	p.stop()
 	if p.observer != 0 {
 		center := n.getObj(objc.ID(objc.GetClass("NSNotificationCenter")), n.selDefaultCenter)
@@ -987,17 +1005,55 @@ func (p *tvosPlayer) activateAudioSession() {
 	p.setAudioSessionActive(true, false)
 }
 
+func (p *tvosPlayer) hasActiveAudioOnlyItem() bool {
+	if !p.audioOnly || p.player == 0 {
+		return false
+	}
+	return tvosNative.getObj(p.player, tvosNative.selCurrentItem) != 0
+}
+
+func (p *tvosPlayer) setAudioOnly(audioOnly bool) {
+	if p.audioOnly == audioOnly {
+		return
+	}
+	n := &tvosNative
+	p.audioOnly = audioOnly
+	if audioOnly {
+		p.clearDisplayCriteria()
+		p.detachBackdropOutput()
+		if p.view != 0 {
+			n.setBool(p.view, n.selSetHidden, true)
+		}
+	}
+	p.applyIdle()
+	if p.fullscreen || p.preview || p.hasActiveAudioOnlyItem() {
+		p.setAudioSessionActive(true, false)
+	}
+}
+
+func (p *tvosPlayer) setAllowScreensaver(allow bool) {
+	if p.allowAudioScreensaver == allow {
+		return
+	}
+	p.allowAudioScreensaver = allow
+	p.applyIdle()
+}
+
 func (p *tvosPlayer) setAudioSessionActive(active, force bool) {
+	musicMode := p.audioOnly
 	p.audioMu.Lock()
 	if p.audioClosed {
 		p.audioMu.Unlock()
 		return
 	}
-	if !force && !p.audioWorking && ((!p.audioSessionSet && !active) || (p.audioSessionSet && p.audioSessionOn == active)) {
+	if !force && !p.audioWorking &&
+		((!p.audioSessionSet && !active) ||
+			(p.audioSessionSet && p.audioSessionOn == active && (!active || p.audioSessionMusicMode == musicMode))) {
 		p.audioMu.Unlock()
 		return
 	}
 	p.audioDesired = active
+	p.audioDesiredMusicMode = musicMode
 	if force {
 		p.audioForce = true
 	}
@@ -1021,8 +1077,9 @@ func (p *tvosPlayer) drainAudioSession() {
 			return
 		}
 		want := p.audioDesired
+		wantMusicMode := p.audioDesiredMusicMode
 		force := p.audioForce
-		alreadySame := !force && ((!p.audioSessionSet && !want) || (p.audioSessionSet && p.audioSessionOn == want))
+		alreadySame := !force && ((!p.audioSessionSet && !want) || (p.audioSessionSet && p.audioSessionOn == want && (!want || p.audioSessionMusicMode == wantMusicMode)))
 		p.audioDirty = false
 		p.audioForce = false
 		p.audioMu.Unlock()
@@ -1034,7 +1091,11 @@ func (p *tvosPlayer) drainAudioSession() {
 		audio := n.getObj(objc.ID(objc.GetClass("AVAudioSession")), n.selSharedInstance)
 		if audio != 0 {
 			if want {
-				n.setAudioCategory(audio, n.selSetCategoryMode, n.avAudioSessionCategoryPlayback, n.avAudioSessionModeMoviePlayback, 0, 0)
+				mode := n.avAudioSessionModeMoviePlayback
+				if wantMusicMode && n.avAudioSessionModeDefault != 0 {
+					mode = n.avAudioSessionModeDefault
+				}
+				n.setAudioCategory(audio, n.selSetCategoryMode, n.avAudioSessionCategoryPlayback, mode, 0, 0)
 				n.setAudioActive(audio, n.selSetActive, true, 0)
 			} else {
 				n.setAudioActiveOpts(audio, n.selSetActiveWithOptions, false, avAudioSessionDeactivateNotify, 0)
@@ -1044,9 +1105,10 @@ func (p *tvosPlayer) drainAudioSession() {
 		p.audioMu.Lock()
 		p.audioSessionSet = true
 		p.audioSessionOn = want
+		p.audioSessionMusicMode = wantMusicMode
 		p.audioMu.Unlock()
 		if p.trace {
-			log.Printf("player-audio-session: active=%t elapsed=%s", want, time.Since(started).Round(time.Microsecond))
+			log.Printf("player-audio-session: active=%t musicMode=%t elapsed=%s", want, wantMusicMode, time.Since(started).Round(time.Microsecond))
 		}
 	}
 }
@@ -1058,7 +1120,10 @@ func (p *tvosPlayer) onResignActive() {
 		}
 		p.foreground = false
 		p.clearDisplayCriteria()
-		p.applyRate()
+		// Keep active audio-only playback alive in background (UIBackgroundModes: audio).
+		if !(p.audioOnly && p.rate > 0) {
+			p.applyRate()
+		}
 		p.applyIdle()
 	})
 }
@@ -1070,7 +1135,7 @@ func (p *tvosPlayer) onBecomeActive() {
 		}
 		p.foreground = true
 		p.refreshMatchDisplay()
-		if p.fullscreen || p.preview {
+		if p.fullscreen || p.preview || p.hasActiveAudioOnlyItem() {
 			p.setAudioSessionActive(true, true)
 		}
 		p.applyDisplayCriteria()
@@ -1244,7 +1309,7 @@ func (p *tvosPlayer) onAudioInterruption(note objc.ID) {
 			p.applyRate()
 		case avAudioSessionInterruptEnded:
 			p.audioInterrupted = false
-			if (p.fullscreen || p.preview) && p.foreground {
+			if ((p.fullscreen || p.preview) && p.foreground) || p.hasActiveAudioOnlyItem() {
 				p.setAudioSessionActive(true, true)
 				if options&avAudioSessionOptShouldResume != 0 {
 					p.applyRate()
@@ -1370,7 +1435,7 @@ func (p *tvosPlayer) resolveDisplayCriteria() (objc.ID, bool) {
 func (p *tvosPlayer) applyDisplayCriteria() {
 	n := &tvosNative
 	item := n.getObj(p.player, n.selCurrentItem)
-	if !p.foreground || !p.fullscreen || (p.asset == 0 && item == 0) {
+	if p.audioOnly || !p.foreground || !p.fullscreen || (p.asset == 0 && item == 0) {
 		if p.displayCriteriaApplied {
 			p.clearDisplayCriteria()
 		}
@@ -1546,24 +1611,32 @@ func (p *tvosPlayer) isNearEnd() bool {
 
 func (p *tvosPlayer) applyRate() {
 	n := &tvosNative
-	if !p.foreground || (!p.fullscreen && !p.preview) || p.audioInterrupted || p.seeking || p.ended || p.rate == 0 {
+	allowBackgroundAudio := p.audioOnly && !p.foreground
+	if (!p.foreground && !allowBackgroundAudio) || (!p.fullscreen && !p.preview && !p.audioOnly) || p.audioInterrupted || p.seeking || p.ended || p.rate == 0 {
 		n.getObj(p.player, n.selPause)
-		if p.fullscreen && !p.hdrVideo && n.getBool(p.layer, n.selIsReadyForDisplay) && !p.seeking {
+		if !p.audioOnly && p.fullscreen && !p.hdrVideo && n.getBool(p.layer, n.selIsReadyForDisplay) && !p.seeking {
 			p.attachBackdropOutputIfSafe()
 			p.sampleBackdropAt(n.caCurrentMediaTime())
 		}
 	} else if n.getObj(p.player, n.selCurrentItem) != 0 {
-		if p.backdropRadius == 0 && !p.isNearEnd() {
+		if !p.audioOnly && p.backdropRadius == 0 && !p.isNearEnd() {
 			p.detachBackdropOutput()
 		}
 		n.setFloat32(p.player, n.selSetRate, p.rate)
 	}
+	p.applyIdle()
 }
 
 func (p *tvosPlayer) applyIdle() {
 	n := &tvosNative
 	app := n.getObj(objc.ID(objc.GetClass("UIApplication")), n.selSharedApplication)
 	wanted := p.fullscreen && p.foreground
+	if p.audioOnly {
+		wanted = wanted && !p.allowAudioScreensaver && p.rate > 0
+	}
+	if p.player != 0 {
+		n.setBool(p.player, n.selSetPreventsSleep, !p.audioOnly || !p.allowAudioScreensaver)
+	}
 	if wanted {
 		p.idleGeneration++
 		if !p.idleHeld {
@@ -1616,6 +1689,10 @@ func (p *tvosPlayer) clearItem() {
 	setRetained(&p.displayCriteria, 0)
 	n.setBool(p.view, n.selSetHidden, true)
 	n.getObj(p.player, n.selPause)
+	if p.pendingAsset != 0 {
+		n.getObj(p.pendingAsset, n.selCancelLoading)
+		setRetained(&p.pendingAsset, 0)
+	}
 	if p.asset != 0 {
 		n.getObj(p.asset, n.selCancelLoading)
 		setRetained(&p.asset, 0)
@@ -1718,15 +1795,31 @@ func (p *tvosPlayer) open(address string, position float64) bool {
 		p.clearDisplayCriteria()
 		return false
 	}
-	p.clearItem()
+	curItem := n.getObj(p.player, n.selCurrentItem)
+	replacing := curItem != 0 && p.errorCode == 0 && p.cachedItemStatus != avPlayerItemStatusFailed && !p.ended
+	if !replacing {
+		p.clearItem()
+	} else {
+		p.generation++
+		if p.pendingAsset != 0 {
+			n.getObj(p.pendingAsset, n.selCancelLoading)
+			setRetained(&p.pendingAsset, 0)
+		}
+	}
 	p.target = max(position, 0)
 	p.audioInterrupted = false
 	asset := n.withObj2(objc.ID(objc.GetClass("AVURLAsset")), n.selURLAssetWithURL, url, 0)
 	if asset == 0 {
-		p.clearDisplayCriteria()
+		if !replacing {
+			p.clearDisplayCriteria()
+		}
 		return false
 	}
-	setRetained(&p.asset, asset)
+	if replacing {
+		setRetained(&p.pendingAsset, asset)
+	} else {
+		setRetained(&p.asset, asset)
+	}
 	generation := p.generation
 	block := objc.NewBlock(func(objc.Block) {
 		runOnMain(func() {
@@ -1753,9 +1846,48 @@ func (p *tvosPlayer) open(address string, position float64) bool {
 					log.Printf("player-playable: status=%d playable=%t code=%d domain=%q desc=%q",
 						status, playable, code, domain, desc)
 				}
+				if replacing {
+					setRetained(&p.pendingAsset, 0)
+				}
 				p.errorCode = code
 				p.clearDisplayCriteria()
 				return
+			}
+			if replacing {
+				// Keep the transition continuous if the previous item advanced while
+				// the replacement asset parsed its headers.
+				if p.rate > 0 && !p.seeking && n.getObj(p.player, n.selCurrentItem) != 0 {
+					livePos := secondsAt(n.getCMTime(p.player, n.selCurrentTime))
+					if livePos > p.target && livePos-p.target < 5.0 {
+						p.target = livePos
+					}
+				}
+				if oldItem := n.getObj(p.player, n.selCurrentItem); oldItem != 0 {
+					n.getObj(oldItem, n.selCancelPendingSeeks)
+				}
+				p.observeItem(0)
+				p.detachBackdropOutput()
+				if p.asset != 0 && p.asset != asset {
+					n.getObj(p.asset, n.selCancelLoading)
+				}
+				setRetained(&p.asset, asset)
+				setRetained(&p.pendingAsset, 0)
+				p.seekGeneration++
+				p.seeking = false
+				p.ended = false
+				p.resolvedTracks = false
+				p.resolvedVideoFormat = false
+				p.audioActive = false
+				p.hdrVideo = false
+				p.errorCode = 0
+				p.cachedDuration = 0
+				p.cachedBuffer = 0
+				p.appliedForwardBuffer = 0
+				p.lastTimeControlStatus = -1
+				p.lastWaitingReason = ""
+				setRetained(&p.displayCriteria, 0)
+				setRetained(&p.backdropFrame, 0)
+				p.blurBackdrop(0)
 			}
 			item := n.withObj(objc.ID(objc.GetClass("AVPlayerItem")), n.selPlayerItemWithAsset, asset)
 			p.applyForwardBuffer(item)
@@ -1765,7 +1897,7 @@ func (p *tvosPlayer) open(address string, position float64) bool {
 			p.nextBufferSample = 0
 			p.applyDisplayCriteria()
 			p.inspectTracksAndDisplayCriteria()
-			n.setBool(p.view, n.selSetHidden, false)
+			n.setBool(p.view, n.selSetHidden, p.audioOnly)
 			if p.target > 0 {
 				p.seek(p.target)
 			} else {
@@ -1810,7 +1942,7 @@ func (p *tvosPlayer) setRate(rate float64) {
 	p.rate = float32(rate)
 	if rate > 0 {
 		p.audioInterrupted = false
-		if (p.fullscreen || p.preview) && p.foreground {
+		if ((p.fullscreen || p.preview) && p.foreground) || p.hasActiveAudioOnlyItem() {
 			p.activateAudioSession()
 		}
 	}
@@ -1901,12 +2033,17 @@ func (p *tvosPlayer) snapshot() Status {
 			}
 		}
 	}
-	if !p.resolvedVideoFormat {
+	if !p.audioOnly && !p.resolvedVideoFormat {
 		p.inspectTracksAndDisplayCriteria()
 	}
-	readyForDisplay := n.getBool(p.layer, n.selIsReadyForDisplay)
+	readyForDisplay := false
+	if p.audioOnly {
+		readyForDisplay = item != 0 && p.cachedItemStatus == avPlayerItemStatusReadyToPlay
+	} else {
+		readyForDisplay = n.getBool(p.layer, n.selIsReadyForDisplay)
+	}
 	nearEnd := p.cachedDuration > 0 && p.cachedDuration-position <= 5.0
-	if readyForDisplay && !p.seeking && p.resolvedVideoFormat && !p.hdrVideo {
+	if !p.audioOnly && readyForDisplay && !p.seeking && p.resolvedVideoFormat && !p.hdrVideo {
 		needOutput := nearEnd || p.backdropRadius > 0
 		if needOutput && p.fullscreen && p.videoOutput == 0 {
 			p.attachBackdropOutputIfSafe()
@@ -1935,19 +2072,21 @@ func (p *tvosPlayer) snapshot() Status {
 		if tcs != p.lastTimeControlStatus || reason != p.lastWaitingReason {
 			p.lastTimeControlStatus = tcs
 			p.lastWaitingReason = reason
-			log.Printf("player-tcs: status=%d reason=%q pos=%.2f bufAhead=%.2f seeking=%t rate=%.2f prefBuf=%.1f",
-				tcs, reason, position, max(0, p.cachedBuffer-position), p.seeking, p.rate, p.appliedForwardBuffer)
+			log.Printf("player-tcs: status=%d reason=%q pos=%.2f bufAhead=%.2f seeking=%t rate=%.2f prefBuf=%.1f audioOnly=%t",
+				tcs, reason, position, max(0, p.cachedBuffer-position), p.seeking, p.rate, p.appliedForwardBuffer, p.audioOnly)
 		}
 	}
+	pendingReplace := p.pendingAsset != 0
 	return Status{
 		Position:            position,
 		Duration:            p.cachedDuration,
 		BufferEnd:           p.cachedBuffer,
 		HasFrame:            readyForDisplay,
+		AudioOnly:           p.audioOnly,
 		Buffering:           item == 0 || itemStatus == avPlayerItemStatusUnknown || p.seeking || (p.rate > 0 && tcs == avPlayerTimeControlWaiting),
 		Seeking:             p.seeking,
-		Ended:               p.ended,
-		Failed:              p.errorCode != 0 || (item != 0 && itemStatus == avPlayerItemStatusFailed),
+		Ended:               !pendingReplace && p.ended,
+		Failed:              p.errorCode != 0 || (!pendingReplace && item != 0 && itemStatus == avPlayerItemStatusFailed),
 		DisplayIncompatible: p.errorCode == avErrorNoCompatibleAlternates,
 		AudioActive:         p.audioActive,
 		HDRVideo:            p.hdrVideo,
@@ -1980,7 +2119,7 @@ func (p *tvosPlayer) setFullscreen(active bool) {
 	p.applyRate()
 	if p.fullscreen {
 		p.setAudioSessionActive(true, false)
-	} else if !p.preview {
+	} else if !p.preview && !p.audioOnly {
 		p.setAudioSessionActive(false, false)
 	}
 }

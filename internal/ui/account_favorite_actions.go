@@ -112,23 +112,31 @@ func libraryManageID(inFolder bool) app.FocusID {
 	return app.ContentAction
 }
 
+func hasRemovableLibraryRows(rows []provider.AccountRow, managing bool) bool {
+	if managing {
+		return true
+	}
+	for _, row := range rows {
+		if row.RemovalID != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *PageContext) libraryHeaderActions(c *ui.Context, query provider.AccountQuery, rows []provider.AccountRow, managing bool) {
 	text := p.Assets.Text.Activity
 	if !p.canManageLibrary(query) {
-		if query.Section == provider.AccountFavorites || len(rows) != 0 {
-			activity := p.host.Activity
-			p.favoriteAction(c, p.Assets.Text.Refresh, "", app.ContentAction, favoriteHeader, func() { activity.Refresh(query) })
-		}
 		return
 	}
 	directory := query.Section == provider.AccountFavorites && query.Folder == ""
 	if directory {
-		p.favoriteAction(c, text.CreateFolder, "plus", app.ContentAction, favoriteHeader, func() {
+		p.favoriteAction(c, p.sourceFolderText(text.CreateFolder), "plus", app.ContentAction, favoriteHeader, func() {
 			p.openFavoriteDialog(favoriteDialog{mode: favoriteCreate}, favoriteDialogName)
 		})
 		return
 	}
-	if managing || len(rows) != 0 {
+	if hasRemovableLibraryRows(rows, managing) {
 		label, icon := text.ManageFolder, "settings"
 		if managing {
 			label, icon = text.DoneManaging, "check"
@@ -145,7 +153,7 @@ func (p *PageContext) libraryHeaderActions(c *ui.Context, query provider.Account
 		})
 	}
 	if query.Folder != "" {
-		p.favoriteAction(c, text.FolderSettings, "folder", app.ContentAction, favoriteHeader, func() {
+		p.favoriteAction(c, p.sourceFolderText(text.FolderSettings), "folder", app.ContentAction, favoriteHeader, func() {
 			p.openFavoriteDialog(favoriteDialog{mode: favoriteSettings}, favoriteDialogEdit)
 		})
 	}
@@ -156,7 +164,7 @@ func (p *PageContext) favoritePageStatus(c *ui.Context, query provider.AccountQu
 	if snapshot.Phase == app.CatalogFailed || snapshot.Phase == app.CatalogCanceled {
 		ui.Column(c).FillWidth().Padding(0, 83, 0, 103).Gap(15).Children(func() {
 			if snapshot.Error != "" {
-				ui.Text(c, p.authError(snapshot.Error)).FontSize(19).TextColor(paint(p.Theme.Colors.Text.Secondary))
+				ui.Text(c, p.requestError(snapshot.Error)).FontSize(19).TextColor(paint(p.Theme.Colors.Text.Secondary))
 			}
 			p.favoriteAction(c, text.Retry, "", "favorites/retry", favoriteStatus, func() {
 				p.State.Focus = app.ContentAction
@@ -186,7 +194,7 @@ func (p *PageContext) favoriteManagementBar(c *ui.Context, snapshot app.AccountS
 	ui.Row(c).Absolute().Top(top).Left(103).Right(83).Height(58).Gap(18).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, fmt.Sprintf(text.SelectedFavorites, len(resources))).FontSize(21).TextColor(paint(p.Theme.Colors.Text.Secondary))
 		if m.err != "" {
-			ui.Text(c, p.authError(m.err)).FontSize(19).TextColor(paint(p.Theme.Colors.Status.Error.Foreground))
+			ui.Text(c, p.requestError(m.err)).FontSize(19).TextColor(paint(p.Theme.Colors.Status.Error.Foreground))
 		}
 		ui.Box(c).Grow(1)
 		p.libraryManagementButton(c, all, "", favoriteSelectAll, func() {
@@ -356,18 +364,18 @@ func (favoriteDialogPage) Render(c *ui.Context, p *PageContext) {
 	title := folder.Title
 	switch dialog.mode {
 	case favoriteCreate:
-		title = text.Activity.CreateFolder
+		title = p.sourceFolderText(text.Activity.CreateFolder)
 	case favoriteEdit:
-		title = text.Activity.EditFolder
+		title = p.sourceFolderText(text.Activity.EditFolder)
 	case favoriteDelete:
-		title = text.Activity.DeleteFolderTitle
+		title = p.sourceFolderText(text.Activity.DeleteFolderTitle)
 	case favoriteConfirmRemove:
 		title = text.Activity.RemoveSelected
 	}
 	if dialog.mode == favoriteDelete || dialog.mode == favoriteConfirmRemove {
-		note := text.Activity.DeleteFolderNote
+		note := p.sourceFolderText(text.Activity.DeleteFolderNote)
 		if dialog.mode == favoriteConfirmRemove {
-			note = fmt.Sprintf(text.Activity.RemoveFavoritesNote, len(dialog.resources))
+			note = p.sourceFolderText(fmt.Sprintf(text.Activity.RemoveFavoritesNote, len(dialog.resources)))
 		}
 		ui.Column(c).FillWidth().Lang(p.langTag()).Font(p.uiFont()).Children(func() {
 			p.framelessHeader(c, "COLLECTION \u00b7 CONFIRM", "trash", title, note)
@@ -395,12 +403,12 @@ func (p *PageContext) favoriteDialogContent(c *ui.Context, dialog *favoriteDialo
 	switch dialog.mode {
 	case favoriteSettings:
 		ui.Column(c).FillWidth().Margin(24, 0, 0, 0).Gap(6).Children(func() {
-			p.favoriteFolderOption(c, text.Activity.EditFolder, "settings", favoriteDialogEdit, func() {
+			p.favoriteFolderOption(c, p.sourceFolderText(text.Activity.EditFolder), "settings", favoriteDialogEdit, func() {
 				*dialog = favoriteDialog{mode: favoriteEdit, title: folder.Title, private: folder.Private != nil && *folder.Private}
 				p.State.Focus = favoriteDialogName
 			})
 			if folder.CanDelete {
-				p.favoriteFolderOption(c, text.Activity.DeleteFolder, "trash", favoriteDialogDelete, func() {
+				p.favoriteFolderOption(c, p.sourceFolderText(text.Activity.DeleteFolder), "trash", favoriteDialogDelete, func() {
 					dialog.mode = favoriteDelete
 					p.State.Focus = app.CloseModal
 				})
@@ -409,9 +417,9 @@ func (p *PageContext) favoriteDialogContent(c *ui.Context, dialog *favoriteDialo
 	case favoriteCreate, favoriteEdit:
 		p.favoriteNameFields(c, dialog)
 	case favoriteDelete, favoriteConfirmRemove:
-		note := text.Activity.DeleteFolderNote
+		note := p.sourceFolderText(text.Activity.DeleteFolderNote)
 		if dialog.mode == favoriteConfirmRemove {
-			note = fmt.Sprintf(text.Activity.RemoveFavoritesNote, len(dialog.resources))
+			note = p.sourceFolderText(fmt.Sprintf(text.Activity.RemoveFavoritesNote, len(dialog.resources)))
 		}
 		ui.Text(c, note).Margin(21, 0, 0, 0).FontSize(21).TextColor(paint(colors.Text.Secondary)).LineHeight(1.8)
 	}
@@ -451,7 +459,7 @@ func (p *PageContext) favoriteDialogButtons(c *ui.Context, dialog *favoriteDialo
 			label, icon := text.Activity.SaveFolder, ""
 			switch dialog.mode {
 			case favoriteDelete:
-				label, icon = text.Activity.DeleteFolder, "trash"
+				label, icon = p.sourceFolderText(text.Activity.DeleteFolder), "trash"
 			case favoriteConfirmRemove:
 				label, icon = text.Activity.ConfirmRemove, "trash"
 			}
@@ -581,7 +589,7 @@ func (p *PageContext) saveFavoriteDialog() {
 	dialog.pending = activity.EditFavoriteFolder(edit, func(completed int, err error) {
 		dialog.pending = false
 		if err != nil {
-			dialog.errorText = p.authError(provider.CodeOf(err))
+			dialog.errorText = p.requestError(provider.CodeOf(err))
 			dialog.resources = dialog.resources[completed:]
 			return
 		}

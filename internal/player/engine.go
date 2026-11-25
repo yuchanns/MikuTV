@@ -5,19 +5,43 @@ type ViewportRect struct {
 	Cover      bool
 }
 
+type NowPlayingInfo struct {
+	Active   bool
+	Title    string
+	Artist   string
+	Album    string
+	Duration float64
+	Elapsed  float64
+	Rate     float64
+	Artwork  []byte
+}
+
+type RemoteHandlers struct {
+	Play     func()
+	Pause    func()
+	Toggle   func()
+	Next     func()
+	Previous func()
+	Seek     func(seconds float64)
+}
+
 type Engine struct {
-	Open         func(url string, position float64) bool
-	Seek         func(seconds float64)
-	SetRate      func(rate float64)
-	SelectAudio  func(name string) bool
-	Stop         func()
-	Snapshot     func() Status
-	Fullscreen   func(bool)
-	Preview      func(bool)
-	Viewport     func(widthFraction float64)
-	ViewportRect func(ViewportRect)
-	BackdropBlur func(radius float32) bool
-	Capabilities func() Capabilities
+	Open                func(url string, position float64) bool
+	Seek                func(seconds float64)
+	SetRate             func(rate float64)
+	SelectAudio         func(name string) bool
+	SetAudioOnly        func(audioOnly bool)
+	SetAllowScreensaver func(allow bool)
+	SetNowPlaying       func(info NowPlayingInfo)
+	SetRemoteHandlers   func(handlers RemoteHandlers)
+	Stop                func()
+	Snapshot            func() Status
+	Fullscreen          func(bool)
+	Preview             func(bool)
+	Viewport            func(widthFraction float64)
+	ViewportRect        func(ViewportRect)
+	BackdropBlur        func(radius float32) bool
+	Capabilities        func() Capabilities
 }
 
 type Capabilities struct {
@@ -30,6 +54,7 @@ type Status struct {
 	Duration            float64
 	BufferEnd           float64
 	HasFrame            bool
+	AudioOnly           bool
 	Buffering           bool
 	Seeking             bool
 	Ended               bool

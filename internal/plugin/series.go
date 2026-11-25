@@ -28,9 +28,10 @@ func (s *Session) ReadSeries(ctx context.Context, request provider.SeriesRequest
 	auth := s.snapshotAuth()
 	input := struct {
 		provider.SeriesRequest
-		SignedIn bool   `json:"signedIn,omitempty"`
-		Owner    string `json:"owner,omitempty"`
-	}{request, auth.signedIn(), auth.owner}
+		SignedIn bool            `json:"signedIn,omitempty"`
+		Owner    string          `json:"owner,omitempty"`
+		Secret   json.RawMessage `json:"secret,omitempty"`
+	}{request, auth.signedIn(), auth.owner, auth.secret}
 	var page provider.SeriesPage
 	if err := s.invoke(ctx, auth.scope, auth.client, provider.BrowseSeries, "readSeries", input, &page); err != nil {
 		return provider.SeriesPage{}, err

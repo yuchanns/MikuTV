@@ -153,7 +153,7 @@ func (p *PageContext) markAllNotificationsRead(query provider.AccountQuery) {
 		Filter: query.Filter,
 	}, func(err error) {
 		if err != nil {
-			p.host.showNoticeFeedback(p.authError(provider.CodeOf(err)))
+			p.host.showNoticeFeedback(p.requestError(provider.CodeOf(err)))
 			return
 		}
 		p.host.showNoticeFeedback(p.Assets.Text.Activity.MarkedAllRead)
@@ -214,7 +214,7 @@ func (p *PageContext) openNotification(row provider.AccountRow) {
 			Cursor: row.Notice.Cursor,
 		}, func(err error) {
 			if err != nil {
-				p.host.showNoticeFeedback(p.authError(provider.CodeOf(err)))
+				p.host.showNoticeFeedback(p.requestError(provider.CodeOf(err)))
 			}
 		})
 	}

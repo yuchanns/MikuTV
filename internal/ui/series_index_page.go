@@ -105,7 +105,7 @@ func (seriesIndexPage) Render(c *ui.Context, p *PageContext) {
 			p.seriesStateBlock(c, "search", text.Series.Loading, "", "", "", "", seriesIndexStatusRegion, nil)
 			return
 		case snap.Phase == app.CatalogFailed && len(snap.Items) == 0:
-			p.seriesStateBlock(c, "search", text.Series.LoadFailed, p.authError(snap.Error), text.Retry, "refresh", seriesIndexRetryFocus, seriesIndexStatusRegion, func() {
+			p.seriesStateBlock(c, "search", text.Series.LoadFailed, p.requestError(snap.Error), text.Retry, "refresh", seriesIndexRetryFocus, seriesIndexStatusRegion, func() {
 				catalog.RetryIndex()
 			})
 			return

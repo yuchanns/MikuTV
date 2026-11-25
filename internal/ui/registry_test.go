@@ -104,16 +104,27 @@ func TestMinimalSourceHidesUnsupportedModulesAndAllowsNonVideoKinds(t *testing.T
 		t.Fatal("Library sub-route must be rejected when BrowseLibrary / AccountFavorites are absent")
 	}
 
-	// Even with EditVideo enabled, a neutral source declaring no custom Actions renders only generic interactions.
+	// With EditVideo alone, Like renders while WatchLater and Favorite stay gated on their own capabilities.
 	entries[0].Capabilities = append(entries[0].Capabilities, provider.EditVideo)
+	state.UpdateEntries(entries)
+	tester.Frame()
+	if !tester.HasText(assets.Text.Detail.Like) {
+		t.Fatal("Like button should render for any EditVideo source")
+	}
+	if tester.HasText(assets.Text.Detail.Favorite) || tester.HasText(assets.Text.Home.Later) {
+		t.Fatal("Favorite and WatchLater buttons must stay hidden without EditVideoFavorites / AccountWatchLater capabilities")
+	}
+	if view.focus.item(videoDetailActionFocus("coin")) != nil || view.focus.item(videoDetailActionFocus("triple")) != nil {
+		t.Fatal("undeclared custom actions must not appear for neutral sources")
+	}
+
+	// Enabling AccountWatchLater and EditVideoFavorites reveals the remaining generic buttons.
+	entries[0].Capabilities = append(entries[0].Capabilities, provider.AccountWatchLater.Capability(), provider.EditVideoFavorites)
 	state.UpdateEntries(entries)
 	tester.Frame()
 	if !tester.HasText(assets.Text.Detail.Like) || !tester.HasText(assets.Text.Detail.Favorite) ||
 		!tester.HasText(assets.Text.Home.Later) {
-		t.Fatal("generic EditVideo buttons should render for any EditVideo source")
-	}
-	if view.focus.item(videoDetailActionFocus("coin")) != nil || view.focus.item(videoDetailActionFocus("triple")) != nil {
-		t.Fatal("undeclared custom actions must not appear for neutral sources")
+		t.Fatal("generic EditVideo buttons should render when their capabilities are declared")
 	}
 
 	// Verify atomic SetTheme preserves route & focus.

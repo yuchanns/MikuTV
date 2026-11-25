@@ -29,6 +29,7 @@ type Session struct {
 	source  *Source
 	entryID string
 	storage *Storage
+	cache   *SessionCache
 	client  *http.Client
 	cdn     *cdnTracker
 	context context.Context
@@ -109,13 +110,16 @@ func (s *Source) NewSession(entryID string, storage *Storage) *Session {
 	scope, stop := context.WithCancel(ctx)
 	client := s.httpClient()
 	return &Session{
-		source: s, entryID: entryID, storage: storage, client: client, cdn: newCDNTracker(),
+		source: s, entryID: entryID, storage: storage, cache: NewSessionCache(), client: client, cdn: newCDNTracker(),
 		context: ctx, cancel: cancel, active: client, scope: scope, stop: stop,
 	}
 }
 
 func (s *Session) Close() {
 	s.cancel()
+	if s.cache != nil {
+		s.cache.Clear()
+	}
 	if s.client != nil {
 		s.client.CloseIdleConnections()
 	}
@@ -402,7 +406,11 @@ func (s *Session) invokeWithOrigin(ctx, scope context.Context, client *http.Clie
 		return &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
 	secure := strings.HasPrefix(string(op), "account.") || op == provider.ReportPlayback || op == provider.WriteLiveChat
-	data, err := s.source.executeWithOrigin(ctx, client, s.storage, export, params, secure, userOrigin)
+	var cache *SessionCache
+	if op != provider.SignIn {
+		cache = s.cache
+	}
+	data, err := s.source.executeWithOrigin(ctx, client, s.storage, cache, export, params, secure, userOrigin)
 	if scope.Err() != nil {
 		return context.Canceled
 	}
@@ -442,10 +450,10 @@ var invokeScript = func() *moejs.Script {
 // Each operation owns its loop. Stopping it cannot interrupt a different call,
 // and a completed call cannot leave its timers or promises running.
 func (s *Source) execute(ctx context.Context, client *http.Client, store *Storage, export string, params []byte, secure bool) ([]byte, error) {
-	return s.executeWithOrigin(ctx, client, store, export, params, secure, nil)
+	return s.executeWithOrigin(ctx, client, store, nil, export, params, secure, nil)
 }
 
-func (s *Source) executeWithOrigin(ctx context.Context, client *http.Client, store *Storage, export string, params []byte, secure bool, userOrigin *url.URL) ([]byte, error) {
+func (s *Source) executeWithOrigin(ctx context.Context, client *http.Client, store *Storage, cache *SessionCache, export string, params []byte, secure bool, userOrigin *url.URL) ([]byte, error) {
 	rt := moejs.NewRuntime(moejs.Options{MemoryLimit: heapLimit, DisableDynamicCode: true})
 	loop, err := eventloop.New(rt, eventloop.Options{})
 	if err != nil {
@@ -458,7 +466,7 @@ func (s *Source) executeWithOrigin(ctx context.Context, client *http.Client, sto
 		return nil, &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
 	defer api.Close()
-	if err := installHost(ctx, rt, store); err != nil {
+	if err := installHostWith(ctx, rt, store, cache, nil); err != nil {
 		return nil, &provider.Error{Code: provider.PluginFailed, Cause: err}
 	}
 	stop := context.AfterFunc(ctx, func() { loop.Interrupt(ctx.Err()) })

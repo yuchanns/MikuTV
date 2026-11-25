@@ -2,6 +2,7 @@ package tvui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -264,6 +265,9 @@ func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item
 		title = text.Danmaku
 	case playerSubtitles:
 		title = text.Subtitles
+		if state.AudioOnly && text.AudioLyrics != "" {
+			title = text.AudioLyrics
+		}
 	case playerAudio:
 		title, current = text.AudioTrack, playbackAudioLabel(state)
 	case playerSpeed:
@@ -273,7 +277,11 @@ func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item
 			title = text.LiveQuality
 			popoverWidth, popoverRight = 370, 80
 		} else {
-			title, current = text.Quality, playbackQualityLabel(state)
+			qualTitle := text.Quality
+			if state.AudioOnly && text.AudioQuality != "" {
+				qualTitle = text.AudioQuality
+			}
+			title, current = qualTitle, playbackQualityLabel(state)
 			if state.Selected == "" && current != "" {
 				current = text.Auto + " · " + current
 			}
@@ -437,7 +445,7 @@ func (p *PageContext) playbackOptions(c *ui.Context, state app.PlaybackState) {
 		isAuto := !liveMode && state.Selected == ""
 		for _, quality := range plan.Qualities {
 			selected := (!isAuto && plan.Quality == quality.ID) || (liveMode && plan.Quality == quality.ID)
-			option(quality.ID, quality.Label, p.playbackLimitLabel(quality.Limit), selected, func() {
+			option(quality.ID, quality.Label, p.playbackLimitLabel(quality.Limit, state.AudioOnly), selected, func() {
 				s.content.requestQuality = quality.ID
 				if quality.Limit == provider.PlaybackLogin && v.openPlaybackSignIn() {
 					return
@@ -502,7 +510,8 @@ func (p *PageContext) playbackOption(c *ui.Context, id app.FocusID, label, note 
 				ui.Icon(c, p.Assets.Icon("check")).Size(22, 22).TextColor(ink)
 			} else if p.host.player.panel == playerQuality && note != "" {
 				icon, iconInk := "info", sub
-				if note == p.playbackLimitLabel(provider.PlaybackLogin) || note == p.playbackLimitLabel(provider.PlaybackMembership) {
+				audioOnly := p.host.Playback != nil && p.host.Playback.State().AudioOnly
+				if note == p.playbackLimitLabel(provider.PlaybackLogin, audioOnly) || note == p.playbackLimitLabel(provider.PlaybackMembership, audioOnly) {
 					icon, iconInk = "lock", paint(colors.Accent.Primary)
 				}
 				ui.Icon(c, p.Assets.Icon(icon)).Size(22, 22).TextColor(iconInk)
@@ -529,9 +538,9 @@ func playbackUpcomingEpisodes(state app.PlaybackState, item provider.MediaItem) 
 func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, current playbackItem) {
 	v, s, colors, d := p.host, &p.host.player, p.Theme.Colors, p.uiColors()
 	text := p.Assets.Text.Playback
-	drawer := ui.Column(c.Key("player-drawer")).Absolute().Top(0).Bottom(0).Right(0).Width(playerDrawerWidth).
+	drawer := ui.Column(c.Key("player-drawer")).Absolute().Top(0).Bottom(0).Right(0).Width(playerDrawerWidth).ZIndex(3).
 		Background(paint(colors.Surface.Panel)).Clip().Transition(menuTransition)
-	ui.Box(c.Key("player-drawer-edge")).Absolute().Top(0).Bottom(0).Right(playerDrawerWidth - 1).Width(1).
+	ui.Box(c.Key("player-drawer-edge")).Absolute().Top(0).Bottom(0).Right(playerDrawerWidth - 1).Width(1).ZIndex(3).
 		Background(paint(colors.Border.Subtle))
 	if s.panel == playerComments {
 		if isLivePlayback(state, current) {
@@ -543,14 +552,18 @@ func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, cur
 	}
 	p.region(playerPanelGroup, focusEdges{})
 	upcoming := playbackUpcomingEpisodes(state, current.item)
-	hasEpisodes := !s.keepQueue && (len(s.items) > 1 || len(upcoming) > 0)
+	hasEpisodes := len(s.items) > 1 || (!s.keepQueue && len(upcoming) > 0)
+	infoTitle := text.Info
+	if state.AudioOnly && text.AudioInfo != "" {
+		infoTitle = text.AudioInfo
+	}
 	if !hasEpisodes {
-		p.bind(drawer.Focusable().Label(text.Info), playerPanelExit, playerPanelGroup)
+		p.bind(drawer.Focusable().Label(infoTitle), playerPanelExit, playerPanelGroup)
 	}
 	drawer.Children(func() {
 		ui.Scroll(c).Fill().TrackScroll(&s.panelScroll).Children(func() {
 			ui.Column(c).FillWidth().Padding(65, 42).Gap(22).Children(func() {
-				ui.Text(c, text.Info).FontSize(32).FontWeight(550)
+				ui.Text(c, infoTitle).FontSize(32).FontWeight(550)
 				if creator := current.item.Creator; creator != nil {
 					ui.Text(c, creator.Name).FontSize(16).Margin(5, 0, 0, 0).TextColor(paint(colors.Text.Secondary))
 				}
@@ -563,7 +576,9 @@ func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, cur
 				}
 				if hasEpisodes {
 					episodesHeading := text.Episodes
-					if current.item.Ref.Kind == provider.Course {
+					if s.keepQueue {
+						episodesHeading = text.Playlist
+					} else if current.item.Ref.Kind == provider.Course {
 						episodesHeading = p.Assets.Text.Detail.CourseUnit
 					}
 					p.styledButton(c, episodesHeading, "following", playerPanelExit, playerPanelGroup,
@@ -588,17 +603,74 @@ func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, cur
 								TextColor(paint(colors.Text.Muted))
 						}
 					})
-					ui.Column(c).FillWidth().Gap(16).Children(func() {
-						for i, row := range s.items {
-							p.playbackEpisodeRow(c, row, i)
-						}
-						for i, seg := range upcoming {
-							p.playbackUpcomingRow(c, seg, len(s.items)+i)
-						}
-					})
+					p.playbackVirtualEpisodes(c, upcoming)
 				}
 			})
 		})
+	})
+}
+
+const (
+	playbackEpisodeRowHeight float32 = 86
+	playbackEpisodeRowGap    float32 = 16
+	playbackEpisodeStride    float32 = playbackEpisodeRowHeight + playbackEpisodeRowGap
+)
+
+func (p *PageContext) playbackVirtualEpisodes(c *ui.Context, upcoming []provider.VideoSegment) {
+	s := &p.host.player
+	total := len(s.items) + len(upcoming)
+	if total == 0 {
+		return
+	}
+	listHeight := float32(total)*playbackEpisodeStride - playbackEpisodeRowGap
+	// Estimate the drawer header offset conservatively and keep a generous overscan
+	// window so fast scrolling never exposes blank rows.
+	const headerEstimate float32 = 420
+	const overscan = 5
+	y := s.panelScroll.Y - headerEstimate
+	first := min(total, max(0, int(y/playbackEpisodeStride)-overscan))
+	end := min(total, max(first, int((s.panelScroll.Y+p.Height)/playbackEpisodeStride)+overscan+1))
+
+	pinned := make([]int, 0, 6)
+	addPin := func(idx int) {
+		if idx < 0 || idx >= total || (idx >= first && idx < end) {
+			return
+		}
+		for _, existing := range pinned {
+			if existing == idx {
+				return
+			}
+		}
+		pinned = append(pinned, idx)
+	}
+	addPin(0)
+	addPin(total - 1)
+	addPin(s.index)
+	if raw, ok := strings.CutPrefix(string(p.State.Focus), "player/episode/"); ok {
+		if idx, err := strconv.Atoi(raw); err == nil {
+			addPin(idx - 1)
+			addPin(idx)
+			addPin(idx + 1)
+		}
+	}
+
+	renderRow := func(idx int) {
+		top := float32(idx) * playbackEpisodeStride
+		ui.Box(c.Key(fmt.Sprintf("player/row-slot/%d", idx))).Absolute().Top(top).Left(0).Right(0).Height(playbackEpisodeRowHeight).Children(func() {
+			if idx < len(s.items) {
+				p.playbackEpisodeRow(c, s.items[idx], idx)
+			} else {
+				p.playbackUpcomingRow(c, upcoming[idx-len(s.items)], idx)
+			}
+		})
+	}
+	ui.Box(c.Key("player-episodes-virtual")).FillWidth().Height(listHeight).Children(func() {
+		for idx := first; idx < end; idx++ {
+			renderRow(idx)
+		}
+		for _, idx := range pinned {
+			renderRow(idx)
+		}
 	})
 }
 
@@ -628,7 +700,7 @@ func (p *PageContext) playbackEpisodeRow(c *ui.Context, row playbackItem, index 
 	if focused {
 		fill, ink, meta = paint(colors.Focus.Background), paint(colors.Focus.Foreground), d.focusSubtext
 	}
-	button := ui.Button(c.Key(string(id)), "").Label(number+" "+title).FillWidth().MinHeight(80).Radius(13).
+	button := ui.Button(c.Key(string(id)), "").Label(number+" "+title).FillWidth().Height(playbackEpisodeRowHeight).Radius(13).
 		Padding(14, 20).Background(fill).Border(1, d.subtleBorder).
 		AccessSelected(selected).OnClick(func() {
 		p.dispatch(func() {
@@ -661,7 +733,7 @@ func (p *PageContext) playbackUpcomingRow(c *ui.Context, segment provider.VideoS
 		status = p.Assets.Text.Detail.EpisodeUpcoming
 	}
 	muted := withAlpha(colors.Text.Muted, 0xaa)
-	ui.Row(c.Key(fmt.Sprintf("player/upcoming/%d", index))).FillWidth().MinHeight(80).Radius(13).
+	ui.Row(c.Key(fmt.Sprintf("player/upcoming/%d", index))).FillWidth().Height(playbackEpisodeRowHeight).Radius(13).
 		Padding(14, 20).Gap(17).AlignItems(ui.Center).
 		Background(withAlpha(colors.Surface.Raised, 0x55)).Border(1, d.subtleBorder).IgnoreInput(true).Children(func() {
 		ui.Text(c, number).FontSize(25).FontWeight(450).TextColor(muted)
@@ -689,7 +761,7 @@ func playbackBlocking(state app.PlaybackState) bool {
 	return playbackHasAccessDialog(state) || playbackHasBranchOverlay(state) || state.Failure != "" || state.Clock.Ended || state.LiveEnded
 }
 
-func (p *PageContext) playbackLimitLabel(limit provider.PlaybackLimit) string {
+func (p *PageContext) playbackLimitLabel(limit provider.PlaybackLimit, audioOnly bool) string {
 	text := p.Assets.Text.Playback
 	switch limit {
 	case provider.PlaybackLogin:
@@ -703,6 +775,9 @@ func (p *PageContext) playbackLimitLabel(limit provider.PlaybackLimit) string {
 	case provider.PlaybackDevice:
 		return text.DeviceLimit
 	case provider.PlaybackSource:
+		if audioOnly && text.AudioSourceLimit != "" {
+			return text.AudioSourceLimit
+		}
 		return text.SourceLimit
 	}
 	return ""

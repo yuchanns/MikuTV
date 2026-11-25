@@ -10,8 +10,14 @@ const (
 	ReportPlayback     Capability = "playback.progress"
 	ReadDanmaku        Capability = "playback.danmaku"
 	ReadSubtitles      Capability = "playback.subtitles"
+	PlaybackModes      Capability = "playback.modes"
 	WriteDanmaku       Capability = "account.danmaku"
 	EditVideoFavorites Capability = "account.videoFavorites"
+)
+
+const (
+	PlaybackMediaAudio = "audio"
+	PlaybackMediaVideo = "video"
 )
 
 type PlaybackTarget struct {
@@ -24,6 +30,7 @@ type PlaybackRequest struct {
 	Quality          string `json:"quality,omitempty"`
 	PreferredQuality string `json:"preferredQuality,omitempty"`
 	Line             string `json:"line,omitempty"`
+	MediaKind        string `json:"mediaKind,omitempty"`
 	BranchID         string `json:"branchID,omitempty"`
 	BranchState      string `json:"branchState,omitempty"`
 	HDR              bool   `json:"hdr,omitempty"`
@@ -67,6 +74,7 @@ type PlaybackPlan struct {
 	Qualities             []PlaybackQuality   `json:"qualities,omitempty"`
 	Line                  string              `json:"line,omitempty"`
 	Lines                 []PlaybackLine      `json:"lines,omitempty"`
+	AvailableKinds        []string            `json:"availableKinds,omitempty"`
 	Streams               []PlaybackStream    `json:"streams,omitempty"`
 	Chapters              []PlaybackChapter   `json:"chapters,omitempty"`
 	Subtitles             []PlaybackTrack     `json:"subtitles,omitempty"`

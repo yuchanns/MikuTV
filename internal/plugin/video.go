@@ -104,7 +104,12 @@ func (s *Session) VideoComments(ctx context.Context, query provider.VideoComment
 		return page, &provider.Error{Code: provider.Denied}
 	}
 	auth := s.snapshotAuth()
-	if err := s.invoke(ctx, auth.scope, auth.client, provider.ReadVideoComments, "videoComments", query, &page); err != nil {
+	input := struct {
+		provider.VideoCommentQuery
+		SignedIn bool            `json:"signedIn,omitempty"`
+		Secret   json.RawMessage `json:"secret,omitempty"`
+	}{query, auth.signedIn(), auth.secret}
+	if err := s.invoke(ctx, auth.scope, auth.client, provider.ReadVideoComments, "videoComments", input, &page); err != nil {
 		return provider.VideoCommentPage{}, err
 	}
 	if err := ownVideoComments(page.Comments, query.ThreadID == ""); err != nil {
@@ -154,9 +159,10 @@ func (s *Session) VideoFavoriteFolders(ctx context.Context, ref provider.MediaRe
 		return nil, err
 	}
 	input := struct {
-		Ref   provider.MediaRef `json:"ref"`
-		Owner string            `json:"owner"`
-	}{ref, auth.owner}
+		Ref    provider.MediaRef `json:"ref"`
+		Owner  string            `json:"owner"`
+		Secret json.RawMessage   `json:"secret,omitempty"`
+	}{ref, auth.owner, auth.secret}
 	var result struct {
 		Folders []provider.VideoFavoriteFolder `json:"folders"`
 	}

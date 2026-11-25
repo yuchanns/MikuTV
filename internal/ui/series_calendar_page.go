@@ -78,7 +78,7 @@ func (seriesCalendarPage) Render(c *ui.Context, p *PageContext) {
 			p.seriesStateBlock(c, "history", text.Series.Loading, "", "", "", "", seriesCalendarStatusRegion, nil)
 			return
 		case snap.Phase == app.CatalogFailed && !snap.Loaded:
-			p.seriesStateBlock(c, "history", text.Series.LoadFailed, p.authError(snap.Error), text.Retry, "refresh", seriesCalendarRetryFocus, seriesCalendarStatusRegion, func() {
+			p.seriesStateBlock(c, "history", text.Series.LoadFailed, p.requestError(snap.Error), text.Retry, "refresh", seriesCalendarRetryFocus, seriesCalendarStatusRegion, func() {
 				catalog.RetryCalendar()
 			})
 			return

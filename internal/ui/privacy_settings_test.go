@@ -272,12 +272,25 @@ func TestPrivacySettingsClearConfirmIsolationGuestAndAboutDetails(t *testing.T) 
 		t.Fatal("expected PrivacyConfirm auto-dismissed on entry switch")
 	}
 
-	// 7. Minimal source without AccountHistory/SearchCatalog/ResolvePlayback hides all unavailable controls and falls back to empty state.
+	// 7. Minimal source without AccountHistory/SearchCatalog/ResolvePlayback hides the Privacy section itself (and the Manage action in Privacy Details) instead of showing an empty section.
 	state.Navigate(app.Route{Page: app.Settings, Section: "privacy"})
 	tester.Frame()
-	if view.focus.item(app.HistorySync) != nil || view.focus.item(privacyClearSearch) != nil || view.focus.item(privacyClearHistory) != nil {
-		t.Fatal("minimal source without privacy capabilities should hide all privacy controls")
+	if view.focus.item(app.SectionFocus("privacy")) != nil || view.focus.item(app.HistorySync) != nil || view.focus.item(privacyClearSearch) != nil || view.focus.item(privacyClearHistory) != nil {
+		t.Fatal("minimal source without privacy capabilities should hide privacy section and all privacy controls")
 	}
+	if state.Section != "playback" {
+		t.Fatalf("expected hidden privacy section to redirect to playback, got %q", state.Section)
+	}
+	if _, found := tester.Find(assets.Text.EmptySettings); found {
+		t.Fatal("hidden privacy section should not render EmptySettings placeholder")
+	}
+	state.Navigate(app.Route{Page: app.Settings, Section: "about"})
+	state.Push(app.Route{Page: app.PrivacyDetails, Section: "about"})
+	tester.Frame()
+	if view.focus.item(privacyManageAction) != nil || state.Focus != app.CloseModal {
+		t.Fatalf("expected PrivacyDetails manage action hidden when privacy section is unavailable, focus=%q", state.Focus)
+	}
+	state.Back()
 
 	// 8. Guest mode on entryFull hides HistorySync, shows ClearSearch + ClearHistory, clears ONLY guest bucket.
 	state.SelectEntry(entryFull.ID)

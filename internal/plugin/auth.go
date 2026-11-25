@@ -227,6 +227,9 @@ func (s *Session) SetAccount(credential *provider.Credential) error {
 	if !sameAccount {
 		s.stop()
 		s.scope, s.stop = context.WithCancel(s.context)
+		if s.cache != nil {
+			s.cache.Clear()
+		}
 	}
 	s.active, s.secret, s.userOrigin = client, secret, userOrigin
 	s.accountID = nextAccountID

@@ -474,8 +474,8 @@ func TestHomeKeepsFocusThroughArtworkPagingAndFiltering(t *testing.T) {
 		t.Fatalf("Left did not return to homePlayAction: %s", state.Focus)
 	}
 	tester.Key(0, ui.KeyDown)
-	if state.Focus != app.FocusID("home/shelf/continue") {
-		t.Fatalf("down from the hero actions focused %s", state.Focus)
+	if state.Focus != catalogCardFocus("picks", first) {
+		t.Fatalf("down from the hero actions focused %s (expected first picks card when continue history is empty)", state.Focus)
 	}
 	tester.Key(0, ui.KeyUp)
 	view.activeScroll.Y = 90
@@ -804,6 +804,7 @@ func TestRailLibraryAndSettingsHoverSwitchImmediately(t *testing.T) {
 		provider.BrowseSeries,
 		provider.BrowseLive,
 		provider.BrowseLibrary,
+		provider.ReadDanmaku,
 		provider.AccountHistory.Capability(),
 		provider.AccountWatchLater.Capability(),
 		provider.AccountFavorites.Capability(),

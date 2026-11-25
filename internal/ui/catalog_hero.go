@@ -416,6 +416,10 @@ func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem
 	ui.Row(c).Absolute().Left(103).Top(498).Gap(16).AlignItems(ui.Center).Children(func() {
 		p.styledButton(c, text.Play, "play-filled", homePlayAction, homeHero, func() {
 			if item != nil && p.canPlay(item.Ref) {
+				if queue, idx := p.playbackQueueFromList(*item, p.host.home.featured, p.host.home.selected); len(queue) > 1 {
+					p.openPlayback(queue, idx, true, nil)
+					return
+				}
 				p.openPlayback([]playbackItem{{item: *item}}, 0, false, nil)
 				return
 			}
@@ -423,14 +427,14 @@ func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem
 		}, p.playButtonAppearance()).Width(179).Center()
 		if item != nil && p.canOpenVideoDetail(item.Ref) {
 			p.styledButton(c, text.Details, "info", homeDetailAction, homeHero, func() {
-				p.openVideoDetail(*item)
+				p.openMediaFromList(*item, p.host.home.featured, p.host.home.selected)
 			}, buttonAppearance{
 				height: 62, padding: 0, radius: 12, fontSize: 22, iconSize: 28, iconGap: 13, fontWeight: 550,
 				background: d.secondaryFill, foreground: d.secondaryText,
 				border: d.secondaryBorder,
 			}).Width(185).Center()
 		}
-		if item != nil && entry.Capabilities.Has(provider.EditVideo) {
+		if item != nil && p.canEditWatchLater(entry) {
 			focused := p.State.Focus == homeLaterAction
 			background, ink, borderColor := d.secondaryFill, paint(colors.Text.Primary), d.secondaryBorder
 			if focused {

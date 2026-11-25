@@ -9,8 +9,9 @@ import (
 type navigationRail struct{}
 
 const (
-	collapsedRailWidth float32 = 116
-	expandedRailWidth  float32 = 288
+	collapsedRailWidth float32     = 116
+	expandedRailWidth  float32     = 288
+	railNowPlaying     app.FocusID = "rail/now-playing"
 )
 
 func railWidth(state *app.State) float32 {
@@ -68,6 +69,15 @@ func (navigationRail) Render(c *ui.Context, p *PageContext) {
 		})
 		ui.Spacer(c).Grow(1)
 		ui.Column(c).Gap(16).Children(func() {
+			if p.host.HasBackgroundAudio() {
+				p.railNowPlayingButton(c, buttonWidth, expanded)
+			} else if p.active && p.State.Focus == railNowPlaying {
+				owner := p.Pages.navigationOwner(p.Location.Route)
+				if owner == "" {
+					owner = app.Home
+				}
+				p.State.Focus, p.host.reveal = app.RailFocus(owner), true
+			}
 			for _, link := range p.Pages.navigation(p.State, utilityNavigation) {
 				p.railButton(c, link, buttonWidth, expanded)
 			}
@@ -129,4 +139,94 @@ func (p *PageContext) railButton(c *ui.Context, registration Registration, width
 		})
 	})
 	p.bind(e, id, "rail")
+}
+
+func (p *PageContext) railNowPlayingButton(c *ui.Context, width float32, expanded bool) {
+	v := p.host
+	item := v.player.current()
+	state := v.Playback.State()
+	nowPlayingLabel := p.Assets.Text.Playback.NowPlaying
+	title := item.item.Title
+	if title == "" {
+		title = nowPlayingLabel
+	}
+	accessLabel := nowPlayingLabel
+	if item.item.Title != "" && item.item.Title != nowPlayingLabel {
+		accessLabel = nowPlayingLabel + " · " + item.item.Title
+	}
+	cover := p.catalogCover(item.item.CoverURL)
+	if cover == nil && item.item.CoverURL != "" && v.Catalog != nil {
+		v.Catalog.PrepareArtwork([]string{item.item.CoverURL})
+	}
+	colors, d := p.Theme.Colors, p.uiColors()
+	background, foreground := ui.Transparent, paint(colors.Text.Primary)
+	borderW, borderColor := float32(0), ui.Transparent
+	focused := p.State.Focus == railNowPlaying
+	if focused {
+		background, foreground = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+		if !p.Theme.Dark {
+			borderW, borderColor = 1, d.focusBorder
+		}
+	}
+	e := ui.Button(c.Key(string(railNowPlaying)), "").Width(width).Height(66).Padding(0, 12).
+		Radius(16).Border(borderW, borderColor).Background(background).TextColor(foreground).
+		Label(accessLabel).
+		OnClick(func() {
+			p.dispatch(func() { v.ResumeBackgroundAudio() })
+		})
+	p.animateFocus(e, background, foreground)
+	opacity := float32(0)
+	if expanded {
+		opacity = 1
+	}
+	opacity = e.AnimateTo("label", opacity, ui.Animation{Duration: focusDuration, NonMotion: true})
+
+	barHeights := [3]float32{4, 7, 5}
+	if state.Playing {
+		if v.reduceMotionEnabled(c) {
+			barHeights = [3]float32{5, 9, 6}
+		} else {
+			frames := [4][3]float32{
+				{5, 9, 6},
+				{8, 5, 9},
+				{6, 10, 5},
+				{9, 6, 8},
+			}
+			barHeights = frames[(c.Now().UnixMilli()/int64(backgroundAudioPoll.Milliseconds()))%4]
+		}
+	}
+	badgeBg := paint(colors.Surface.Sidebar)
+	badgeBorder := withAlpha(colors.Accent.Primary, 0x66)
+	barColor := paint(colors.Accent.Primary)
+	if focused {
+		badgeBg = paint(colors.Focus.Background)
+		badgeBorder = withAlpha(colors.Focus.Foreground, 0x33)
+		barColor = paint(colors.Focus.Foreground)
+	}
+
+	e.Children(func() {
+		ui.Row(c).Fill().Gap(16).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Size(40, 40).Shrink(0).Children(func() {
+				ui.Box(c.Key("rail-np-cover")).Size(40, 40).Radius(8).Clip().
+					Background(paint(colors.Surface.Panel)).Border(1, withAlpha(colors.Text.Primary, 0x18)).Children(func() {
+					if cover != nil {
+						ui.Image(c, cover).Fill().Fit(ui.Cover)
+					} else {
+						ui.Box(c).Fill().Center().Children(func() {
+							ui.Icon(c, p.Assets.Icon("stage-audio")).Size(22, 22).TextColor(paint(colors.Text.Muted))
+						})
+					}
+				})
+				ui.Row(c.Key("rail-np-eq")).Absolute().Right(-2).Bottom(-2).Size(17, 17).Radius(8.5).
+					Background(badgeBg).Border(1, badgeBorder).Justify(ui.Center).AlignItems(ui.End).
+					Padding(0, 0, 3, 0).Gap(2).Children(func() {
+					for i, h := range barHeights {
+						ui.Box(c.Key(i)).Size(2, h).Radius(1).Background(barColor)
+					}
+				})
+			})
+			ui.Text(c, title).Width(180).MaxLines(1).FontSize(22).Opacity(opacity)
+		})
+	})
+	p.bind(e, railNowPlaying, "rail")
 }

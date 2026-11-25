@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/yuchanns/MikuTV/internal/provider"
@@ -17,8 +18,9 @@ func (s *Session) ReadFollowing(ctx context.Context, request provider.FollowingR
 	}
 	input := struct {
 		provider.FollowingRequest
-		Owner string `json:"owner"`
-	}{request, auth.owner}
+		Owner  string          `json:"owner"`
+		Secret json.RawMessage `json:"secret,omitempty"`
+	}{request, auth.owner, auth.secret}
 	var page provider.FollowingPage
 	if err := s.invoke(ctx, auth.scope, auth.client, provider.BrowseFollowing, "readFollowing", input, &page); err != nil {
 		return provider.FollowingPage{}, err

@@ -38,13 +38,6 @@ const (
 	creatorPostCover   = 235
 )
 
-var defaultCreatorTabs = []provider.CreatorTab{
-	provider.CreatorTabVideos,
-	provider.CreatorTabPosts,
-	provider.CreatorTabCollections,
-	provider.CreatorTabAbout,
-}
-
 func creatorTabFocus(tab provider.CreatorTab) app.FocusID {
 	return app.FocusID("creator/tab/" + string(tab))
 }
@@ -145,7 +138,10 @@ func (s *creatorState) visibleTabs() []provider.CreatorTab {
 	if len(s.profile.Tabs) != 0 {
 		return s.profile.Tabs
 	}
-	return defaultCreatorTabs
+	if !s.profileLoaded {
+		return []provider.CreatorTab{provider.CreatorTabVideos}
+	}
+	return []provider.CreatorTab{provider.CreatorTabVideos, provider.CreatorTabAbout}
 }
 
 func (v *View) canOpenCreator(creator *provider.Creator) bool {
@@ -769,19 +765,7 @@ func (p *PageContext) creatorOverview(c *ui.Context, state *creatorState, canFol
 }
 
 func (p *PageContext) creatorTabLabel(tab provider.CreatorTab) string {
-	text := p.Assets.Text.Creator
-	switch tab {
-	case provider.CreatorTabVideos:
-		return text.Videos
-	case provider.CreatorTabPosts:
-		return text.Posts
-	case provider.CreatorTabCollections:
-		return text.Collections
-	case provider.CreatorTabAbout:
-		return text.About
-	default:
-		return string(tab)
-	}
+	return p.sourceCreatorTabLabel(tab)
 }
 
 func (p *PageContext) creatorTabs(c *ui.Context, state *creatorState, tabs []provider.CreatorTab, headerFocus app.FocusID) {
@@ -958,7 +942,7 @@ func (p *PageContext) creatorVideosSection(c *ui.Context, state *creatorState) {
 				}).Margin(20, 0, 0, 0)
 				return
 			}
-			p.videoDetailText(c, text.Creator.NoVideos)
+			p.videoDetailText(c, p.sourceCreatorEmptyVideos())
 			return
 		}
 
@@ -1023,7 +1007,7 @@ func (p *PageContext) creatorVideosSection(c *ui.Context, state *creatorState) {
 								return false
 							}
 						}
-						p.catalogCard(c, creatorVideoFocus(item.Ref), creatorContentRegion, item, size, dir)
+						p.catalogCardInList(c, creatorVideoFocus(item.Ref), creatorContentRegion, item, data.items, index, size, dir)
 					}
 				})
 			}
@@ -1231,7 +1215,7 @@ func (p *PageContext) creatorCollectionsSection(c *ui.Context, state *creatorSta
 				}).Margin(20, 0, 0, 0)
 				return
 			}
-			p.videoDetailText(c, text.Creator.NoCollections)
+			p.videoDetailText(c, p.sourceCreatorEmptyCollections())
 			return
 		}
 

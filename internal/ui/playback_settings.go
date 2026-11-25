@@ -5,6 +5,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
 type playbackSettingKind string
@@ -18,8 +19,9 @@ const (
 const (
 	playbackPrefQuality   app.FocusID = "settings/playback/quality"
 	playbackPrefSpeed     app.FocusID = "settings/playback/speed"
-	playbackPrefSubtitles app.FocusID = "settings/playback/subtitles"
-	playbackPrefAutoplay  app.FocusID = "settings/playback/autoplay"
+	playbackPrefSubtitles       app.FocusID = "settings/playback/subtitles"
+	playbackPrefAutoplay        app.FocusID = "settings/playback/autoplay"
+	playbackPrefAudioScreensaver app.FocusID = "settings/playback/audio-screensaver"
 )
 
 func playbackPickerOptionID(index int) app.FocusID {
@@ -111,12 +113,27 @@ func (p *PageContext) playbackSubtitlePrefLabel(pref app.PlaybackSubtitlePref) s
 	}
 }
 
+func (v *View) showPlaybackSubtitlesSetting() bool {
+	if v.State == nil {
+		return true
+	}
+	entry, ok := v.State.Current()
+	if !ok || entry.ID == "" {
+		return true
+	}
+	return entry.Capabilities.Has(provider.ReadSubtitles)
+}
+
 type playbackSettingsPage struct{}
 
 func (playbackSettingsPage) Render(c *ui.Context, p *PageContext) {
 	v := p.host
 	l := p.Assets.Text.PlaybackPrefs
 	prefs := v.playbackPreferences()
+	showSubtitles := v.showPlaybackSubtitlesSetting()
+	if p.active && !showSubtitles && p.State.Focus == playbackPrefSubtitles {
+		p.State.Focus, v.reveal = playbackPrefQuality, true
+	}
 	p.region("content", nil)
 
 	p.settingsSectionHeader(c, l.Title, l.Intro)
@@ -131,14 +148,23 @@ func (playbackSettingsPage) Render(c *ui.Context, p *PageContext) {
 		p.State.Push(app.Route{Page: app.PlaybackSettingPicker, Section: "playback"})
 		p.State.Focus, v.reveal = v.playbackPickerInitialFocus(), true
 	})
-	p.settingsValueRow(c, playbackPrefSubtitles, "captions", l.Subtitles, "", p.playbackSubtitlePrefLabel(prefs.Subtitle), func() {
-		v.playbackUI.pickerKind = playbackSettingSubtitles
-		p.State.Push(app.Route{Page: app.PlaybackSettingPicker, Section: "playback"})
-		p.State.Focus, v.reveal = v.playbackPickerInitialFocus(), true
-	})
+	if showSubtitles {
+		p.settingsValueRow(c, playbackPrefSubtitles, "captions", l.Subtitles, "", p.playbackSubtitlePrefLabel(prefs.Subtitle), func() {
+			v.playbackUI.pickerKind = playbackSettingSubtitles
+			p.State.Push(app.Route{Page: app.PlaybackSettingPicker, Section: "playback"})
+			p.State.Focus, v.reveal = v.playbackPickerInitialFocus(), true
+		})
+	}
 	p.settingsToggleRow(c, playbackPrefAutoplay, "skip-forward", l.Autoplay, l.AutoplayNote, prefs.Autoplay, func() {
 		if v.PlaybackSettings != nil {
 			if err := v.PlaybackSettings.Update(func(cfg *app.PlaybackPreferences) { cfg.Autoplay = !cfg.Autoplay }); err != nil {
+				v.showSettingsFeedback(p.Assets.Text.SaveFailed)
+			}
+		}
+	})
+	p.settingsToggleRow(c, playbackPrefAudioScreensaver, "moon", l.AudioScreensaver, l.AudioScreensaverNote, prefs.AllowAudioScreensaver, func() {
+		if v.PlaybackSettings != nil {
+			if err := v.PlaybackSettings.Update(func(cfg *app.PlaybackPreferences) { cfg.AllowAudioScreensaver = !cfg.AllowAudioScreensaver }); err != nil {
 				v.showSettingsFeedback(p.Assets.Text.SaveFailed)
 			}
 		}

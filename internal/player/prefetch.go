@@ -921,7 +921,13 @@ func (m *Media) fetchSegment(ctx context.Context, track *dashTrack, seg *cachedS
 // Warmup prefetches the initialization bytes and opening segments into a capped
 // cache budget so a preloaded next episode can start immediately when promoted.
 func (m *Media) Warmup(ctx context.Context) error {
-	if m == nil || m.cache == nil || len(m.tracks) == 0 {
+	if m == nil {
+		return nil
+	}
+	if m.direct != nil {
+		return m.direct.warmup(ctx)
+	}
+	if m.cache == nil || len(m.tracks) == 0 {
 		return nil
 	}
 	m.cache.setWarmupMode(true)
@@ -973,7 +979,14 @@ func (m *Media) Warmup(ctx context.Context) error {
 
 // Promote lifts a warmed-up Media instance to its full active playback cache budget.
 func (m *Media) Promote() {
-	if m == nil || m.cache == nil {
+	if m == nil {
+		return
+	}
+	if m.direct != nil {
+		m.direct.setWarmupMode(false)
+		return
+	}
+	if m.cache == nil {
 		return
 	}
 	m.cache.setWarmupMode(false)

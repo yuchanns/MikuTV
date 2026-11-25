@@ -30,7 +30,9 @@ func (v *View) startCatalogHold(key ui.Key, group string) bool {
 	}
 	if v.home.hold.key != key {
 		v.home.hold = catalogHold{key: key}
-		scroll.ScrollTo(scroll.X, scroll.Y, ui.Animation{})
+		if scroll.Scrolling() {
+			scroll.ScrollTo(scroll.X, scroll.Y, ui.Animation{Duration: time.Nanosecond})
+		}
 		v.home.rotateAt = time.Time{}
 	}
 	return true

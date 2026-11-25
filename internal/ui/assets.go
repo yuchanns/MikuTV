@@ -191,6 +191,7 @@ type playbackSettingsLabels struct {
 	Speed                                                 string
 	Subtitles, SubtitlesOff, SubtitlesChinese, SubtitlesEnglish string
 	Autoplay, AutoplayNote                                string
+	AudioScreensaver, AudioScreensaverNote                string
 }
 
 type danmakuSettingsLabels struct {
@@ -282,6 +283,10 @@ type playbackLabels struct {
 	Interactive, BranchQuestion, BranchButton                                                             string
 	AudioTrack, AudioDefault                                                                              string
 	FastForward, Rewind                                                                                   string
+	Playlist, ModeSequential, ModeRepeatAll, ModeRepeatOne, ModeShuffle                                   string
+	SwitchToVideo, SwitchToAudio, NowPlaying                                                              string
+	AudioInfo, AudioPrevious, AudioNext, AudioQuality, AudioLyrics                                        string
+	AudioFailedNote, AudioEndedNote, AudioSourceLimit                                                     string
 }
 
 type playbackAccessLabels struct {
@@ -291,6 +296,9 @@ type playbackAccessLabels struct {
 	PurchaseTitle, PurchaseBody, TrialMinutes, TrialState, TrialLeft                                                              string
 	TrialEndedTitle, TrialEndedBody, PurchaseTrialEndedBody, QualityVIPTitle, QualityVIPBody                                      string
 	TrialSeconds, MobileClient                                                                                                    string
+	AudioTrialState, AudioTrialLeft, AudioTrialEndedTitle, AudioTrialSeconds, AudioTrialMinutes, AudioVIPTitle                    string
+	AudioQualityVIPTitle, AudioQualityVIPBody, AudioKeep, AudioUseBest, AudioSourceTitle, AudioSourceBody, AudioSourceGeneric     string
+	AudioVIPBody, AudioVIPNoPreview, AudioTrialEndedBody, AudioRefresh, AudioMembershipInstructions                               string
 }
 
 type detailLabels struct {

@@ -255,7 +255,11 @@ func (p *PageContext) loadVideoDiscussion(d *videoDiscussionState, page int) {
 					detail.item.VideoDetails = &provider.VideoDetails{}
 				}
 				info := detail.item.VideoDetails
-				info.Discussion, appended = discussionPage(info.Discussion, result.Comments, page)
+				if page == 0 && len(info.Discussion) > 0 {
+					info.Discussion, appended = discussionPage(info.Discussion, result.Comments, 1)
+				} else {
+					info.Discussion, appended = discussionPage(info.Discussion, result.Comments, page)
+				}
 				d.hotLoaded, d.nextHot = true, result.NextPage
 				if page != 0 && appended == 0 {
 					d.nextHot = 0
@@ -275,10 +279,15 @@ func (p *PageContext) loadVideoDiscussion(d *videoDiscussionState, page int) {
 		if page <= 1 {
 			d.replies = result.Comments
 		} else {
+			appended := 0
 			for _, row := range result.Comments {
 				if !slices.ContainsFunc(d.replies, func(current provider.VideoComment) bool { return current.ID == row.ID }) {
 					d.replies = append(d.replies, row)
+					appended++
 				}
+			}
+			if appended == 0 {
+				d.nextPage = 0
 			}
 			if p.State.Focus == videoDiscussionMoreReplies && len(result.Comments) != 0 {
 				p.host.moveFocus(videoCommentFocus(result.Comments[0].ID), app.Down, true)
@@ -448,19 +457,30 @@ func (p *PageContext) videoDiscussionRows(c *ui.Context, d *videoDiscussionState
 		rows = d.replies
 		list, prefix = &d.threadRows, 1
 	}
-	if p.active && p.host.reveal {
-		for i, comment := range rows {
-			if p.State.Focus == videoCommentFocus(comment.ID) {
+	focusedIdx := -1
+	for i, comment := range rows {
+		if p.State.Focus == videoCommentFocus(comment.ID) {
+			focusedIdx = i
+			if p.active && p.host.reveal {
 				list.ScrollIntoView(i + prefix)
-				break
 			}
+			break
 		}
 	}
 	end := prefix + len(rows)
 	empty := len(rows) == 0 && (d.root == nil || d.cancel != nil)
-	count := end
 	nextPage := d.morePage()
-	if d.failed || empty || nextPage != 0 {
+	needsHotBootstrap := nextPage == 0 && !d.showLatest && d.root == nil && !d.hotLoaded && len(rows) > 0 && p.canReadVideoDiscussion() &&
+		(info == nil || info.Comments == nil || int64(len(rows)) < *info.Comments)
+	if p.active && (nextPage != 0 || needsHotBootstrap) && d.cancel == nil && !d.failed && len(rows) > 0 {
+		_, lastVisible := list.Visible()
+		if lastVisible >= end-4 || (focusedIdx >= 0 && focusedIdx >= len(rows)-4) {
+			p.loadVideoDiscussion(d, nextPage)
+		}
+	}
+	loadingMore := !empty && d.cancel != nil && (nextPage != 0 || d.hotLoaded || d.hasLatest || d.root != nil)
+	count := end
+	if d.failed || empty || loadingMore {
 		count++
 	}
 	type decoration bool
@@ -487,19 +507,13 @@ func (p *PageContext) videoDiscussionRows(c *ui.Context, d *videoDiscussionState
 				p.loadVideoDiscussion(d, d.failedPage)
 			})
 		case empty && d.cancel != nil:
-			p.videoDetailText(c, text.Detail.Loading)
+			p.videoDetailText(c, p.sourceDetailLoading())
 		case empty:
 			p.videoDetailText(c, text.Detail.NoComments)
-		case nextPage != 0:
-			label := text.Playback.MoreComments
-			if d.root != nil {
-				label = text.Detail.MoreReplies
-			}
-			p.button(c, label, videoDiscussionMoreReplies, videoDiscussionRegion, func() {
-				if d.cancel == nil {
-					p.loadVideoDiscussion(d, nextPage)
-				}
-			}).Margin(12, 16, 0, 16)
+		case loadingMore:
+			ui.Row(c).FillWidth().Padding(16, 0).Center().Children(func() {
+				p.loadingSpinner(c, 32)
+			})
 		}
 	})
 }

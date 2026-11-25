@@ -252,10 +252,10 @@ func (p *PageContext) drawFavoriteChooser(c *ui.Context, chooser *playerFavorite
 	p.region(playerFavoritesArea, actionEdges)
 	modalText := p.Assets.Text.Modal
 	p.renderPlayerDrawer(c, "player-favorites", 620, func() {
-		p.drawerHeader(c, "COLLECTION \u00b7 SAVE", text.PickFavoriteFolders, "", p.host.player.current().item.Title)
+		p.drawerHeader(c, "COLLECTION \u00b7 SAVE", p.sourceFolderText(text.PickFavoriteFolders), "", p.host.player.current().item.Title)
 		switch {
 		case chooser.failure != "":
-			ui.Text(c, p.authError(chooser.failure)).FontSize(18).TextColor(paint(colors.Status.Error.Foreground))
+			ui.Text(c, p.requestError(chooser.failure)).FontSize(18).TextColor(paint(colors.Status.Error.Foreground))
 		case chooser.cancel != nil && !chooser.writing:
 			ui.Text(c, p.Assets.Text.LoadingTitle).FontSize(18).TextColor(paint(colors.Text.Secondary))
 		default:
@@ -268,7 +268,7 @@ func (p *PageContext) drawFavoriteChooser(c *ui.Context, chooser *playerFavorite
 			})
 		}
 		if canCreate {
-			p.styledButton(c, library.CreateFolder, "plus", playerFavoritesNew, playerFavoritesArea, func() {
+			p.styledButton(c, p.sourceFolderText(library.CreateFolder), "plus", playerFavoritesNew, playerFavoritesArea, func() {
 				p.openFavoriteDialog(favoriteDialog{mode: favoriteCreate, saved: func() { p.loadPlayerFavorites(true) }}, favoriteDialogName)
 			}, buttonAppearance{
 				height: 46, padding: 12, radius: 10, fontSize: 19, iconSize: 21,

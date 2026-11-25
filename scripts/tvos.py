@@ -123,6 +123,7 @@ def build():
             "CFBundleURLSchemes": ["mikutv"],
         }],
         "UIDeviceFamily": [3], "MinimumOSVersion": MINIMUM,
+        "UIBackgroundModes": ["audio"],
         "LSRequiresIPhoneOS": True, "UILaunchScreen": {},
         "NSAppTransportSecurity": {"NSExceptionDomains": {"127.0.0.1": {"NSExceptionAllowsInsecureHTTPLoads": True}}},
     }

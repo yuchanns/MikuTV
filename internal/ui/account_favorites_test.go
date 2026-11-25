@@ -199,9 +199,13 @@ func TestAccountShortcutsAndFavoriteManagement(t *testing.T) {
 	}
 	await(func() bool { return activity.Snapshot(libraryQuery(view)).Phase == app.CatalogReady })
 	tester.Frame()
+	if tester.HasText(assets.Text.Refresh) {
+		t.Fatal("read-only library section must not render a manual Refresh button")
+	}
 	move(ui.KeyDown, libraryPlayAll)
 	move(ui.KeyDown, libraryCardFocus(libraryQuery(view), folder))
-	move(ui.KeyUp, app.ContentAction)
+	move(ui.KeyUp, libraryPlayAll)
+	move(ui.KeyUp, app.FocusID("library/tab/"+provider.AccountWatchLater))
 	move(ui.KeyEscape, later)
 	move(ui.KeyLeft, favorites)
 	tester.Key(0, ui.KeyEnter)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
@@ -36,8 +37,33 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 	if snapshot.Page.Total != nil {
 		total = *snapshot.Page.Total
 	}
+	activeTab := app.FocusID("library/tab/" + query.Section)
+	hasHeaderAction := available && p.canManageLibrary(query) && (directory || query.Folder != "" || hasRemovableLibraryRows(rows, managing))
+	if p.active && !guest && available && !hasHeaderAction && p.State.Focus == app.ContentAction {
+		switch {
+		case query.Folder != "":
+			p.State.Focus = "favorites/back"
+		case query.Section == provider.AccountWatchLater && len(rows) > 0:
+			p.State.Focus = libraryPlayAll
+		default:
+			p.State.Focus = activeTab
+		}
+	}
 	belowHeader := focusDestination{Focus: libraryPlayAll, Region: favoriteCards}
+	if query.Section != provider.AccountWatchLater {
+		belowHeader = focusDestination{Region: favoriteCards}
+	}
 	aboveCards := focusDestination{Focus: app.ContentAction, Region: favoriteHeader}
+	if !hasHeaderAction {
+		switch {
+		case query.Section == provider.AccountWatchLater && len(rows) > 0:
+			aboveCards = focusDestination{Focus: libraryPlayAll, Region: libraryMeta}
+		case query.Folder != "":
+			aboveCards = focusDestination{Focus: "favorites/back", Region: favoriteHeader}
+		default:
+			aboveCards = focusDestination{Focus: activeTab, Region: favoriteTabs}
+		}
+	}
 	if managing {
 		belowHeader = focusDestination{Region: favoriteTools}
 		aboveCards = belowHeader
@@ -45,7 +71,6 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 	if len(rows) == 0 {
 		belowHeader = focusDestination{Region: favoriteStatus}
 	}
-	activeTab := app.FocusID("library/tab/" + query.Section)
 	if p.active && available && !directory && !managing && snapshot.Phase == app.CatalogReady &&
 		strings.HasPrefix(string(p.State.Focus), "account/") {
 		found := false
@@ -68,10 +93,24 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 	if query.Folder != "" {
 		emptyFocus = "library/empty-action"
 	}
-	p.region(favoriteTabs, focusEdges{app.Down: {Focus: app.ContentAction, Region: belowHeader.Region}})
+	tabsDown := focusDestination{Focus: app.ContentAction, Region: belowHeader.Region}
+	if !hasHeaderAction {
+		if query.Folder != "" {
+			tabsDown = focusDestination{Focus: "favorites/back", Region: favoriteHeader}
+		} else {
+			tabsDown = belowHeader
+		}
+	}
+	p.region(favoriteTabs, focusEdges{app.Down: tabsDown})
 	p.region(favoriteHeader, focusEdges{app.Up: {Focus: activeTab}, app.Down: belowHeader})
 	p.region(favoriteTools, focusEdges{app.Up: {Focus: libraryManageID(query.Folder != "")}, app.Down: {Region: favoriteCards}})
-	p.region(libraryMeta, focusEdges{app.Up: {Focus: app.ContentAction, Region: favoriteTabs}, app.Down: {Region: favoriteCards}})
+	metaUp := focusDestination{Focus: activeTab, Region: favoriteTabs}
+	if hasHeaderAction {
+		metaUp = focusDestination{Focus: app.ContentAction, Region: favoriteHeader}
+	} else if query.Folder != "" {
+		metaUp = focusDestination{Focus: "favorites/back", Region: favoriteHeader}
+	}
+	p.region(libraryMeta, focusEdges{app.Up: metaUp, app.Down: {Region: favoriteCards}})
 	p.region(favoriteCards, focusEdges{app.Up: aboveCards, app.Down: {Region: favoriteStatus}})
 	p.region(favoriteStatus, focusEdges{app.Up: {Focus: activeTab, Region: favoriteCards}})
 	headingHeight, actionTop, metaTop := float32(266), float32(110), float32(203)
@@ -90,7 +129,8 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 		p.renderLibraryTabs(c, query.Section)
 		ui.Column(c.Key("library-body/" + string(query.Section) + "/" + query.Folder)).FillWidth().Children(func() {
 			if guest {
-				p.libraryEmpty(c, "library", text.Activity.LibraryGuestTitle, text.Activity.LibraryGuestNote,
+				guestTitle, guestNote := p.libraryGuestText()
+				p.libraryEmpty(c, "library", guestTitle, guestNote,
 					p.signInActionLabel(), "user", emptyFocus, func() { p.State.Push(app.Route{Page: app.Account}) })
 				return
 			}
@@ -117,7 +157,7 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 				case app.CatalogIdle, app.CatalogLoading:
 					p.libraryEmpty(c, "spinner", text.LoadingTitle, "", "", "", "", nil)
 				case app.CatalogFailed:
-					p.libraryEmpty(c, "", text.FailedTitle, p.authError(snapshot.Error), text.Retry, "", emptyFocus, func() { activity.Retry(query) })
+					p.libraryEmpty(c, "", text.FailedTitle, p.requestError(snapshot.Error), text.Retry, "", emptyFocus, func() { activity.Retry(query) })
 				case app.CatalogCanceled:
 					p.libraryEmpty(c, "", text.CanceledTitle, "", text.Retry, "", emptyFocus, func() { activity.Retry(query) })
 				default:
@@ -184,7 +224,7 @@ func (p *PageContext) renderLibraryTabs(c *ui.Context, active provider.AccountSe
 				selected := section == active
 				background, foreground, width := ui.Transparent, paint(colors.Text.Muted), float32(148)
 				borderW, borderColor := float32(0), ui.Transparent
-				if section == provider.AccountFavorites {
+				if section == provider.AccountFavorites && utf8.RuneCountInString(title) <= 3 {
 					width = 123
 				}
 				if selected {
@@ -231,7 +271,7 @@ func (p *PageContext) libraryHeading(c *ui.Context, folder provider.AccountRow, 
 		return
 	}
 	ui.Box(c).Absolute().Top(42).Left(103).Children(func() {
-		p.libraryTextLink(c, text.FoldersBack, "back", "favorites/back", favoriteHeader, func() {
+		p.libraryTextLink(c, p.libraryFoldersBackLabel(), "back", "favorites/back", favoriteHeader, func() {
 			p.State.Back()
 		})
 	})
@@ -255,29 +295,34 @@ func (p *PageContext) libraryCollectionMeta(c *ui.Context, query provider.Accoun
 		ui.Text(c, label).FontSize(26).FontWeight(400)
 		ui.Text(c, fmt.Sprintf(text.FolderCount, total)).FontSize(18).TextColor(paint(colors.Text.Muted))
 	})
+	rows := p.host.Activity.Snapshot(query).Page.Rows
 	if query.Section == provider.AccountWatchLater {
-		ui.Box(c).Absolute().Top(top + 7).Right(83).Children(func() {
+		ui.Box(c).Absolute().Top(top + 2).Right(83).Children(func() {
 			p.libraryTextLink(c, text.PlayAll, "play", libraryPlayAll, libraryMeta, func() {
-				p.playWatchLater(p.host.Activity.Snapshot(query).Page.Rows)
+				p.playWatchLater(rows)
 			})
 		})
 	}
 }
 
 func (p *PageContext) libraryTextLink(c *ui.Context, label, icon string, id app.FocusID, region string, action func()) {
-	ink := paint(p.Theme.Colors.Text.Secondary)
-	if p.paintFocus() == id {
-		ink = paint(p.Theme.Colors.Text.Primary)
+	colors := p.Theme.Colors
+	focused := p.paintFocus() == id
+	bg, ink := ui.Transparent, paint(colors.Text.Secondary)
+	borderW, borderCol := float32(0), ui.Transparent
+	if focused {
+		bg, ink = paint(colors.Focus.Background), paint(colors.Focus.Foreground)
+		borderW, borderCol = 2, paint(colors.Focus.Ring)
 	}
-	button := ui.Button(c.Key(string(id)), "").Label(label).Height(28).Padding(0, 0).
-		Border(0, ui.Transparent).Background(ui.Transparent).TextColor(ink).
+	button := ui.Button(c.Key(string(id)), "").Label(label).Height(38).Padding(0, 14).Radius(19).
+		Border(borderW, borderCol).Background(bg).TextColor(ink).
 		OnClick(func() { p.dispatch(action) })
-	p.animateFocus(button, ui.Transparent, ink)
+	p.animateFocus(button, bg, ink)
 	p.bind(button, id, region)
 	button.Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, p.Assets.Icon(icon)).Size(20, 20)
-			ui.Text(c, label).FontSize(19)
+			ui.Icon(c, p.Assets.Icon(icon)).Size(20, 20).TextColor(ink)
+			ui.Text(c, label).FontSize(19).TextColor(ink)
 		})
 	})
 }
@@ -338,7 +383,7 @@ func (p *PageContext) libraryGrid(c *ui.Context, query provider.AccountQuery, sn
 		draw := func(row int) {
 			ui.Row(c.Key(row)).Absolute().Top(float32(row) * stride).Left(103).Right(83).Height(stride).Gap(gap).Children(func() {
 				for _, item := range items[row*columns : min((row+1)*columns, len(items))] {
-					p.libraryCard(c, query, item, directory, width, cover, managing)
+					p.libraryCard(c, query, items, item, directory, width, cover, managing)
 				}
 			})
 		}
@@ -374,7 +419,7 @@ func (p *PageContext) accountRowImage(location string) *ui.Bitmap {
 	return p.catalogCover(location)
 }
 
-func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, item provider.AccountRow, directory bool, width, cover float32, managing bool) {
+func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, allRows []provider.AccountRow, item provider.AccountRow, directory bool, width, cover float32, managing bool) {
 	colors := p.Theme.Colors
 	var quality string
 	if query.Section == provider.AccountHistory && item.Ref != nil {
@@ -405,7 +450,40 @@ func (p *PageContext) libraryCard(c *ui.Context, query provider.AccountQuery, it
 	if !managing && !directory && item.Ref != nil && item.Ref.EntryID == p.State.CurrentEntry && p.canOpenVideoDetail(*item.Ref) {
 		media := provider.MediaItem{Ref: *item.Ref, Title: item.Title, CoverURL: item.CoverURL,
 			DurationSeconds: item.DurationSeconds, Views: item.Views}
-		button.OnClick(func() { p.dispatch(func() { p.openVideoDetail(media) }) })
+		if item.Item != nil {
+			media = *item.Item
+		}
+		button.OnClick(func() {
+			p.dispatch(func() {
+				entry, _ := p.State.Current()
+				queueSection := (query.Section == provider.AccountFavorites && query.Folder != "") ||
+					query.Section == provider.AccountWatchLater ||
+					(query.Section == provider.AccountHistory && entry.Capabilities.Has(provider.PlaybackModes))
+				if queueSection {
+					queue := make([]playbackItem, 0, len(allRows))
+					clickedIdx := -1
+					for _, row := range allRows {
+						if row.Ref == nil || !p.canPlay(*row.Ref) {
+							continue
+						}
+						m := provider.MediaItem{Ref: *row.Ref, Title: row.Title, CoverURL: row.CoverURL,
+							DurationSeconds: row.DurationSeconds, Views: row.Views}
+						if row.Item != nil {
+							m = *row.Item
+						}
+						if row.ID == item.ID && *row.Ref == *item.Ref && clickedIdx < 0 {
+							clickedIdx = len(queue)
+						}
+						queue = append(queue, playbackItem{item: m})
+					}
+					if clickedIdx >= 0 && len(queue) > 1 {
+						p.openVideoDetailInQueue(media, queue, clickedIdx)
+						return
+					}
+				}
+				p.openVideoDetail(media)
+			})
+		})
 	}
 	p.bind(button, id, favoriteCards)
 	button.Children(func() {

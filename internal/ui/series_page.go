@@ -148,7 +148,7 @@ func (seriesPage) Render(c *ui.Context, p *PageContext) {
 				p.seriesStateBlock(c, "series", p.Assets.Text.Series.Loading, "", "", "", "", seriesStatusRegion, nil)
 				return
 			case snap.Phase == app.CatalogFailed && !snap.Loaded:
-				p.seriesStateBlock(c, "series", p.Assets.Text.Series.LoadFailed, p.authError(snap.Error), p.Assets.Text.Retry, "refresh", seriesRetryFocus, seriesStatusRegion, func() {
+				p.seriesStateBlock(c, "series", p.Assets.Text.Series.LoadFailed, p.requestError(snap.Error), p.Assets.Text.Retry, "refresh", seriesRetryFocus, seriesStatusRegion, func() {
 					catalog.RetryHub()
 				})
 				return
@@ -211,11 +211,11 @@ func (p *PageContext) restoreSeriesHubFocus(snap app.SeriesHubSnapshot) {
 
 func (p *PageContext) seriesHubRegions(snap app.SeriesHubSnapshot, hasHero bool) {
 	tab := seriesGenreFocus(snap.Genre)
-	hasTools := !snap.Loaded || snap.SupportsIndex || snap.SupportsCalendar
+	hasTools := snap.Loaded && (snap.SupportsIndex || snap.SupportsCalendar)
 	headerEdges := focusEdges{}
 	if hasTools {
 		toolTarget := seriesToolIndexFocus
-		if snap.Loaded && !snap.SupportsIndex {
+		if !snap.SupportsIndex {
 			toolTarget = seriesToolCalendarFocus
 		}
 		headerEdges[app.Right] = focusDestination{Focus: toolTarget, Region: seriesToolsRegion}
@@ -509,8 +509,8 @@ func (p *PageContext) seriesHeader(c *ui.Context, snap app.SeriesHubSnapshot) {
 				})
 			}
 		})
-		showIndex := !snap.Loaded || snap.SupportsIndex
-		showCalendar := !snap.Loaded || snap.SupportsCalendar
+		showIndex := snap.Loaded && snap.SupportsIndex
+		showCalendar := snap.Loaded && snap.SupportsCalendar
 		if showIndex || showCalendar {
 			ui.Row(c).Absolute().Top(51).Right(69).Height(44).Gap(6).AlignItems(ui.Center).Children(func() {
 				if showIndex {

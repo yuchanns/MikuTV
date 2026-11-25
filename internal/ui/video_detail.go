@@ -73,6 +73,8 @@ type videoDetailState struct {
 	synopsisWidth float32
 	synopsisLang  string
 	synopsis      videoDetailSynopsis
+	queue         []playbackItem
+	queueIndex    int
 }
 
 type videoDetailLocation struct {
@@ -84,6 +86,8 @@ type videoDetailLocation struct {
 	discussion    *videoDiscussionState
 	relatedScroll *ui.ScrollState
 	segmentRows   *ui.ListState
+	queue         []playbackItem
+	queueIndex    int
 }
 
 func (s *videoDetailState) actionSpec(id string) (provider.ActionSpec, bool) {
@@ -113,8 +117,44 @@ func (p *PageContext) canOpenVideoDetail(ref provider.MediaRef) bool {
 }
 
 func (p *PageContext) openVideoDetail(item provider.MediaItem) {
+	p.openVideoDetailInQueue(item, nil, 0)
+}
+
+func (p *PageContext) playbackQueueFromList(item provider.MediaItem, list []provider.MediaItem, index int) ([]playbackItem, int) {
+	entry, ok := p.State.Current()
+	if !ok || !entry.Capabilities.Has(provider.PlaybackModes) || len(list) <= 1 || item.Ref.Kind != provider.Video {
+		return nil, -1
+	}
+	queue := make([]playbackItem, 0, len(list))
+	clickedIdx := -1
+	for i, cand := range list {
+		if cand.Ref.Kind != provider.Video || !p.canPlay(cand.Ref) {
+			continue
+		}
+		if i == index || (clickedIdx < 0 && cand.Ref == item.Ref) {
+			clickedIdx = len(queue)
+			queue = append(queue, playbackItem{item: item})
+			continue
+		}
+		queue = append(queue, playbackItem{item: cand})
+	}
+	if clickedIdx < 0 || len(queue) <= 1 {
+		return nil, -1
+	}
+	return queue, clickedIdx
+}
+
+func (p *PageContext) openMediaFromList(item provider.MediaItem, list []provider.MediaItem, index int) {
+	if queue, clickedIdx := p.playbackQueueFromList(item, list, index); len(queue) > 1 {
+		p.openVideoDetailInQueue(item, queue, clickedIdx)
+		return
+	}
+	p.openVideoDetail(item)
+}
+
+func (p *PageContext) openVideoDetailInQueue(item provider.MediaItem, queue []playbackItem, queueIndex int) {
 	if p.State.Page == app.VideoDetail {
-		p.openRelatedVideoDetail(item)
+		p.openRelatedVideoDetail(item, queue, queueIndex)
 		return
 	}
 	layers := p.State.Layers()
@@ -137,6 +177,10 @@ func (p *PageContext) openVideoDetail(item provider.MediaItem) {
 		view.videoDetail.close()
 	}
 	view.videoDetail.seed = item
+	if len(queue) > 1 && queueIndex >= 0 && queueIndex < len(queue) {
+		view.videoDetail.queue = queue
+		view.videoDetail.queueIndex = queueIndex
+	}
 	if len(layers) == 1 {
 		view.videoDetail.entrance.from = layers[0]
 	}
@@ -200,7 +244,7 @@ func syncVideoDetail(v *View) {
 	}
 }
 
-func (p *PageContext) openRelatedVideoDetail(item provider.MediaItem) {
+func (p *PageContext) openRelatedVideoDetail(item provider.MediaItem, queue []playbackItem, queueIndex int) {
 	view, scroll := p.host, p.scroll()
 	detail := &view.videoDetail
 	if item.Ref == detail.item.Ref {
@@ -212,10 +256,16 @@ func (p *PageContext) openRelatedVideoDetail(item provider.MediaItem) {
 	detail.previous = append(detail.previous, videoDetailLocation{
 		seed: detail.seed, item: detail.item, tab: detail.tab, part: detail.part, expanded: detail.expanded, position: view.State.Position,
 		discussion: detail.discussion, relatedScroll: detail.relatedScroll, segmentRows: detail.segmentRows,
+		queue: detail.queue, queueIndex: detail.queueIndex,
 	})
 	detail.seed, detail.tab, detail.part = item, videoDetailOverview, 0
 	detail.expanded = false
 	detail.discussion, detail.relatedScroll, detail.segmentRows = nil, nil, nil
+	if len(queue) > 1 && queueIndex >= 0 && queueIndex < len(queue) {
+		detail.queue, detail.queueIndex = queue, queueIndex
+	} else {
+		detail.queue, detail.queueIndex = nil, 0
+	}
 	view.State.RecordPosition(app.Position{Focus: videoDetailPlay})
 	scroll.ScrollTo(0, 0, ui.Animation{})
 	view.reveal = true
@@ -248,6 +298,7 @@ func (v *View) backFromVideoDetail() bool {
 	detail.seed, detail.item, detail.tab = parent.seed, parent.item, parent.tab
 	detail.expanded, detail.part = parent.expanded, parent.part
 	detail.discussion, detail.relatedScroll, detail.segmentRows = parent.discussion, parent.relatedScroll, parent.segmentRows
+	detail.queue, detail.queueIndex = parent.queue, parent.queueIndex
 	detail.cancel, detail.loading, detail.failure = nil, false, ""
 	v.State.RecordPosition(parent.position)
 	if scroll := v.activeScroll; scroll != nil {
@@ -333,7 +384,7 @@ func (videoDetailPage) Render(c *ui.Context, p *PageContext) {
 	p.region(videoDetailControls, nil)
 	entry, _ := p.State.Current()
 	if p.active && p.State.Focus == videoDetailPlay && !entry.Capabilities.Has(provider.ResolvePlayback) {
-		if entry.Capabilities.Has(provider.EditVideo) {
+		if p.canEditWatchLater(entry) {
 			p.State.Focus = videoDetailLater
 		} else {
 			p.State.Focus = videoDetailOverview.focusID()
@@ -464,7 +515,7 @@ func (p *PageContext) videoDetailCreator(c *ui.Context, creator provider.Creator
 			openCreator = func() { p.dispatch(func() { p.openCreator(selected) }) }
 		}
 		p.styledButton(c, creator.Name, "", videoDetailCreatorID, videoDetailControls, openCreator, style).AlignSelf(ui.Center)
-		if entry.Capabilities.Has(provider.EditVideo) {
+		if entry.Capabilities.Has(provider.FollowCreator) {
 			follow := text.Follow
 			if creator.Following {
 				follow = text.Followed
@@ -483,9 +534,9 @@ func (p *PageContext) videoDetailActions(c *ui.Context, item provider.MediaItem)
 	if detail := item.VideoDetails; detail != nil {
 		switch detail.Access {
 		case provider.VideoAccessPreview:
-			play, icon = text.Detail.Preview, "lock"
+			play, icon = p.sourceDetailPreviewAction(), "lock"
 		case provider.VideoAccessRestricted:
-			play, icon = text.Detail.GetAccess, "lock"
+			play, icon = p.sourceDetailAccessAction(), "lock"
 		}
 	}
 	ui.Row(c).Absolute().Top(492 - videoDetailMetadataTop).Left(0).Gap(16).Children(func() {
@@ -499,11 +550,13 @@ func (p *PageContext) videoDetailActions(c *ui.Context, item provider.MediaItem)
 			}, style).Width(179).Center()
 		}
 		if entry.Capabilities.Has(provider.EditVideo) {
-			laterIcon := "detail/plus"
-			if item.VideoDetails != nil && item.VideoDetails.Engagement.WatchLater {
-				laterIcon = "detail/check"
+			if p.canEditWatchLater(entry) {
+				laterIcon := "detail/plus"
+				if item.VideoDetails != nil && item.VideoDetails.Engagement.WatchLater {
+					laterIcon = "detail/check"
+				}
+				p.videoDetailButton(c, text.Home.Later, laterIcon, videoDetailLater, 185)
 			}
-			p.videoDetailButton(c, text.Home.Later, laterIcon, videoDetailLater, 185)
 			if item.VideoDetails != nil {
 				for _, action := range item.VideoDetails.Actions {
 					if action.Slot == provider.ActionSlotHero {
@@ -602,6 +655,6 @@ func (p *PageContext) videoDetailFailure(code provider.ErrorCode) string {
 	case provider.RateLimited:
 		return text.Home.RateLimited
 	default:
-		return text.Detail.LoadFailed
+		return p.sourceDetailLoadFailed()
 	}
 }

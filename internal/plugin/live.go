@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/yuchanns/MikuTV/internal/provider"
@@ -16,9 +17,10 @@ func (s *Session) ReadLive(ctx context.Context, request provider.LiveRequest) (p
 	auth := s.snapshotAuth()
 	input := struct {
 		provider.LiveRequest
-		SignedIn bool   `json:"signedIn,omitempty"`
-		Owner    string `json:"owner,omitempty"`
-	}{request, auth.signedIn(), auth.owner}
+		SignedIn bool            `json:"signedIn,omitempty"`
+		Owner    string          `json:"owner,omitempty"`
+		Secret   json.RawMessage `json:"secret,omitempty"`
+	}{request, auth.signedIn(), auth.owner, auth.secret}
 	var page provider.LivePage
 	if err := s.invoke(ctx, auth.scope, auth.client, provider.BrowseLive, "readLive", input, &page); err != nil {
 		return provider.LivePage{}, err
