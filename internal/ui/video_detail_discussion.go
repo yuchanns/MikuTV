@@ -487,7 +487,7 @@ func (p *PageContext) videoDiscussionRows(c *ui.Context, d *videoDiscussionState
 				p.loadVideoDiscussion(d, d.failedPage)
 			})
 		case empty && d.cancel != nil:
-			p.videoDetailText(c, text.Detail.Loading)
+			p.videoDetailText(c, p.sourceDetailLoading())
 		case empty:
 			p.videoDetailText(c, text.Detail.NoComments)
 		case nextPage != 0:

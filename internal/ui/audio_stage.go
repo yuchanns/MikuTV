@@ -226,8 +226,18 @@ func audioStageSubtitle(item playbackItem) string {
 func (p *PageContext) renderAudioStage(c *ui.Context, state app.PlaybackState, item playbackItem, now time.Time) {
 	v, s := p.host, &p.host.player
 	colors := p.Theme.Colors
-	cover := p.catalogCover(item.item.CoverURL)
-	art := p.catalogArtwork(catalogImageKey{location: item.item.CoverURL})
+	var cover *ui.Bitmap
+	var art *app.CatalogArtwork
+	if item.item.BackdropURL != "" {
+		cover = p.catalogBitmap(catalogImageKey{location: item.item.BackdropURL, backdrop: true})
+		art = p.catalogArtwork(catalogImageKey{location: item.item.BackdropURL, backdrop: true})
+	}
+	if cover == nil {
+		cover = p.catalogCover(item.item.CoverURL)
+	}
+	if art == nil {
+		art = p.catalogArtwork(catalogImageKey{location: item.item.CoverURL})
+	}
 	ambient := cachedAudioAmbientBackdrop(art, p.Theme.Dark, colors.Surface.Canvas)
 
 	var driftX, driftY float32
@@ -256,10 +266,10 @@ func (p *PageContext) renderAudioStage(c *ui.Context, state app.PlaybackState, i
 			compact := p.Width < 1500
 
 			if len(cues) == 0 {
-				p.renderAudioStageArtworkOnly(c, cover, title, sub, s.visible, compact, driftX, driftY)
+				p.renderAudioStageArtworkOnly(c, cover, title, sub, compact, driftX, driftY)
 				return
 			}
-			p.renderAudioStageLyricsSplit(c, cover, title, sub, cues, state.Position, s.visible, compact, driftX, driftY)
+			p.renderAudioStageLyricsSplit(c, cover, title, sub, cues, state.Position, compact, driftX, driftY)
 		})
 	})
 }
@@ -285,24 +295,16 @@ func (p *PageContext) renderAudioCoverSquare(c *ui.Context, key string, cover *u
 	})
 }
 
-func (p *PageContext) renderAudioStageArtworkOnly(c *ui.Context, cover *ui.Bitmap, title, sub string, hudVisible, compact bool, driftX, driftY float32) {
+func (p *PageContext) renderAudioStageArtworkOnly(c *ui.Context, cover *ui.Bitmap, title, sub string, compact bool, driftX, driftY float32) {
 	colors := p.Theme.Colors
 	coverSize := float32(520)
-	padBottom := float32(0)
-	if hudVisible {
-		coverSize = 430
-		padBottom = 130
-	} else if compact {
+	if compact {
 		coverSize = 440
 	}
-	ui.Column(c.Key("audio-stage-centered")).Absolute().Top(driftY).Left(driftX).Right(-driftX).Bottom(padBottom - driftY).
+	ui.Column(c.Key("audio-stage-centered")).Absolute().Top(driftY).Left(driftX).Right(-driftX).Bottom(-driftY).
 		Center().Padding(0, 80, 0, 80).Children(func() {
 		p.renderAudioCoverSquare(c, "audio-cover-hero", cover, coverSize, 24)
-		metaOpacity := float32(1)
-		if hudVisible {
-			metaOpacity = 0.35
-		}
-		ui.Column(c).Margin(36, 0, 0, 0).Gap(12).AlignItems(ui.Center).Opacity(metaOpacity).Children(func() {
+		ui.Column(c).Margin(36, 0, 0, 0).Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, title).FontSize(40).FontWeight(650).MaxLines(1).TextColor(paint(colors.Text.Primary))
 			if sub != "" {
 				ui.Text(c, sub).FontSize(22).MaxLines(1).TextColor(paint(colors.Text.Secondary))
@@ -311,37 +313,25 @@ func (p *PageContext) renderAudioStageArtworkOnly(c *ui.Context, cover *ui.Bitma
 	})
 }
 
-func (p *PageContext) renderAudioStageLyricsSplit(c *ui.Context, cover *ui.Bitmap, title, sub string, cues []provider.SubtitleCue, position float64, hudVisible, compact bool, driftX, driftY float32) {
+func (p *PageContext) renderAudioStageLyricsSplit(c *ui.Context, cover *ui.Bitmap, title, sub string, cues []provider.SubtitleCue, position float64, compact bool, driftX, driftY float32) {
 	colors := p.Theme.Colors
 	coverSize := float32(490)
 	padLeft, padRight, gap := float32(140), float32(124), float32(108)
-	padBottom := float32(0)
-	if hudVisible {
-		coverSize = 446
-		padBottom = 110
-	}
 	if compact {
 		coverSize = min(coverSize, 360)
 		padLeft, padRight, gap = 72, 64, 56
 	}
 
 	activeIdx := activeAudioLyricIndex(cues, position)
-	windowHalf := 2
-	if hudVisible {
-		windowHalf = 1
-	}
+	const windowHalf = 2
 	startIdx := max(0, activeIdx-windowHalf)
 	endIdx := min(len(cues), activeIdx+windowHalf+1)
 
-	ui.Row(c.Key("audio-stage-split")).Absolute().Top(driftY).Left(driftX).Right(-driftX).Bottom(padBottom - driftY).
+	ui.Row(c.Key("audio-stage-split")).Absolute().Top(driftY).Left(driftX).Right(-driftX).Bottom(-driftY).
 		Padding(0, padRight, 0, padLeft).Gap(gap).AlignItems(ui.Center).Children(func() {
 		ui.Column(c.Key("audio-stage-left")).Width(coverSize).Shrink(0).Children(func() {
 			p.renderAudioCoverSquare(c, "audio-cover-square", cover, coverSize, 22)
-			metaOpacity := float32(1)
-			if hudVisible {
-				metaOpacity = 0.35
-			}
-			ui.Column(c).Margin(30, 0, 0, 0).Gap(10).Opacity(metaOpacity).Children(func() {
+			ui.Column(c).Margin(30, 0, 0, 0).Gap(10).Children(func() {
 				ui.Text(c, title).FontSize(34).FontWeight(650).MaxLines(1).TextColor(paint(colors.Text.Primary))
 				if sub != "" {
 					ui.Text(c, sub).FontSize(21).MaxLines(1).TextColor(paint(colors.Text.Secondary))

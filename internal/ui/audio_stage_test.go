@@ -184,6 +184,20 @@ func TestAudioStagePlanALyricsNoLyricsLightAndOLEDPauseDim(t *testing.T) {
 		if darkImg == nil {
 			t.Fatal("expected non-nil rendered frame")
 		}
+		// Showing the HUD must overlay on top without shrinking or shifting the stage cover.
+		coverHidden, okHidden := tester.Find("audio-cover-square")
+		view.player.visible = true
+		tester.Frame()
+		coverVisible, okVisible := tester.Find("audio-cover-square")
+		if okHidden && okVisible && coverHidden != coverVisible {
+			t.Fatalf("audio stage cover moved/resized when HUD appeared: hidden=%+v visible=%+v", coverHidden, coverVisible)
+		}
+		// Audio-only player HUD must present audio-native labels (Track Info / Lyrics / Audio Quality / Prev/Next Track).
+		if !tester.HasText(assets.Text.Playback.AudioInfo) {
+			t.Fatalf("expected audio info label %q when AudioOnly=true", assets.Text.Playback.AudioInfo)
+		}
+		view.player.visible = false
+		tester.Frame()
 
 		// Pause for 5+ minutes -> AudioDimmed=true; outer corner must remain opaque dark canvas
 		// (no transparent bleed!) and strictly dimmer than the undimmed ambient wash.

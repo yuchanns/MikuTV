@@ -124,7 +124,7 @@ func (p *PageContext) searchKindLabel(kind provider.SearchKind) string {
 	text := p.Assets.Text.Search
 	switch kind {
 	case provider.SearchVideo:
-		return text.KindVideo
+		return p.sourceSearchVideoLabel()
 	case provider.SearchCreator:
 		return p.sourceSearchCreatorLabel()
 	case provider.SearchSeries:
@@ -368,7 +368,7 @@ func (p *PageContext) restoreSearchFocus(current app.SearchSnapshot, history, su
 }
 
 func (p *PageContext) searchBox(c *ui.Context, current app.SearchSnapshot) {
-	colors, d, text := p.Theme.Colors, p.uiColors(), p.Assets.Text.Search
+	colors, d := p.Theme.Colors, p.uiColors()
 	state := &p.host.search
 	if state.editing {
 		ui.Row(c.Key("search-box-edit")).Width(searchLeftWidth).Height(72).Padding(0, 20).Gap(15).
@@ -378,7 +378,7 @@ func (p *PageContext) searchBox(c *ui.Context, current app.SearchSnapshot) {
 			field := ui.TextInput(c.Key("search-input"), &state.input).Grow(1).MinWidth(0).Height(50).
 				Padding(0, 0).Border(0, ui.Transparent).Background(ui.Transparent).
 				FontSize(27).TextColor(paint(colors.Text.Primary)).
-				Label(text.Placeholder).Placeholder(text.Placeholder).PlaceholderColor(paint(colors.Text.Muted)).
+				Label(p.sourceSearchPlaceholder()).Placeholder(p.sourceSearchPlaceholder()).PlaceholderColor(paint(colors.Text.Muted)).
 				MaxLength(searchQueryMaxLength).ReturnKey(ui.ReturnSearch).
 				OnChange(func() {
 					if p.host.Search != nil {
@@ -414,7 +414,7 @@ func (p *PageContext) searchBox(c *ui.Context, current app.SearchSnapshot) {
 	display := current.Request.Query
 	ink := paint(colors.Text.Primary)
 	if display == "" {
-		display = text.Placeholder
+		display = p.sourceSearchPlaceholder()
 		ink = paint(colors.Text.Muted)
 	}
 	focused := p.paintFocus() == searchInputFocus
@@ -789,7 +789,7 @@ func (p *PageContext) searchCreatorMeta(item provider.SearchCreatorItem) string 
 		parts = append(parts, catalogViews(*item.Followers, text.Home)+text.Search.Followers)
 	}
 	if item.Videos != nil {
-		parts = append(parts, fmt.Sprintf(text.Search.VideoCount, *item.Videos))
+		parts = append(parts, p.sourceSearchItemCount(*item.Videos))
 	}
 	if len(parts) != 0 {
 		return strings.Join(parts, " \u00b7 ")

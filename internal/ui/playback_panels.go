@@ -264,6 +264,9 @@ func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item
 		title = text.Danmaku
 	case playerSubtitles:
 		title = text.Subtitles
+		if state.AudioOnly && text.AudioLyrics != "" {
+			title = text.AudioLyrics
+		}
 	case playerAudio:
 		title, current = text.AudioTrack, playbackAudioLabel(state)
 	case playerSpeed:
@@ -273,7 +276,11 @@ func (p *PageContext) playbackPanel(c *ui.Context, state app.PlaybackState, item
 			title = text.LiveQuality
 			popoverWidth, popoverRight = 370, 80
 		} else {
-			title, current = text.Quality, playbackQualityLabel(state)
+			qualTitle := text.Quality
+			if state.AudioOnly && text.AudioQuality != "" {
+				qualTitle = text.AudioQuality
+			}
+			title, current = qualTitle, playbackQualityLabel(state)
 			if state.Selected == "" && current != "" {
 				current = text.Auto + " · " + current
 			}
@@ -544,13 +551,17 @@ func (p *PageContext) playbackDrawer(c *ui.Context, state app.PlaybackState, cur
 	p.region(playerPanelGroup, focusEdges{})
 	upcoming := playbackUpcomingEpisodes(state, current.item)
 	hasEpisodes := len(s.items) > 1 || (!s.keepQueue && len(upcoming) > 0)
+	infoTitle := text.Info
+	if state.AudioOnly && text.AudioInfo != "" {
+		infoTitle = text.AudioInfo
+	}
 	if !hasEpisodes {
-		p.bind(drawer.Focusable().Label(text.Info), playerPanelExit, playerPanelGroup)
+		p.bind(drawer.Focusable().Label(infoTitle), playerPanelExit, playerPanelGroup)
 	}
 	drawer.Children(func() {
 		ui.Scroll(c).Fill().TrackScroll(&s.panelScroll).Children(func() {
 			ui.Column(c).FillWidth().Padding(65, 42).Gap(22).Children(func() {
-				ui.Text(c, text.Info).FontSize(32).FontWeight(550)
+				ui.Text(c, infoTitle).FontSize(32).FontWeight(550)
 				if creator := current.item.Creator; creator != nil {
 					ui.Text(c, creator.Name).FontSize(16).Margin(5, 0, 0, 0).TextColor(paint(colors.Text.Secondary))
 				}

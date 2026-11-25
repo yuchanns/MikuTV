@@ -1,10 +1,12 @@
 package tvui
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/yuchanns/MikuTV/internal/app"
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
@@ -108,9 +110,174 @@ func (p *PageContext) sourceText(raw string) string {
 	return raw
 }
 
+func (p *PageContext) canEditWatchLater(entry app.Entry) bool {
+	return entry.Capabilities.Has(provider.EditVideo) &&
+		entry.Capabilities.Has(provider.AccountWatchLater.Capability())
+}
+
+func (p *PageContext) canEditFavorites(entry app.Entry) bool {
+	return entry.Capabilities.Has(provider.EditVideo) &&
+		entry.Capabilities.Has(provider.EditVideoFavorites)
+}
+
+func (p *PageContext) libraryNavLabel() string {
+	if label := strings.TrimSpace(p.sourcePresentation().Sections.Library); label != "" {
+		return label
+	}
+	return p.Assets.Text.Nav[app.Library]
+}
+
+func (p *PageContext) sourceHomePicks() (string, string) {
+	home := p.sourcePresentation().Home
+	title, note := p.Assets.Text.Home.Picks, p.Assets.Text.Home.PicksNote
+	if v := strings.TrimSpace(home.PicksTitle); v != "" {
+		title = v
+	}
+	if v := strings.TrimSpace(home.PicksNote); v != "" {
+		note = v
+	}
+	return title, note
+}
+
+func (p *PageContext) sourceHomeContinueTitle() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Home.ContinueTitle); v != "" {
+		return v
+	}
+	return p.Assets.Text.Home.Continue
+}
+
+func (p *PageContext) sourceHomeRankingNote() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Home.RankingNote); v != "" {
+		return v
+	}
+	return p.Assets.Text.Home.RankingNote
+}
+
+func (p *PageContext) sourceSearchPlaceholder() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Search.Placeholder); v != "" {
+		return v
+	}
+	return p.Assets.Text.Search.Placeholder
+}
+
+func (p *PageContext) sourceSearchVideoLabel() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Search.VideoLabel); v != "" {
+		return v
+	}
+	return p.Assets.Text.Search.KindVideo
+}
+
+func (p *PageContext) sourceSearchItemCount(count int64) string {
+	if tmpl := strings.TrimSpace(p.sourcePresentation().Search.ItemCountLabel); tmpl != "" {
+		if strings.Contains(tmpl, "%d") {
+			return fmt.Sprintf(tmpl, count)
+		}
+		return fmt.Sprintf("%d %s", count, tmpl)
+	}
+	return fmt.Sprintf(p.Assets.Text.Search.VideoCount, count)
+}
+
+func (p *PageContext) sourceCreatorTabLabel(tab provider.CreatorTab) string {
+	pres := p.sourcePresentation().Creator
+	text := p.Assets.Text.Creator
+	switch tab {
+	case provider.CreatorTabVideos:
+		if v := strings.TrimSpace(pres.VideosLabel); v != "" {
+			return v
+		}
+		return text.Videos
+	case provider.CreatorTabPosts:
+		return text.Posts
+	case provider.CreatorTabCollections:
+		if v := strings.TrimSpace(pres.CollectionsLabel); v != "" {
+			return v
+		}
+		return text.Collections
+	case provider.CreatorTabAbout:
+		return text.About
+	default:
+		return string(tab)
+	}
+}
+
+func (p *PageContext) sourceCreatorEmptyVideos() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Creator.EmptyVideos); v != "" {
+		return v
+	}
+	return p.Assets.Text.Creator.NoVideos
+}
+
+func (p *PageContext) sourceCreatorEmptyCollections() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Creator.EmptyCollections); v != "" {
+		return v
+	}
+	return p.Assets.Text.Creator.NoCollections
+}
+
+func (p *PageContext) sourceDetailItemLabel() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Detail.ItemLabel); v != "" {
+		return v
+	}
+	return p.Assets.Text.Detail.CurrentVideo
+}
+
+func (p *PageContext) sourceDetailCollectionLabel() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Detail.CollectionLabel); v != "" {
+		return v
+	}
+	return p.Assets.Text.Detail.Collection
+}
+
+func (p *PageContext) sourceDetailCollectionUnit() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Detail.CollectionUnit); v != "" {
+		return v
+	}
+	return p.Assets.Text.Detail.SeriesUnit
+}
+
+func (p *PageContext) sourceDetailLoading() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Detail.Loading); v != "" {
+		return v
+	}
+	return p.Assets.Text.Detail.Loading
+}
+
+func (p *PageContext) sourceDetailLoadFailed() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Detail.LoadFailed); v != "" {
+		return v
+	}
+	return p.Assets.Text.Detail.LoadFailed
+}
+
+func (p *PageContext) sourceDetailPreviewAction() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Detail.PreviewAction); v != "" {
+		return v
+	}
+	return p.Assets.Text.Detail.Preview
+}
+
+func (p *PageContext) sourceDetailAccessAction() string {
+	if v := strings.TrimSpace(p.sourcePresentation().Detail.AccessAction); v != "" {
+		return v
+	}
+	return p.Assets.Text.Detail.GetAccess
+}
+
 func (p *PageContext) librarySectionLabel(section provider.AccountSection) string {
 	sections := p.sourcePresentation().Sections
 	switch section {
+	case provider.AccountHistory:
+		if label := strings.TrimSpace(sections.History); label != "" {
+			return label
+		}
+	case provider.AccountFavorites:
+		if label := strings.TrimSpace(sections.Favorites); label != "" {
+			return label
+		}
+	case provider.AccountWatchLater:
+		if label := strings.TrimSpace(sections.WatchLater); label != "" {
+			return label
+		}
 	case provider.AccountTracking:
 		if label := strings.TrimSpace(sections.Tracking); label != "" {
 			return label
@@ -121,6 +288,25 @@ func (p *PageContext) librarySectionLabel(section provider.AccountSection) strin
 		}
 	}
 	return p.Assets.Text.Activity.libraryTab(section)
+}
+
+func (p *PageContext) libraryFoldersBackLabel() string {
+	if label := strings.TrimSpace(p.sourcePresentation().Sections.Favorites); label != "" {
+		return label
+	}
+	return p.Assets.Text.Activity.FoldersBack
+}
+
+func (p *PageContext) libraryGuestText() (string, string) {
+	sections := p.sourcePresentation().Sections
+	title, note := p.Assets.Text.Activity.LibraryGuestTitle, p.Assets.Text.Activity.LibraryGuestNote
+	if v := strings.TrimSpace(sections.GuestTitle); v != "" {
+		title = v
+	}
+	if v := strings.TrimSpace(sections.GuestNote); v != "" {
+		note = v
+	}
+	return title, note
 }
 
 func (p *PageContext) libraryEmptyText(section provider.AccountSection) (string, string) {

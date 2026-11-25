@@ -679,6 +679,9 @@ func (playbackPage) Render(c *ui.Context, p *PageContext) {
 			images = s.discussion.videoDiscussion().artwork(images, item.item.VideoDetails)
 		}
 		v.Catalog.PrepareArtwork(images)
+		if state.AudioOnly && item.item.BackdropURL != "" {
+			v.Catalog.PrepareBackdrops([]string{item.item.BackdropURL})
+		}
 	}
 	if v.Trace {
 		s.trace(state)
@@ -1020,6 +1023,8 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 			infoLabel := text.Info
 			if liveMode {
 				infoLabel = text.RoomInfo
+			} else if state.AudioOnly && text.AudioInfo != "" {
+				infoLabel = text.AudioInfo
 			}
 			ui.Row(c).Height(65).Gap(14).AlignItems(ui.Center).Children(func() {
 				if creator := item.item.Creator; creator != nil {
@@ -1030,8 +1035,17 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 			ui.Row(c).Height(65).Gap(15).Shrink(0).AlignItems(ui.Center).Children(func() {
 				loopMode := v.playbackLoopMode()
 				wrapNav := len(s.items) > 1 && (loopMode == app.PlaybackLoopRepeatAll || loopMode == app.PlaybackLoopShuffle)
+				prevLabel, nextLabel := text.Previous, text.Next
+				if state.AudioOnly {
+					if text.AudioPrevious != "" {
+						prevLabel = text.AudioPrevious
+					}
+					if text.AudioNext != "" {
+						nextLabel = text.AudioNext
+					}
+				}
 				if !liveMode {
-					controls.playerButton(c, playerPrevious, "skip-back", text.Previous, "", !wrapNav && s.index == 0, func() {
+					controls.playerButton(c, playerPrevious, "skip-back", prevLabel, "", !wrapNav && s.index == 0, func() {
 						v.stepPlayback(-1, false)
 					})
 				}
@@ -1041,7 +1055,7 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 				}
 				controls.playerButton(c, playerToggle, icon, label, "", false, v.togglePlayback)
 				if !liveMode {
-					controls.playerButton(c, playerNext, "skip-forward", text.Next, "", !wrapNav && s.index+1 >= len(s.items), func() {
+					controls.playerButton(c, playerNext, "skip-forward", nextLabel, "", !wrapNav && s.index+1 >= len(s.items), func() {
 						v.stepPlayback(1, false)
 					})
 				}
@@ -1110,13 +1124,21 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 					controls.playerButton(c, playerLoopMode, modeIcon, modeTitle, "", false, v.cyclePlaybackLoopMode)
 				}
 				if entry.Capabilities.Has(provider.ReadSubtitles) && (len(state.Resolution.Plan.Subtitles) > 0 || s.content.subtitle != "") {
-					controls.playerButton(c, playerSubtitles, "captions", text.Subtitles, "", false, func() { s.openPanel(v, playerSubtitles) })
+					subTitle := text.Subtitles
+					if state.AudioOnly && text.AudioLyrics != "" {
+						subTitle = text.AudioLyrics
+					}
+					controls.playerButton(c, playerSubtitles, "captions", subTitle, "", false, func() { s.openPanel(v, playerSubtitles) })
 				}
 				if len(state.AudioTracks) > 1 {
 					controls.playerButton(c, playerAudio, "", text.AudioTrack, text.AudioTrack, false, func() { s.openPanel(v, playerAudio) })
 				}
 				if len(state.Resolution.Plan.Qualities) > 0 || playbackQualityLabel(state) != "" {
-					controls.playerButton(c, playerQuality, "", text.Quality, playbackQualityLabel(state), false, func() { s.openPanel(v, playerQuality) })
+					qualTitle := text.Quality
+					if state.AudioOnly && text.AudioQuality != "" {
+						qualTitle = text.AudioQuality
+					}
+					controls.playerButton(c, playerQuality, "", qualTitle, playbackQualityLabel(state), false, func() { s.openPanel(v, playerQuality) })
 				}
 				controls.playerButton(c, playerSpeed, "", text.Speed, playbackRateLabel(v.Playback.Rate()), false, func() { s.openPanel(v, playerSpeed) })
 			})

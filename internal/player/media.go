@@ -172,6 +172,7 @@ type Media struct {
 	hlsPrefetchUntil time.Time
 	hlsLive          bool
 	cache            *segmentCache
+	direct           *directBuffer
 	tracks           []*dashTrack
 	audioTracks      []provider.PlaybackTrack
 	audioOptionNames map[string]string
@@ -291,6 +292,7 @@ func (m *Media) closeResources(wait bool) {
 	m.closed = true
 	tracks := m.tracks
 	cache := m.cache
+	direct := m.direct
 	m.mu.Unlock()
 	if m.cancel != nil {
 		m.cancel()
@@ -301,6 +303,9 @@ func (m *Media) closeResources(wait bool) {
 		}
 		if cache != nil {
 			cache.close()
+		}
+		if direct != nil {
+			direct.close()
 		}
 		if m.server != nil {
 			_ = m.server.Close()
@@ -499,7 +504,11 @@ func (m *Media) prepareStream(ctx context.Context, stream provider.PlaybackStrea
 		}
 		m.primaryURLs = primary.Resource.URLs
 		m.bandwidthBps = float64(max(primary.Bandwidth, 0)) / 8.0
-		m.registerResource(name, primary.Resource, ct, false)
+		buf := newDirectBuffer(m, primary.Resource, ct, isAudio)
+		m.mu.Lock()
+		m.direct = buf
+		m.mu.Unlock()
+		m.mux.HandleFunc(m.prefix+name, buf.serve)
 		return name, isAudio, nil
 	case provider.PlaybackHLS:
 		body, err := m.fetchPlaylist(ctx, primary.Resource)

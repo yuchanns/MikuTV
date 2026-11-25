@@ -170,7 +170,7 @@ func TestVideoDetailReturnsToTheCallingCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := testEntries()
-	entries[0].Capabilities = append(entries[0].Capabilities, provider.GetCatalogItem, provider.ResolvePlayback, provider.EditVideo)
+	entries[0].Capabilities = append(entries[0].Capabilities, provider.GetCatalogItem, provider.ResolvePlayback, provider.EditVideo, provider.AccountWatchLater.Capability(), provider.EditVideoFavorites)
 	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
 	if err != nil {
 		t.Fatal(err)
@@ -418,7 +418,7 @@ func TestVideoDetailSectionsAndConfirmations(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := testEntries()
-	entries[0].Capabilities = []provider.Capability{provider.GetCatalogItem, provider.ResolvePlayback, provider.ReadVideoComments, provider.WriteVideoComments, provider.EditVideo}
+	entries[0].Capabilities = []provider.Capability{provider.GetCatalogItem, provider.ResolvePlayback, provider.ReadVideoComments, provider.WriteVideoComments, provider.EditVideo, provider.AccountWatchLater.Capability(), provider.EditVideoFavorites}
 	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
 	if err != nil {
 		t.Fatal(err)

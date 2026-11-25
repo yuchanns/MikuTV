@@ -242,7 +242,8 @@ func (p *PageContext) accountShortcuts(c *ui.Context) {
 		ui.Box(c).FillWidth().Height(1).Background(d.subtleBorder)
 		ui.Grid(c).FillWidth().Columns(len(sections)).Gap(12).Children(func() {
 			for _, section := range sections {
-				label, icon := l.section(section)
+				_, icon := l.section(section)
+				label := p.librarySectionLabel(section)
 				query := provider.AccountQuery{Section: section}
 				snapshot := activity.Snapshot(query)
 				value := l.Unavailable

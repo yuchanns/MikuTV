@@ -116,6 +116,7 @@ func NewPages(assets *Assets, additional ...Registration) (*Pages, error) {
 		}
 	}
 	library := content(app.Library, provider.BrowseLibrary)
+	library.Navigation.Label = (*PageContext).libraryNavLabel
 	library.Component, library.Sync = libraryPage{}, syncLibrary
 	library.RawScreen = true
 	library.Back = (*View).backFromLibraryManagement

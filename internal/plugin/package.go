@@ -202,20 +202,92 @@ func (s *Source) LocalizedMetadata(tag string) (name, description string, auth p
 	if strings.TrimSpace(ov.Presentation.MobileApp) != "" {
 		pres.MobileApp = ov.Presentation.MobileApp
 	}
+	if strings.TrimSpace(ov.Presentation.Home.PicksTitle) != "" {
+		pres.Home.PicksTitle = ov.Presentation.Home.PicksTitle
+	}
+	if strings.TrimSpace(ov.Presentation.Home.PicksNote) != "" {
+		pres.Home.PicksNote = ov.Presentation.Home.PicksNote
+	}
+	if strings.TrimSpace(ov.Presentation.Home.ContinueTitle) != "" {
+		pres.Home.ContinueTitle = ov.Presentation.Home.ContinueTitle
+	}
+	if strings.TrimSpace(ov.Presentation.Home.RankingNote) != "" {
+		pres.Home.RankingNote = ov.Presentation.Home.RankingNote
+	}
+	if strings.TrimSpace(ov.Presentation.Sections.Library) != "" {
+		pres.Sections.Library = ov.Presentation.Sections.Library
+	}
+	if strings.TrimSpace(ov.Presentation.Sections.History) != "" {
+		pres.Sections.History = ov.Presentation.Sections.History
+	}
+	if strings.TrimSpace(ov.Presentation.Sections.Favorites) != "" {
+		pres.Sections.Favorites = ov.Presentation.Sections.Favorites
+	}
+	if strings.TrimSpace(ov.Presentation.Sections.WatchLater) != "" {
+		pres.Sections.WatchLater = ov.Presentation.Sections.WatchLater
+	}
 	if strings.TrimSpace(ov.Presentation.Sections.Tracking) != "" {
 		pres.Sections.Tracking = ov.Presentation.Sections.Tracking
 	}
 	if strings.TrimSpace(ov.Presentation.Sections.Courses) != "" {
 		pres.Sections.Courses = ov.Presentation.Sections.Courses
 	}
+	if strings.TrimSpace(ov.Presentation.Sections.GuestTitle) != "" {
+		pres.Sections.GuestTitle = ov.Presentation.Sections.GuestTitle
+	}
+	if strings.TrimSpace(ov.Presentation.Sections.GuestNote) != "" {
+		pres.Sections.GuestNote = ov.Presentation.Sections.GuestNote
+	}
 	if strings.TrimSpace(ov.Presentation.Search.Hint) != "" {
 		pres.Search.Hint = ov.Presentation.Search.Hint
+	}
+	if strings.TrimSpace(ov.Presentation.Search.Placeholder) != "" {
+		pres.Search.Placeholder = ov.Presentation.Search.Placeholder
+	}
+	if strings.TrimSpace(ov.Presentation.Search.VideoLabel) != "" {
+		pres.Search.VideoLabel = ov.Presentation.Search.VideoLabel
 	}
 	if strings.TrimSpace(ov.Presentation.Search.CreatorLabel) != "" {
 		pres.Search.CreatorLabel = ov.Presentation.Search.CreatorLabel
 	}
 	if strings.TrimSpace(ov.Presentation.Search.SeriesLabel) != "" {
 		pres.Search.SeriesLabel = ov.Presentation.Search.SeriesLabel
+	}
+	if strings.TrimSpace(ov.Presentation.Search.ItemCountLabel) != "" {
+		pres.Search.ItemCountLabel = ov.Presentation.Search.ItemCountLabel
+	}
+	if strings.TrimSpace(ov.Presentation.Creator.VideosLabel) != "" {
+		pres.Creator.VideosLabel = ov.Presentation.Creator.VideosLabel
+	}
+	if strings.TrimSpace(ov.Presentation.Creator.CollectionsLabel) != "" {
+		pres.Creator.CollectionsLabel = ov.Presentation.Creator.CollectionsLabel
+	}
+	if strings.TrimSpace(ov.Presentation.Creator.EmptyVideos) != "" {
+		pres.Creator.EmptyVideos = ov.Presentation.Creator.EmptyVideos
+	}
+	if strings.TrimSpace(ov.Presentation.Creator.EmptyCollections) != "" {
+		pres.Creator.EmptyCollections = ov.Presentation.Creator.EmptyCollections
+	}
+	if strings.TrimSpace(ov.Presentation.Detail.ItemLabel) != "" {
+		pres.Detail.ItemLabel = ov.Presentation.Detail.ItemLabel
+	}
+	if strings.TrimSpace(ov.Presentation.Detail.CollectionLabel) != "" {
+		pres.Detail.CollectionLabel = ov.Presentation.Detail.CollectionLabel
+	}
+	if strings.TrimSpace(ov.Presentation.Detail.CollectionUnit) != "" {
+		pres.Detail.CollectionUnit = ov.Presentation.Detail.CollectionUnit
+	}
+	if strings.TrimSpace(ov.Presentation.Detail.Loading) != "" {
+		pres.Detail.Loading = ov.Presentation.Detail.Loading
+	}
+	if strings.TrimSpace(ov.Presentation.Detail.LoadFailed) != "" {
+		pres.Detail.LoadFailed = ov.Presentation.Detail.LoadFailed
+	}
+	if strings.TrimSpace(ov.Presentation.Detail.PreviewAction) != "" {
+		pres.Detail.PreviewAction = ov.Presentation.Detail.PreviewAction
+	}
+	if strings.TrimSpace(ov.Presentation.Detail.AccessAction) != "" {
+		pres.Detail.AccessAction = ov.Presentation.Detail.AccessAction
 	}
 	if strings.TrimSpace(ov.Presentation.Series.TrackLabel) != "" {
 		pres.Series.TrackLabel = ov.Presentation.Series.TrackLabel

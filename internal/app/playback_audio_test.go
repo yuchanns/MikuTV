@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ type audioPlaybackSession struct {
 	audioOnly      bool
 	availableKinds []string
 	lastReq        provider.PlaybackRequest
+	resolveCount   atomic.Int32
 }
 
 func (s *audioPlaybackSession) Close() {}
@@ -29,6 +31,7 @@ func (s *audioPlaybackSession) Item(context.Context, provider.MediaRef) (provide
 }
 
 func (s *audioPlaybackSession) ResolvePlayback(_ context.Context, req provider.PlaybackRequest) (provider.Playback, error) {
+	s.resolveCount.Add(1)
 	s.lastReq = req
 	wantAudio := s.audioOnly
 	if req.MediaKind == provider.PlaybackMediaAudio {
@@ -241,7 +244,8 @@ func TestSwitchMediaKindPreservesPosition(t *testing.T) {
 		t.Fatalf("opened position = %.2f, want ~88.5 preserved", openedPos)
 	}
 
-	// Switch back to audio preserving new position
+	// Switch back to audio preserving new position (reuses cached alternate Media without extra ResolvePlayback!)
+	beforeBack := sess.resolveCount.Load()
 	clock.AudioOnly = false
 	clock.Position = 123.0
 	pb.Tick(time.Now())
@@ -251,5 +255,8 @@ func TestSwitchMediaKindPreservesPosition(t *testing.T) {
 	waitReady(true)
 	if openedPos < 122.5 || openedPos > 123.5 {
 		t.Fatalf("opened position = %.2f, want ~123.0 preserved", openedPos)
+	}
+	if got := sess.resolveCount.Load(); got != beforeBack {
+		t.Fatalf("expected cached alternate audio reuse without ResolvePlayback, got %d -> %d", beforeBack, got)
 	}
 }

@@ -271,9 +271,10 @@ func (p *PageContext) homeShelves(sourceShelves []provider.Collection, picks []p
 			followingTitle = title
 		}
 	}
+	picksTitle, picksNote := p.sourceHomePicks()
 	return []catalogShelf{
-		{id: "continue", title: text.Continue, note: text.ContinueNote, items: history},
-		{id: "picks", title: text.Picks, note: text.PicksNote, items: picks},
+		{id: "continue", title: p.sourceHomeContinueTitle(), note: text.ContinueNote, items: history},
+		{id: "picks", title: picksTitle, note: picksNote, items: picks},
 		{id: "following", title: followingTitle, note: text.FollowingNote, items: followingItems},
 	}
 }
@@ -556,10 +557,11 @@ func (p *PageContext) refreshHome(focus app.FocusID) {
 func (p *PageContext) catalogDiscovery(c *ui.Context, current app.CatalogSnapshot) {
 	home, text := &p.host.home, p.Assets.Text
 	colors := p.Theme.Colors
-	eyebrow, title, note := text.Home.PopularEyebrow, text.Home.Popular, text.Home.PicksNote
+	_, picksNote := p.sourceHomePicks()
+	eyebrow, title, note := text.Home.PopularEyebrow, text.Home.Popular, picksNote
 	switch home.tab {
 	case "ranking":
-		eyebrow, title, note = text.Home.RankingEyebrow, text.Home.Ranking, text.Home.RankingNote
+		eyebrow, title, note = text.Home.RankingEyebrow, text.Home.Ranking, p.sourceHomeRankingNote()
 	case "regions":
 		eyebrow, title = text.Home.RegionsEyebrow, text.Home.Regions
 	}

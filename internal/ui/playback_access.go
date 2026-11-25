@@ -117,8 +117,12 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 	}
 	if state.PreviewPending || playbackPreviewEnded(state) || playbackHasWorkRestriction(state) {
 		purchase := state.Limit == provider.PlaybackPurchase || plan.PreviewRestriction == provider.PlaybackPurchase
+		vipTitle := labels.VIPTitle
+		if state.AudioOnly && labels.AudioVIPTitle != "" {
+			vipTitle = labels.AudioVIPTitle
+		}
 		dialog := playbackAccessDialog{
-			title: p.sourceText(labels.VIPTitle), body: p.sourceText(labels.VIPNoPreview), work: item.item.Title,
+			title: p.sourceText(vipTitle), body: p.sourceText(labels.VIPNoPreview), work: item.item.Title,
 			workAccess: true, returnToDetail: true, purchase: purchase,
 		}
 		if purchase {
@@ -128,9 +132,18 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 			if !purchase {
 				dialog.body = p.sourceText(labels.VIPBody)
 			}
-			trialLabel := fmt.Sprintf(labels.TrialMinutes, max(1, int((state.Duration+30)/60)))
+			trialMin, trialSec := labels.TrialMinutes, labels.TrialSeconds
+			if state.AudioOnly {
+				if labels.AudioTrialMinutes != "" {
+					trialMin = labels.AudioTrialMinutes
+				}
+				if labels.AudioTrialSeconds != "" {
+					trialSec = labels.AudioTrialSeconds
+				}
+			}
+			trialLabel := fmt.Sprintf(trialMin, max(1, int((state.Duration+30)/60)))
 			if state.Duration < 60 {
-				trialLabel = fmt.Sprintf(labels.TrialSeconds, max(1, int(state.Duration)))
+				trialLabel = fmt.Sprintf(trialSec, max(1, int(state.Duration)))
 			}
 			dialog.actions = append(dialog.actions, playbackAccessAction{trialLabel, "play-filled", func() {
 				s.showAccessHelp = false
@@ -140,7 +153,11 @@ func (p *PageContext) playbackAccessDialogFor(state app.PlaybackState, item play
 			}})
 		}
 		if playbackPreviewEnded(state) {
-			dialog.title, dialog.body = labels.TrialEndedTitle, p.sourceText(labels.TrialEndedBody)
+			endedTitle := labels.TrialEndedTitle
+			if state.AudioOnly && labels.AudioTrialEndedTitle != "" {
+				endedTitle = labels.AudioTrialEndedTitle
+			}
+			dialog.title, dialog.body = endedTitle, p.sourceText(labels.TrialEndedBody)
 			if purchase {
 				dialog.body = labels.PurchaseTrialEndedBody
 			}
@@ -283,9 +300,18 @@ func (p *PageContext) playbackPreviewBanner(c *ui.Context, state app.PlaybackSta
 	ui.Row(c.Key("preview-remaining")).Absolute().Left(playerInset).Top(157).Height(39).Radius(9).
 		Padding(0, 15).Gap(12).AlignItems(ui.Center).
 		Background(withAlpha(colors.Overlay.PlayerBottom, 0xc8)).Border(1, rule).Children(func() {
+		trialState, trialLeft := text.TrialState, text.TrialLeft
+		if state.AudioOnly {
+			if text.AudioTrialState != "" {
+				trialState = text.AudioTrialState
+			}
+			if text.AudioTrialLeft != "" {
+				trialLeft = text.AudioTrialLeft
+			}
+		}
 		ui.Icon(c, p.Assets.Icon("lock")).Size(18, 18).TextColor(ink)
-		ui.Text(c, text.TrialState).FontSize(16).TextColor(ink)
+		ui.Text(c, trialState).FontSize(16).TextColor(ink)
 		ui.Box(c).Size(1, 15).Background(rule)
-		ui.Text(c, text.TrialLeft+" "+playbackTime(state.Duration-state.Position)).FontSize(16).TextColor(ink)
+		ui.Text(c, trialLeft+" "+playbackTime(state.Duration-state.Position)).FontSize(16).TextColor(ink)
 	})
 }

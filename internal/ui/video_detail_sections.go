@@ -52,7 +52,7 @@ func (p *PageContext) visibleVideoDetailTabs(detail *videoDetailState) []videoDe
 
 func (p *PageContext) videoDetailTabs(c *ui.Context, detail *videoDetailState, hasMore bool) {
 	text, colors := p.Assets.Text.Detail, p.Theme.Colors
-	allLabels := [...]string{text.Overview, text.Episodes, text.Comments, text.Related}
+	allLabels := [...]string{text.Overview, p.sourceDetailCollectionLabel(), text.Comments, text.Related}
 	allWidths := [...]float32{98, 98, 98, 148}
 	tabs := p.visibleVideoDetailTabs(detail)
 	if !slices.Contains(tabs, detail.tab) {
@@ -173,7 +173,7 @@ func videoDetailSectionFocus(tab videoDetailTab, info *provider.VideoDetails) ap
 func (p *PageContext) videoDetailSection(c *ui.Context, detail *videoDetailState, synopsis videoDetailSynopsis) {
 	text := p.Assets.Text
 	if detail.loading {
-		p.videoDetailText(c, text.Detail.Loading)
+		p.videoDetailText(c, p.sourceDetailLoading())
 		return
 	}
 	if detail.failure != "" {
@@ -219,18 +219,20 @@ func (p *PageContext) videoDetailAbout(c *ui.Context, detail *videoDetailState, 
 							}
 						}
 					}
-					p.videoDetailButton(c, text.Favorite, "detail/star", videoDetailFavorite, 141)
+					if p.canEditFavorites(entry) {
+						p.videoDetailButton(c, text.Favorite, "detail/star", videoDetailFavorite, 141)
+					}
 				})
 			}
 		})
 		ui.Column(c).Width(width / 2).Children(func() {
-			label := text.CurrentVideo
+			label := p.sourceDetailItemLabel()
 			segment := provider.VideoSegment{Title: item.Title, DurationSeconds: item.DurationSeconds}
 			if index := detail.episodeIndex(); index >= 0 {
-				label, segment = text.Collection, videoEpisodes(item.VideoDetails)[index]
+				label, segment = p.sourceDetailCollectionLabel(), videoEpisodes(item.VideoDetails)[index]
 				switch item.Ref.Kind {
 				case provider.Series:
-					label = text.SeriesUnit
+					label = p.sourceDetailCollectionUnit()
 				case provider.Course:
 					label = text.CourseUnit
 				}

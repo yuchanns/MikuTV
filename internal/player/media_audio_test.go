@@ -126,8 +126,11 @@ func TestOpenMediaDirectAudioContainersAndRangeProxy(t *testing.T) {
 			if string(body) != "fLaC" {
 				t.Fatalf("body = %q, want fLaC", body)
 			}
-			if tr.rangeHeader != "bytes=0-3" {
-				t.Fatalf("forwarded Range = %q, want bytes=0-3", tr.rangeHeader)
+			if tr.rangeHeader != "bytes=0-" {
+				t.Fatalf("upstream Range = %q, want bytes=0-", tr.rangeHeader)
+			}
+			if cr := resp.Header.Get("Content-Range"); cr != "bytes 0-3/12" {
+				t.Fatalf("Content-Range = %q, want bytes 0-3/12", cr)
 			}
 			if gotCT := resp.Header.Get("Content-Type"); gotCT != tc.wantCT {
 				t.Fatalf("Content-Type = %q, want %q", gotCT, tc.wantCT)

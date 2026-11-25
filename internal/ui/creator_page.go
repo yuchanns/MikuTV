@@ -769,19 +769,7 @@ func (p *PageContext) creatorOverview(c *ui.Context, state *creatorState, canFol
 }
 
 func (p *PageContext) creatorTabLabel(tab provider.CreatorTab) string {
-	text := p.Assets.Text.Creator
-	switch tab {
-	case provider.CreatorTabVideos:
-		return text.Videos
-	case provider.CreatorTabPosts:
-		return text.Posts
-	case provider.CreatorTabCollections:
-		return text.Collections
-	case provider.CreatorTabAbout:
-		return text.About
-	default:
-		return string(tab)
-	}
+	return p.sourceCreatorTabLabel(tab)
 }
 
 func (p *PageContext) creatorTabs(c *ui.Context, state *creatorState, tabs []provider.CreatorTab, headerFocus app.FocusID) {
@@ -958,7 +946,7 @@ func (p *PageContext) creatorVideosSection(c *ui.Context, state *creatorState) {
 				}).Margin(20, 0, 0, 0)
 				return
 			}
-			p.videoDetailText(c, text.Creator.NoVideos)
+			p.videoDetailText(c, p.sourceCreatorEmptyVideos())
 			return
 		}
 
@@ -1231,7 +1219,7 @@ func (p *PageContext) creatorCollectionsSection(c *ui.Context, state *creatorSta
 				}).Margin(20, 0, 0, 0)
 				return
 			}
-			p.videoDetailText(c, text.Creator.NoCollections)
+			p.videoDetailText(c, p.sourceCreatorEmptyCollections())
 			return
 		}
 

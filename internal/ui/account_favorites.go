@@ -94,7 +94,8 @@ func (p *PageContext) renderLibrary(c *ui.Context, query provider.AccountQuery) 
 		p.renderLibraryTabs(c, query.Section)
 		ui.Column(c.Key("library-body/" + string(query.Section) + "/" + query.Folder)).FillWidth().Children(func() {
 			if guest {
-				p.libraryEmpty(c, "library", text.Activity.LibraryGuestTitle, text.Activity.LibraryGuestNote,
+				guestTitle, guestNote := p.libraryGuestText()
+				p.libraryEmpty(c, "library", guestTitle, guestNote,
 					p.signInActionLabel(), "user", emptyFocus, func() { p.State.Push(app.Route{Page: app.Account}) })
 				return
 			}
@@ -235,7 +236,7 @@ func (p *PageContext) libraryHeading(c *ui.Context, folder provider.AccountRow, 
 		return
 	}
 	ui.Box(c).Absolute().Top(42).Left(103).Children(func() {
-		p.libraryTextLink(c, text.FoldersBack, "back", "favorites/back", favoriteHeader, func() {
+		p.libraryTextLink(c, p.libraryFoldersBackLabel(), "back", "favorites/back", favoriteHeader, func() {
 			p.State.Back()
 		})
 	})

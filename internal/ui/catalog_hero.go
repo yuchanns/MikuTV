@@ -430,7 +430,7 @@ func (p *PageContext) catalogHeroActions(c *ui.Context, item *provider.MediaItem
 				border: d.secondaryBorder,
 			}).Width(185).Center()
 		}
-		if item != nil && entry.Capabilities.Has(provider.EditVideo) {
+		if item != nil && p.canEditWatchLater(entry) {
 			focused := p.State.Focus == homeLaterAction
 			background, ink, borderColor := d.secondaryFill, paint(colors.Text.Primary), d.secondaryBorder
 			if focused {

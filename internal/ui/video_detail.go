@@ -333,7 +333,7 @@ func (videoDetailPage) Render(c *ui.Context, p *PageContext) {
 	p.region(videoDetailControls, nil)
 	entry, _ := p.State.Current()
 	if p.active && p.State.Focus == videoDetailPlay && !entry.Capabilities.Has(provider.ResolvePlayback) {
-		if entry.Capabilities.Has(provider.EditVideo) {
+		if p.canEditWatchLater(entry) {
 			p.State.Focus = videoDetailLater
 		} else {
 			p.State.Focus = videoDetailOverview.focusID()
@@ -483,9 +483,9 @@ func (p *PageContext) videoDetailActions(c *ui.Context, item provider.MediaItem)
 	if detail := item.VideoDetails; detail != nil {
 		switch detail.Access {
 		case provider.VideoAccessPreview:
-			play, icon = text.Detail.Preview, "lock"
+			play, icon = p.sourceDetailPreviewAction(), "lock"
 		case provider.VideoAccessRestricted:
-			play, icon = text.Detail.GetAccess, "lock"
+			play, icon = p.sourceDetailAccessAction(), "lock"
 		}
 	}
 	ui.Row(c).Absolute().Top(492 - videoDetailMetadataTop).Left(0).Gap(16).Children(func() {
@@ -499,11 +499,13 @@ func (p *PageContext) videoDetailActions(c *ui.Context, item provider.MediaItem)
 			}, style).Width(179).Center()
 		}
 		if entry.Capabilities.Has(provider.EditVideo) {
-			laterIcon := "detail/plus"
-			if item.VideoDetails != nil && item.VideoDetails.Engagement.WatchLater {
-				laterIcon = "detail/check"
+			if p.canEditWatchLater(entry) {
+				laterIcon := "detail/plus"
+				if item.VideoDetails != nil && item.VideoDetails.Engagement.WatchLater {
+					laterIcon = "detail/check"
+				}
+				p.videoDetailButton(c, text.Home.Later, laterIcon, videoDetailLater, 185)
 			}
-			p.videoDetailButton(c, text.Home.Later, laterIcon, videoDetailLater, 185)
 			if item.VideoDetails != nil {
 				for _, action := range item.VideoDetails.Actions {
 					if action.Slot == provider.ActionSlotHero {
@@ -602,6 +604,6 @@ func (p *PageContext) videoDetailFailure(code provider.ErrorCode) string {
 	case provider.RateLimited:
 		return text.Home.RateLimited
 	default:
-		return text.Detail.LoadFailed
+		return p.sourceDetailLoadFailed()
 	}
 }

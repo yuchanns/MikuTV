@@ -774,6 +774,7 @@ type tvosPlayer struct {
 	view            objc.ID
 	layer           objc.ID
 	asset           objc.ID
+	pendingAsset    objc.ID
 	observedItem    objc.ID
 	displayCriteria objc.ID
 	videoOutput     objc.ID
@@ -1688,6 +1689,10 @@ func (p *tvosPlayer) clearItem() {
 	setRetained(&p.displayCriteria, 0)
 	n.setBool(p.view, n.selSetHidden, true)
 	n.getObj(p.player, n.selPause)
+	if p.pendingAsset != 0 {
+		n.getObj(p.pendingAsset, n.selCancelLoading)
+		setRetained(&p.pendingAsset, 0)
+	}
 	if p.asset != 0 {
 		n.getObj(p.asset, n.selCancelLoading)
 		setRetained(&p.asset, 0)
@@ -1790,15 +1795,30 @@ func (p *tvosPlayer) open(address string, position float64) bool {
 		p.clearDisplayCriteria()
 		return false
 	}
-	p.clearItem()
+	replacing := n.getObj(p.player, n.selCurrentItem) != 0
+	if !replacing {
+		p.clearItem()
+	} else {
+		p.generation++
+		if p.pendingAsset != 0 {
+			n.getObj(p.pendingAsset, n.selCancelLoading)
+			setRetained(&p.pendingAsset, 0)
+		}
+	}
 	p.target = max(position, 0)
 	p.audioInterrupted = false
 	asset := n.withObj2(objc.ID(objc.GetClass("AVURLAsset")), n.selURLAssetWithURL, url, 0)
 	if asset == 0 {
-		p.clearDisplayCriteria()
+		if !replacing {
+			p.clearDisplayCriteria()
+		}
 		return false
 	}
-	setRetained(&p.asset, asset)
+	if replacing {
+		setRetained(&p.pendingAsset, asset)
+	} else {
+		setRetained(&p.asset, asset)
+	}
 	generation := p.generation
 	block := objc.NewBlock(func(objc.Block) {
 		runOnMain(func() {
@@ -1825,9 +1845,48 @@ func (p *tvosPlayer) open(address string, position float64) bool {
 					log.Printf("player-playable: status=%d playable=%t code=%d domain=%q desc=%q",
 						status, playable, code, domain, desc)
 				}
+				if replacing {
+					setRetained(&p.pendingAsset, 0)
+				}
 				p.errorCode = code
 				p.clearDisplayCriteria()
 				return
+			}
+			if replacing {
+				// Keep the transition continuous if the previous item advanced while
+				// the replacement asset parsed its headers.
+				if p.rate > 0 && !p.seeking && n.getObj(p.player, n.selCurrentItem) != 0 {
+					livePos := secondsAt(n.getCMTime(p.player, n.selCurrentTime))
+					if livePos > p.target && livePos-p.target < 5.0 {
+						p.target = livePos
+					}
+				}
+				if oldItem := n.getObj(p.player, n.selCurrentItem); oldItem != 0 {
+					n.getObj(oldItem, n.selCancelPendingSeeks)
+				}
+				p.observeItem(0)
+				p.detachBackdropOutput()
+				if p.asset != 0 && p.asset != asset {
+					n.getObj(p.asset, n.selCancelLoading)
+				}
+				setRetained(&p.asset, asset)
+				setRetained(&p.pendingAsset, 0)
+				p.seekGeneration++
+				p.seeking = false
+				p.ended = false
+				p.resolvedTracks = false
+				p.resolvedVideoFormat = false
+				p.audioActive = false
+				p.hdrVideo = false
+				p.errorCode = 0
+				p.cachedDuration = 0
+				p.cachedBuffer = 0
+				p.appliedForwardBuffer = 0
+				p.lastTimeControlStatus = -1
+				p.lastWaitingReason = ""
+				setRetained(&p.displayCriteria, 0)
+				setRetained(&p.backdropFrame, 0)
+				p.blurBackdrop(0)
 			}
 			item := n.withObj(objc.ID(objc.GetClass("AVPlayerItem")), n.selPlayerItemWithAsset, asset)
 			p.applyForwardBuffer(item)
@@ -1837,9 +1896,7 @@ func (p *tvosPlayer) open(address string, position float64) bool {
 			p.nextBufferSample = 0
 			p.applyDisplayCriteria()
 			p.inspectTracksAndDisplayCriteria()
-			if !p.audioOnly {
-				n.setBool(p.view, n.selSetHidden, false)
-			}
+			n.setBool(p.view, n.selSetHidden, p.audioOnly)
 			if p.target > 0 {
 				p.seek(p.target)
 			} else {

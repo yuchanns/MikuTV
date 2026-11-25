@@ -66,14 +66,47 @@ const (
 )
 
 type SectionPresentation struct {
-	Tracking string `json:"tracking,omitempty"`
-	Courses  string `json:"courses,omitempty"`
+	Library    string `json:"library,omitempty"`
+	History    string `json:"history,omitempty"`
+	Favorites  string `json:"favorites,omitempty"`
+	WatchLater string `json:"watchLater,omitempty"`
+	Tracking   string `json:"tracking,omitempty"`
+	Courses    string `json:"courses,omitempty"`
+	GuestTitle string `json:"guestTitle,omitempty"`
+	GuestNote  string `json:"guestNote,omitempty"`
+}
+
+type HomePresentation struct {
+	PicksTitle    string `json:"picksTitle,omitempty"`
+	PicksNote     string `json:"picksNote,omitempty"`
+	ContinueTitle string `json:"continueTitle,omitempty"`
+	RankingNote   string `json:"rankingNote,omitempty"`
 }
 
 type SearchPresentation struct {
-	Hint         string `json:"hint,omitempty"`
-	CreatorLabel string `json:"creatorLabel,omitempty"`
-	SeriesLabel  string `json:"seriesLabel,omitempty"`
+	Hint           string `json:"hint,omitempty"`
+	Placeholder    string `json:"placeholder,omitempty"`
+	VideoLabel     string `json:"videoLabel,omitempty"`
+	CreatorLabel   string `json:"creatorLabel,omitempty"`
+	SeriesLabel    string `json:"seriesLabel,omitempty"`
+	ItemCountLabel string `json:"itemCountLabel,omitempty"`
+}
+
+type CreatorPresentation struct {
+	VideosLabel      string `json:"videosLabel,omitempty"`
+	CollectionsLabel string `json:"collectionsLabel,omitempty"`
+	EmptyVideos      string `json:"emptyVideos,omitempty"`
+	EmptyCollections string `json:"emptyCollections,omitempty"`
+}
+
+type DetailPresentation struct {
+	ItemLabel       string `json:"itemLabel,omitempty"`
+	CollectionLabel string `json:"collectionLabel,omitempty"`
+	CollectionUnit  string `json:"collectionUnit,omitempty"`
+	Loading         string `json:"loading,omitempty"`
+	LoadFailed      string `json:"loadFailed,omitempty"`
+	PreviewAction   string `json:"previewAction,omitempty"`
+	AccessAction    string `json:"accessAction,omitempty"`
 }
 
 type SeriesPresentation struct {
@@ -86,8 +119,11 @@ type SourcePresentation struct {
 	CreatorGroupTitle string              `json:"creatorGroupTitle,omitempty"`
 	Membership        string              `json:"membership,omitempty"`
 	MobileApp         string              `json:"mobileApp,omitempty"`
+	Home              HomePresentation    `json:"home,omitzero"`
 	Sections          SectionPresentation `json:"sections,omitzero"`
 	Search            SearchPresentation  `json:"search,omitzero"`
+	Creator           CreatorPresentation `json:"creator,omitzero"`
+	Detail            DetailPresentation  `json:"detail,omitzero"`
 	Series            SeriesPresentation  `json:"series,omitzero"`
 }
 
