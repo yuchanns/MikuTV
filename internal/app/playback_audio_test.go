@@ -13,7 +13,9 @@ import (
 )
 
 type audioPlaybackSession struct {
-	audioOnly bool
+	audioOnly      bool
+	availableKinds []string
+	lastReq        provider.PlaybackRequest
 }
 
 func (s *audioPlaybackSession) Close() {}
@@ -26,9 +28,16 @@ func (s *audioPlaybackSession) Item(context.Context, provider.MediaRef) (provide
 	return provider.MediaItem{}, nil
 }
 
-func (s *audioPlaybackSession) ResolvePlayback(context.Context, provider.PlaybackRequest) (provider.Playback, error) {
+func (s *audioPlaybackSession) ResolvePlayback(_ context.Context, req provider.PlaybackRequest) (provider.Playback, error) {
+	s.lastReq = req
+	wantAudio := s.audioOnly
+	if req.MediaKind == provider.PlaybackMediaAudio {
+		wantAudio = true
+	} else if req.MediaKind == provider.PlaybackMediaVideo {
+		wantAudio = false
+	}
 	stream := provider.PlaybackStream{Format: provider.PlaybackDirect}
-	if s.audioOnly {
+	if wantAudio {
 		stream.Audio = &provider.PlaybackTrack{
 			ContentType: "audio/mpeg",
 			Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/track.mp3"}},
@@ -41,8 +50,9 @@ func (s *audioPlaybackSession) ResolvePlayback(context.Context, provider.Playbac
 	}
 	return provider.Playback{
 		Plan: provider.PlaybackPlan{
-			Duration: 240,
-			Streams:  []provider.PlaybackStream{stream},
+			Duration:       240,
+			AvailableKinds: s.availableKinds,
+			Streams:        []provider.PlaybackStream{stream},
 		},
 		Transport: audioMockTransport{},
 	}, nil
@@ -158,5 +168,88 @@ func TestAudioPlaybackStatePauseDimAndInlinePreviewSafety(t *testing.T) {
 	ps := pb.InlinePreviewState()
 	if !ps.Active || !ps.AudioOnly || ps.HasFrame {
 		t.Fatalf("audio inline preview state = %+v, want Active=true AudioOnly=true HasFrame=false", ps)
+	}
+}
+
+func TestSwitchMediaKindPreservesPosition(t *testing.T) {
+	sess := &audioPlaybackSession{
+		audioOnly:      true,
+		availableKinds: []string{provider.PlaybackMediaAudio, provider.PlaybackMediaVideo},
+	}
+	queue := make(chan func(), 16)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	catalog := NewCatalog(func(string) provider.Session { return sess }, func(fn func()) { queue <- fn }, func() {})
+	defer catalog.Close()
+	catalog.Open(Entry{
+		ID:           "demo",
+		SourceID:     "demo",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.ResolvePlayback},
+	})
+
+	var (
+		openedPos float64
+		clock     = player.Status{HasFrame: true, AudioOnly: true, Position: 88.5, Duration: 240}
+	)
+	pb := NewPlayback(catalog, player.Engine{
+		Open:     func(_ string, pos float64) bool { openedPos = pos; return true },
+		SetRate:  func(float64) {},
+		Stop:     func() {},
+		Snapshot: func() player.Status { return clock },
+	}, nil, func(fn func()) { queue <- fn }, func() {})
+	defer pb.Close()
+
+	waitReady := func(wantAudio bool) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			drain()
+			st := pb.State()
+			if !st.Loading && !st.Switching && st.AudioOnly == wantAudio {
+				return
+			}
+			select {
+			case fn := <-queue:
+				fn()
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		t.Fatalf("timed out waiting for AudioOnly=%t (state=%+v)", wantAudio, pb.State())
+	}
+
+	target := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "demo", Kind: provider.Video, ID: "track-mv"}}
+	pb.Start(target, "", false, nil)
+	waitReady(true)
+	pb.Tick(time.Now())
+
+	if !pb.SwitchMediaKind(provider.PlaybackMediaVideo) {
+		t.Fatal("SwitchMediaKind(video) returned false")
+	}
+	waitReady(false)
+	if sess.lastReq.MediaKind != provider.PlaybackMediaVideo {
+		t.Fatalf("request MediaKind = %q, want video", sess.lastReq.MediaKind)
+	}
+	if openedPos < 88.0 || openedPos > 89.0 {
+		t.Fatalf("opened position = %.2f, want ~88.5 preserved", openedPos)
+	}
+
+	// Switch back to audio preserving new position
+	clock.AudioOnly = false
+	clock.Position = 123.0
+	pb.Tick(time.Now())
+	if !pb.SwitchMediaKind(provider.PlaybackMediaAudio) {
+		t.Fatal("SwitchMediaKind(audio) returned false")
+	}
+	waitReady(true)
+	if openedPos < 122.5 || openedPos > 123.5 {
+		t.Fatalf("opened position = %.2f, want ~123.0 preserved", openedPos)
 	}
 }

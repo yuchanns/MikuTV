@@ -118,7 +118,9 @@
     "ModeSequential": "Sequential",
     "ModeRepeatAll": "Repeat All",
     "ModeRepeatOne": "Repeat One",
-    "ModeShuffle": "Shuffle"
+    "ModeShuffle": "Shuffle",
+    "SwitchToVideo": "Switch to Video",
+    "SwitchToAudio": "Switch to Audio"
   },
   "PlaybackPrefs": {
     "Title": "Playback",

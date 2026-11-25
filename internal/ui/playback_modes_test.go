@@ -16,8 +16,9 @@ import (
 )
 
 type modesTestSession struct {
-	resolved []string
-	folder   []provider.AccountRow
+	resolved       []string
+	folder         []provider.AccountRow
+	availableKinds []string
 }
 
 func (s *modesTestSession) Close() {}
@@ -32,16 +33,23 @@ func (s *modesTestSession) Item(context.Context, provider.MediaRef) (provider.Me
 
 func (s *modesTestSession) ResolvePlayback(_ context.Context, req provider.PlaybackRequest) (provider.Playback, error) {
 	s.resolved = append(s.resolved, req.Ref.ID)
+	stream := provider.PlaybackStream{Format: provider.PlaybackDirect}
+	if req.MediaKind == provider.PlaybackMediaVideo {
+		stream.Video = provider.PlaybackTrack{
+			ContentType: "video/mp4",
+			Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/" + req.Ref.ID + ".mp4"}},
+		}
+	} else {
+		stream.Audio = &provider.PlaybackTrack{
+			ContentType: "audio/mpeg",
+			Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/" + req.Ref.ID + ".mp3"}},
+		}
+	}
 	return provider.Playback{
 		Plan: provider.PlaybackPlan{
-			Duration: 180,
-			Streams: []provider.PlaybackStream{{
-				Format: provider.PlaybackDirect,
-				Audio: &provider.PlaybackTrack{
-					ContentType: "audio/mpeg",
-					Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/" + req.Ref.ID + ".mp3"}},
-				},
-			}},
+			Duration:       180,
+			AvailableKinds: s.availableKinds,
+			Streams:        []provider.PlaybackStream{stream},
 		},
 		Transport: modesTestTransport{},
 	}, nil
@@ -303,5 +311,75 @@ func TestFavoritesFolderUnlocksPlayAll(t *testing.T) {
 	tester.Frame()
 	if _, found := tester.Access(assets.Text.Activity.PlayAll); !found {
 		t.Fatal("expected Play All button inside favorite folder")
+	}
+}
+
+func TestUnifiedHUDMediaKindSwitchButton(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []app.Entry{{
+		ID: "demo", SourceID: "demo", Name: "Demo",
+		Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.ResolvePlayback},
+	}}
+	state, err := app.NewState(entries, "demo", pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := &modesTestSession{
+		availableKinds: []string{provider.PlaybackMediaAudio, provider.PlaybackMediaVideo},
+	}
+	queue := make(chan func(), 32)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	catalog := app.NewCatalog(func(string) provider.Session { return sess }, func(fn func()) { queue <- fn }, func() {})
+	defer catalog.Close()
+	catalog.Open(entries[0])
+
+	pb := app.NewPlayback(catalog, player.Engine{
+		Open:     func(string, float64) bool { return true },
+		SetRate:  func(float64) {},
+		Stop:     func() {},
+		Snapshot: func() player.Status { return player.Status{HasFrame: true, Position: 42, Duration: 180} },
+	}, nil, func(fn func()) { queue <- fn }, func() {})
+	defer pb.Close()
+
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
+	view.Playback = pb
+	state.Push(app.Route{Page: app.Player})
+	view.player = playbackView{
+		items:   []playbackItem{{item: provider.MediaItem{Ref: provider.MediaRef{EntryID: "demo", Kind: provider.Video, ID: "mv1"}, Title: "Track"}}},
+		visible: true,
+	}
+	view.startPlaybackItem(0, nil)
+	time.Sleep(30 * time.Millisecond)
+	drain()
+
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	tester.Frame()
+	if _, found := tester.Access(assets.Text.Playback.SwitchToVideo); !found {
+		t.Fatal("expected Switch to Video button in audio mode when both kinds available")
+	}
+
+	// Switch to video and verify button flips to Switch to Audio
+	pb.SwitchMediaKind(provider.PlaybackMediaVideo)
+	time.Sleep(30 * time.Millisecond)
+	drain()
+	tester.Frame()
+	if _, found := tester.Access(assets.Text.Playback.SwitchToAudio); !found {
+		t.Fatal("expected Switch to Audio button in video mode when both kinds available")
 	}
 }

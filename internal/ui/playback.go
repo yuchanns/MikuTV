@@ -27,6 +27,7 @@ const (
 	playerComments     app.FocusID = "player/comments"
 	playerFavorite     app.FocusID = "player/favorite"
 	playerDanmaku      app.FocusID = "player/danmaku"
+	playerMediaMode    app.FocusID = "player/media-mode"
 	playerLoopMode     app.FocusID = "player/loop-mode"
 	playerSubtitles    app.FocusID = "player/subtitles"
 	playerAudio        app.FocusID = "player/audio"
@@ -308,6 +309,14 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 			s.discussion.item = metadata
 		}
 	})
+}
+
+func playbackCanSwitchMediaKind(state app.PlaybackState, liveMode bool) bool {
+	if liveMode {
+		return false
+	}
+	kinds := state.Resolution.Plan.AvailableKinds
+	return slices.Contains(kinds, provider.PlaybackMediaAudio) && slices.Contains(kinds, provider.PlaybackMediaVideo)
 }
 
 func (v *View) supportsPlaybackModes(liveMode bool) bool {
@@ -1020,6 +1029,15 @@ func (p *PageContext) playbackControls(c *ui.Context, state app.PlaybackState, i
 				}
 				if entry.Capabilities.Has(provider.ReadDanmaku) {
 					controls.playerButton(c, playerDanmaku, "", text.Danmaku, text.Danmaku, false, func() { s.openPanel(v, playerDanmaku) })
+				}
+				if playbackCanSwitchMediaKind(state, liveMode) {
+					icon, label, targetKind := "stage-audio", text.SwitchToAudio, provider.PlaybackMediaAudio
+					if state.AudioOnly {
+						icon, label, targetKind = "stage-video", text.SwitchToVideo, provider.PlaybackMediaVideo
+					}
+					controls.playerButton(c, playerMediaMode, icon, label, "", false, func() {
+						v.Playback.SwitchMediaKind(targetKind)
+					})
 				}
 				if v.supportsPlaybackModes(liveMode) {
 					mode := v.playbackLoopMode()

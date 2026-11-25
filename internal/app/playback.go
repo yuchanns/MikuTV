@@ -111,6 +111,7 @@ type Playback struct {
 	cancel           context.CancelFunc
 	request          uint64
 	selectedAudio    string
+	mediaKind        string
 	audioCancel      context.CancelFunc
 	audioRequest     uint64
 	refreshed        bool
@@ -285,6 +286,7 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 	p.previewConfirmed, p.hdrBlocked = false, false
 	p.branchID, p.branchState, p.branchTriggered = "", "", false
 	p.selectedAudio = ""
+	p.mediaKind = ""
 	p.lastSaved, p.savedAsEnd = -1, false
 	p.trickRate = 0
 	p.resetAutoQuality(true)
@@ -324,6 +326,7 @@ func (p *Playback) Close() {
 	p.active = false
 	p.branchID, p.branchState, p.branchTriggered = "", "", false
 	p.selectedAudio = ""
+	p.mediaKind = ""
 	p.state = PlaybackState{Revision: p.state.Revision}
 	p.rate = 0
 	p.trickRate = 0
@@ -490,10 +493,11 @@ func (p *Playback) resolveMode(selected, requestQuality, selectedLine string, pr
 		preferredQ = p.preferredQuality()
 	}
 	selectedAudio := p.selectedAudio
+	mediaKind := p.mediaKind
 	resolver, _ := p.catalog.session.(provider.PlaybackReader)
 	input := provider.PlaybackRequest{
 		PlaybackTarget: p.state.Target, Quality: requestQuality, PreferredQuality: preferredQ, Line: selectedLine,
-		BranchID: p.branchID, BranchState: p.branchState, HDR: caps.HDR, HEVC: caps.HEVC,
+		MediaKind: mediaKind, BranchID: p.branchID, BranchState: p.branchState, HDR: caps.HDR, HEVC: caps.HEVC,
 	}
 	go func() {
 		var result provider.Playback
@@ -1112,6 +1116,28 @@ func (p *Playback) ChooseQuality(quality string) {
 	p.refreshed = false
 	p.resetAutoQuality(quality == "")
 	p.resolveMode(quality, quality, p.state.SelectedLine, p.media != nil && p.state.Failure == "", false)
+}
+
+func (p *Playback) SwitchMediaKind(kind string) bool {
+	if !p.active || p.isLive() || p.state.Loading || p.state.Switching {
+		return false
+	}
+	if kind != provider.PlaybackMediaAudio && kind != provider.PlaybackMediaVideo {
+		return false
+	}
+	if !slices.Contains(p.state.Resolution.Plan.AvailableKinds, kind) {
+		return false
+	}
+	if (kind == provider.PlaybackMediaAudio) == p.state.AudioOnly && p.media != nil && p.state.Failure == "" {
+		return true
+	}
+	p.trickRate = 0
+	p.refreshed = false
+	p.mediaKind = kind
+	p.selectedAudio = ""
+	p.resetAutoQuality(true)
+	p.resolveMode("", "", p.state.SelectedLine, p.media != nil && p.state.Failure == "", false)
+	return true
 }
 
 func (p *Playback) ChooseLine(line string) {

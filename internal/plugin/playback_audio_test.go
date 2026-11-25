@@ -67,3 +67,43 @@ func TestOwnPlaybackPlanAcceptsPureAudioDirectStream(t *testing.T) {
 		t.Fatal("expected unauthorized audio host to be rejected")
 	}
 }
+
+func TestOwnPlaybackPlanValidatesAvailableKinds(t *testing.T) {
+	var manifest sourceManifest
+	manifest.ID = "audio-test"
+	manifest.Permissions.Network = []string{"cdn.example"}
+	src := &Source{manifest: manifest}
+	sess := &Session{source: src}
+	allow := src.allowRequest(true)
+	req := provider.PlaybackRequest{
+		PlaybackTarget: provider.PlaybackTarget{
+			Ref: provider.MediaRef{EntryID: "audio-test", Kind: provider.Video, ID: "track-1"},
+		},
+		MediaKind: provider.PlaybackMediaVideo,
+	}
+	if !validPlaybackMediaKind(req.MediaKind) || !validPlaybackMediaKind("") || validPlaybackMediaKind("invalid") {
+		t.Fatal("unexpected validPlaybackMediaKind behavior")
+	}
+	plan := provider.PlaybackPlan{
+		Duration:       215,
+		AvailableKinds: []string{"audio", "video", "audio"},
+		Streams: []provider.PlaybackStream{{
+			Format: provider.PlaybackDirect,
+			Video: provider.PlaybackTrack{
+				ContentType: "video/mp4",
+				Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/mv.mp4"}},
+			},
+		}},
+	}
+	if !sess.ownPlaybackPlan(&plan, req, allow) {
+		t.Fatal("expected valid AvailableKinds to pass")
+	}
+	if len(plan.AvailableKinds) != 2 {
+		t.Fatalf("expected deduplicated AvailableKinds, got %v", plan.AvailableKinds)
+	}
+	bad := plan
+	bad.AvailableKinds = []string{"audio", "bogus"}
+	if sess.ownPlaybackPlan(&bad, req, allow) {
+		t.Fatal("expected invalid AvailableKinds entry to fail validation")
+	}
+}

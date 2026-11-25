@@ -27,10 +27,18 @@ func validPreferredQuality(pref string) bool {
 	return false
 }
 
+func validPlaybackMediaKind(kind string) bool {
+	switch kind {
+	case "", provider.PlaybackMediaAudio, provider.PlaybackMediaVideo:
+		return true
+	}
+	return false
+}
+
 func (s *Session) ResolvePlayback(ctx context.Context, request provider.PlaybackRequest) (provider.Playback, error) {
 	var result provider.Playback
 	if !s.ownsPlayback(request.PlaybackTarget) || len(request.Quality) > 512 || !validPreferredQuality(request.PreferredQuality) ||
-		len(request.Line) > 128 || len(request.BranchID) > 256 || len(request.BranchState) > 4096 {
+		len(request.Line) > 128 || !validPlaybackMediaKind(request.MediaKind) || len(request.BranchID) > 256 || len(request.BranchState) > 4096 {
 		return result, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
@@ -152,6 +160,21 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 	}
 	if plan.Line != "" && !lines[plan.Line] {
 		return false
+	}
+	if len(plan.AvailableKinds) > 0 {
+		seenKinds := make(map[string]bool, len(plan.AvailableKinds))
+		kinds := plan.AvailableKinds[:0]
+		for _, k := range plan.AvailableKinds {
+			k = strings.TrimSpace(k)
+			if k != provider.PlaybackMediaAudio && k != provider.PlaybackMediaVideo {
+				return false
+			}
+			if !seenKinds[k] {
+				seenKinds[k] = true
+				kinds = append(kinds, k)
+			}
+		}
+		plan.AvailableKinds = kinds
 	}
 	for index := range plan.Streams {
 		stream := &plan.Streams[index]

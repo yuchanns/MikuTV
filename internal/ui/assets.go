@@ -284,6 +284,7 @@ type playbackLabels struct {
 	AudioTrack, AudioDefault                                                                              string
 	FastForward, Rewind                                                                                   string
 	Playlist, ModeSequential, ModeRepeatAll, ModeRepeatOne, ModeShuffle                                   string
+	SwitchToVideo, SwitchToAudio                                                                          string
 }
 
 type playbackAccessLabels struct {
