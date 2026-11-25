@@ -96,6 +96,31 @@ MikuTV 通过 GitHub Topic **`mikutv-plugin`**（或用户直接输入的 `owner
 - 静态清单 `permissions.network` 中拒绝内网 IP、回环地址（`127.0.0.1`）、链路本地地址、CGNAT（`100.64.0.0/10`）与 `localhost`；通配符（`*.example.com`）要求具备合法的 eTLD+1 根域名。
 - **自建服务器动态来源放行（`authentication.serverURL`）**：当内容源声明 `"methods": ["credentials"]` 且 `"serverURL": "required"`（或 `"optional"`）时，`permissions.network` 可留空。用户在登录表单输入 `http://` 或 `https://` 服务器地址后，MikuTV 会为当前会话动态放行且**仅放行该精确 Origin（`scheme://host:port`）**的 `fetch`、封面图片与媒体播放请求（含局域网地址），同时继续严格拦截其他一切内网 IP、端口和未声明域名。
 
+### 鉴权封面加载（`permissions.artwork`）
+
+默认情况下，MikuTV 加载外部封面图片时不携带 Cookie 也不跟随重定向。自宿主 `0.1.4` 起，若带登录能力的内容源（如网盘类插件）其缩略图或背景图需要凭会话 Cookie 访问 HTTPS 鉴权接口，可通过 `permissions.artwork` 按需声明：
+
+```json
+"minAppVersion": "0.1.4",
+"permissions": {
+  "network": [
+    "api.example.com",
+    "*.cdn.example.com"
+  ],
+  "artwork": {
+    "hosts": [
+      "api.example.com"
+    ],
+    "referer": "https://api.example.com/"
+  }
+}
+```
+
+- 前置条件：必须同时声明 `account.signIn` 能力，并将 `minAppVersion` 设为 `"0.1.4"` 及以上。
+- `hosts` 需填写 1–16 个精确公网 HTTPS 域名（禁止 `*.example.com` 通配符），且每一项都必须包含在 `permissions.network` 允许范围内。
+- 可选的 `referer` 须为合法的 `https://` URL（不超过 512 字符），其域名同样须在 `permissions.network` 允许范围内。
+- 运行时，MikuTV 仅在请求声明的精确 `artwork.hosts` 时附带当前会话 Cookie 与 `Referer`，允许最多 5 跳经校验的 HTTPS 重定向，并在跨源重定向时自动剥离 Cookie；未声明该项的插件与非声明域名维持零 Cookie、不重定向的默认策略。
+
 ### 账号密码与自建服务器登录（`methods: ["credentials"]`）
 
 对接自建媒体服务器（如 Jellyfin）或账号密码体系的内容源可在 `authentication.methods` 中声明 `"credentials"`：
