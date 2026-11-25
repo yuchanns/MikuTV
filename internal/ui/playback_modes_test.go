@@ -231,6 +231,26 @@ func TestPlaybackModesCapabilityGatingAndStepBehavior(t *testing.T) {
 		if _, found := tester.Access(assets.Text.Playback.Playlist); !found {
 			t.Fatal("expected (i) drawer to show Playlist button/section when keepQueue=true and len(items)>1")
 		}
+
+		// Persisted RepeatOne must NOT silently trap standalone single-item playback when the mode control is hidden.
+		_ = view.PlaybackSettings.Update(func(cfg *app.PlaybackPreferences) {
+			cfg.LoopMode = app.PlaybackLoopRepeatOne
+			cfg.Autoplay = false
+		})
+		view.player = playbackView{items: items[:1], keepQueue: false, visible: true}
+		view.startPlaybackItem(0, nil)
+		time.Sleep(30 * time.Millisecond)
+		drain()
+		if got := view.playbackLoopMode(); got != app.PlaybackLoopSequential {
+			t.Fatalf("single-item playbackLoopMode = %q, want sequential", got)
+		}
+		seeksBefore := *seekZero
+		clock.Ended = true
+		view.Playback.Tick(time.Now())
+		tester.Frame()
+		if *seekZero != seeksBefore {
+			t.Fatalf("single-item playback unexpectedly repeated under hidden RepeatOne preference (seeks %d -> %d)", seeksBefore, *seekZero)
+		}
 	}
 }
 

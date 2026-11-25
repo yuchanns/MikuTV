@@ -223,7 +223,7 @@ func (v *View) Render(c *ui.Context) {
 	} else if v.Playback != nil && v.Playback.InlinePreviewState().Active {
 		v.Playback.TickInlinePreview(c.Now())
 	}
-	if v.HasBackgroundAudio() {
+	if v.hasBackgroundPlaybackSession() {
 		v.tickBackgroundAudio(c)
 	}
 	v.advanceCatalogHold(c, height, len(layers) == 1 && layers[0].Page == app.Home)

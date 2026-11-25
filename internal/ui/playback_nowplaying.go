@@ -104,8 +104,23 @@ func (v *View) backgroundAudioPlayPauseAllowed() bool {
 	return true
 }
 
+func (v *View) hasBackgroundPlaybackSession() bool {
+	if v == nil || v.State == nil || v.Playback == nil || !v.Playback.Active() || !v.player.background {
+		return false
+	}
+	if v.State.Page == app.Player {
+		return false
+	}
+	for _, location := range v.State.Layers() {
+		if location.Page == app.Player {
+			return false
+		}
+	}
+	return true
+}
+
 func (v *View) tickBackgroundAudio(c *ui.Context) {
-	if !v.HasBackgroundAudio() {
+	if !v.hasBackgroundPlaybackSession() {
 		return
 	}
 	now := c.Now()
@@ -115,7 +130,8 @@ func (v *View) tickBackgroundAudio(c *ui.Context) {
 	if !v.Playback.Active() {
 		return
 	}
-	if !state.Loading && !state.Switching && (!state.AudioOnly || state.Failure != "") {
+	if len(s.items) == 0 || isLivePlayback(state, s.current()) ||
+		(!state.Loading && !state.Switching && (!state.AudioOnly || state.Failure != "")) {
 		v.closePlayback()
 		return
 	}

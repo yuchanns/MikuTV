@@ -266,4 +266,168 @@ func TestAudioStagePlanALyricsNoLyricsLightAndOLEDPauseDim(t *testing.T) {
 			t.Fatal("expected rendered centered artwork frame")
 		}
 	}
+
+	// 4. Switching media kind Video -> Audio -> Video reconciles subtitle selection
+	// (loads lyrics on switch to Audio even with Subtitle=Off, clears stale lyrics on switch back to Video).
+	{
+		sess := &audioStageSwitchSession{
+			coverImage: solidTestCover(color.NRGBA{40, 120, 150, 255}),
+			videoSubs:  []provider.PlaybackTrack{{ID: "cc-en", Label: "English CC", Language: "en"}},
+			audioSubs:  []provider.PlaybackTrack{{ID: "lrc", Label: "Lyrics", Default: true}},
+			videoCues:  []provider.SubtitleCue{{Start: 0, End: 5, Text: "Video caption"}},
+			audioCues:  cues,
+		}
+		entries := []app.Entry{{
+			ID: "demo", SourceID: "demo", Name: "Demo",
+			Capabilities: provider.Capabilities{provider.BrowseCatalog, provider.ResolvePlayback, provider.ReadSubtitles},
+		}}
+		state, err := app.NewState(entries, "demo", pages.Routes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		queue := make(chan func(), 32)
+		drain := func() {
+			for {
+				select {
+				case fn := <-queue:
+					fn()
+				default:
+					return
+				}
+			}
+		}
+		catalog := app.NewCatalog(func(string) provider.Session { return sess }, func(fn func()) { queue <- fn }, func() {})
+		catalog.Open(entries[0])
+		clock := &player.Status{HasFrame: true, Position: 5.0, Duration: 240}
+		pb := app.NewPlayback(catalog, player.Engine{
+			Open:         func(string, float64) bool { return true },
+			SetRate:      func(float64) {},
+			SetAudioOnly: func(a bool) { clock.AudioOnly = a },
+			Stop:         func() {},
+			Snapshot:     func() player.Status { return *clock },
+		}, nil, func(fn func()) { queue <- fn }, func() {})
+		prefs := app.NewPlaybackSettings(nil, nil) // Default Subtitle=Off
+		view := newTestView(t, Options{
+			State:            state,
+			Catalog:          catalog,
+			PlaybackSettings: prefs,
+			Pages:            pages,
+			Assets:           assets,
+			Theme:            theme.Default(),
+		})
+		view.Playback = pb
+		view.SyncEntry()
+		t.Cleanup(func() {
+			pb.Close()
+			catalog.Close()
+		})
+
+		state.Push(app.Route{Page: app.Player})
+		view.player = playbackView{
+			items: []playbackItem{{item: provider.MediaItem{
+				Ref:      provider.MediaRef{EntryID: "demo", Kind: provider.Video, ID: "mv-1"},
+				Title:    "Dual Mode Song",
+				CoverURL: "mock://cover",
+			}}},
+			visible: false,
+		}
+		view.startPlaybackItem(0, nil)
+		view.player.visible = false
+		tester := ui.NewTester(view.Render, 1920, 1080)
+		for range 6 {
+			time.Sleep(20 * time.Millisecond)
+			drain()
+			tester.Frame()
+		}
+		if pb.State().AudioOnly || view.player.content.subtitle != "" {
+			t.Fatalf("initial video mode should respect Subtitle=Off: audioOnly=%v sub=%q", pb.State().AudioOnly, view.player.content.subtitle)
+		}
+
+		// Switch Video -> Audio: must clear previous subtitleChosen and auto-load lyrics track!
+		if !pb.SwitchMediaKind(provider.PlaybackMediaAudio) {
+			t.Fatal("SwitchMediaKind(audio) failed")
+		}
+		for range 8 {
+			time.Sleep(20 * time.Millisecond)
+			drain()
+			tester.Frame()
+		}
+		if !pb.State().AudioOnly || view.player.content.subtitle != "lrc" || len(view.player.content.cues) != 3 {
+			t.Fatalf("expected lyrics auto-loaded after Video->Audio switch: audioOnly=%v sub=%q cues=%d",
+				pb.State().AudioOnly, view.player.content.subtitle, len(view.player.content.cues))
+		}
+
+		// Switch Audio -> Video: must clear stale lyrics cues and respect Video Subtitle=Off!
+		if !pb.SwitchMediaKind(provider.PlaybackMediaVideo) {
+			t.Fatal("SwitchMediaKind(video) failed")
+		}
+		for range 8 {
+			time.Sleep(20 * time.Millisecond)
+			drain()
+			tester.Frame()
+		}
+		if pb.State().AudioOnly || view.player.content.subtitle != "" || len(view.player.content.cues) != 0 {
+			t.Fatalf("expected stale lyrics cleared after Audio->Video switch: audioOnly=%v sub=%q cues=%d",
+				pb.State().AudioOnly, view.player.content.subtitle, len(view.player.content.cues))
+		}
+	}
+}
+
+type audioStageSwitchSession struct {
+	coverImage image.Image
+	videoSubs  []provider.PlaybackTrack
+	audioSubs  []provider.PlaybackTrack
+	videoCues  []provider.SubtitleCue
+	audioCues  []provider.SubtitleCue
+}
+
+func (s *audioStageSwitchSession) Close() {}
+func (s *audioStageSwitchSession) Browse(context.Context, provider.BrowseRequest) (provider.CollectionPage, error) {
+	return provider.CollectionPage{}, nil
+}
+func (s *audioStageSwitchSession) Item(context.Context, provider.MediaRef) (provider.MediaItem, error) {
+	return provider.MediaItem{}, nil
+}
+func (s *audioStageSwitchSession) LoadCatalogArtwork(context.Context, string) (image.Image, error) {
+	return s.coverImage, nil
+}
+func (s *audioStageSwitchSession) ResolvePlayback(_ context.Context, req provider.PlaybackRequest) (provider.Playback, error) {
+	if req.MediaKind == provider.PlaybackMediaAudio {
+		return provider.Playback{
+			Plan: provider.PlaybackPlan{
+				Duration:       240,
+				AvailableKinds: []string{provider.PlaybackMediaAudio, provider.PlaybackMediaVideo},
+				Subtitles:      s.audioSubs,
+				Streams: []provider.PlaybackStream{{
+					Format: provider.PlaybackDirect,
+					Audio: &provider.PlaybackTrack{
+						ContentType: "audio/mpeg",
+						Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/song.mp3"}},
+					},
+				}},
+			},
+			Transport: audioStageMockTransport{},
+		}, nil
+	}
+	return provider.Playback{
+		Plan: provider.PlaybackPlan{
+			Duration:       240,
+			AvailableKinds: []string{provider.PlaybackMediaAudio, provider.PlaybackMediaVideo},
+			Subtitles:      s.videoSubs,
+			Streams: []provider.PlaybackStream{{
+				Format: provider.PlaybackDirect,
+				Video: provider.PlaybackTrack{
+					ContentType: "video/mp4",
+					Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/mv.mp4"}},
+				},
+			}},
+		},
+		Transport: audioStageMockTransport{},
+	}, nil
+}
+func (s *audioStageSwitchSession) PlaybackSubtitles(_ context.Context, q provider.PlaybackSubtitleQuery) ([]provider.SubtitleCue, error) {
+	if q.Track.ID == "lrc" {
+		return s.audioCues, nil
+	}
+	return s.videoCues, nil
 }

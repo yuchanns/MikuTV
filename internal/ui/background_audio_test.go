@@ -339,4 +339,33 @@ func TestBackgroundAudioListeningAndRailNowPlaying(t *testing.T) {
 	if lastNowPlaying.Active {
 		t.Fatal("expected NowPlaying cleared on close")
 	}
+
+	// Mixed playlist auto-advancing from audio -> video in background must cleanly
+	// close the incompatible video session instead of stranding an active non-fullscreen player.
+	state.SelectEntry("demo")
+	view.SyncEntry()
+	clock = player.Status{HasFrame: true, AudioOnly: true, Position: 10, Duration: 180}
+	mixed := []playbackItem{
+		tracks[0],
+		{item: provider.MediaItem{
+			Ref:   provider.MediaRef{EntryID: "demo", Kind: provider.Video, ID: "vid-1"},
+			Title: "Mixed Video Item",
+		}},
+	}
+	page = view.context(state.Location, true, 1920, 1080)
+	view.dispatch(func() { page.openPlayback(mixed, 0, true, nil) })
+	pump(6)
+	view.goBack() // hide HUD
+	view.goBack() // enter background listening on Home
+	if !view.HasBackgroundAudio() {
+		t.Fatal("expected background audio active before mixed queue advance")
+	}
+	clock.Ended = true
+	pump(3)
+	clock.Ended = false
+	clock.AudioOnly = false
+	pump(6)
+	if pb.Active() || view.HasBackgroundAudio() {
+		t.Fatalf("mixed background advance into video must close cleanly, active=%v bg=%v", pb.Active(), view.HasBackgroundAudio())
+	}
 }

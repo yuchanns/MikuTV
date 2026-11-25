@@ -94,6 +94,8 @@ type playbackView struct {
 	speedSampleAt    time.Time
 	speedDisplayed   float64
 	lastFrameAt      time.Time
+	hasPlanAudioOnly bool
+	lastAudioOnly    bool
 	background       bool
 	nowPlayingAt     time.Time
 	nowPlayingPos    float64
@@ -271,6 +273,7 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 		v.State.Focus, v.reveal = playerToggle, true
 	}
 	s.visible, s.hideAt, s.scrubbing, s.selectingChapter = true, time.Time{}, false, false
+	s.hasPlanAudioOnly, s.lastAudioOnly = false, false
 	s.trick.reset()
 	s.showAccessHelp = false
 	s.resetNetworkSpeed()
@@ -359,8 +362,7 @@ func (v *View) supportsPlaybackModes(liveMode bool) bool {
 }
 
 func (v *View) playbackLoopMode() app.PlaybackLoopMode {
-	entry, ok := v.State.Current()
-	if !ok || !entry.Capabilities.Has(provider.PlaybackModes) {
+	if !v.supportsPlaybackModes(false) {
 		return app.PlaybackLoopSequential
 	}
 	if v.PlaybackSettings != nil {
@@ -861,6 +863,16 @@ func (s *playbackView) updatePlan(v *View, state app.PlaybackState) {
 		}
 	}
 	plan := state.Resolution.Plan
+	if s.hasPlanAudioOnly && s.lastAudioOnly != state.AudioOnly {
+		if s.content.subtitleQuery != nil {
+			s.content.subtitleQuery()
+			s.content.subtitleQuery = nil
+		}
+		s.content.subtitle = ""
+		s.content.cues = nil
+		s.content.subtitleChosen = false
+	}
+	s.hasPlanAudioOnly, s.lastAudioOnly = true, state.AudioOnly
 	if !isLivePlayback(state, s.current()) && !s.content.subtitleChosen && len(plan.Subtitles) > 0 {
 		if entry, ok := v.State.Current(); ok && entry.Capabilities.Has(provider.ReadSubtitles) {
 			s.content.subtitleChosen = true

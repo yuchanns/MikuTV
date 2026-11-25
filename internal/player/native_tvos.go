@@ -1004,6 +1004,13 @@ func (p *tvosPlayer) activateAudioSession() {
 	p.setAudioSessionActive(true, false)
 }
 
+func (p *tvosPlayer) hasActiveAudioOnlyItem() bool {
+	if !p.audioOnly || p.player == 0 {
+		return false
+	}
+	return tvosNative.getObj(p.player, tvosNative.selCurrentItem) != 0
+}
+
 func (p *tvosPlayer) setAudioOnly(audioOnly bool) {
 	if p.audioOnly == audioOnly {
 		return
@@ -1018,7 +1025,7 @@ func (p *tvosPlayer) setAudioOnly(audioOnly bool) {
 		}
 	}
 	p.applyIdle()
-	if p.fullscreen || p.preview {
+	if p.fullscreen || p.preview || p.hasActiveAudioOnlyItem() {
 		p.setAudioSessionActive(true, false)
 	}
 }
@@ -1127,7 +1134,7 @@ func (p *tvosPlayer) onBecomeActive() {
 		}
 		p.foreground = true
 		p.refreshMatchDisplay()
-		if p.fullscreen || p.preview {
+		if p.fullscreen || p.preview || p.hasActiveAudioOnlyItem() {
 			p.setAudioSessionActive(true, true)
 		}
 		p.applyDisplayCriteria()
@@ -1301,7 +1308,7 @@ func (p *tvosPlayer) onAudioInterruption(note objc.ID) {
 			p.applyRate()
 		case avAudioSessionInterruptEnded:
 			p.audioInterrupted = false
-			if (p.fullscreen || p.preview) && p.foreground {
+			if ((p.fullscreen || p.preview) && p.foreground) || p.hasActiveAudioOnlyItem() {
 				p.setAudioSessionActive(true, true)
 				if options&avAudioSessionOptShouldResume != 0 {
 					p.applyRate()
@@ -1877,7 +1884,7 @@ func (p *tvosPlayer) setRate(rate float64) {
 	p.rate = float32(rate)
 	if rate > 0 {
 		p.audioInterrupted = false
-		if (p.fullscreen || p.preview) && p.foreground {
+		if ((p.fullscreen || p.preview) && p.foreground) || p.hasActiveAudioOnlyItem() {
 			p.activateAudioSession()
 		}
 	}
