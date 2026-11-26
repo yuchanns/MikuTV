@@ -127,6 +127,28 @@ func TestPlaybackPreferencesAndAudioTrackSwitching(t *testing.T) {
 		t.Fatal("expected off preference to match no subtitle")
 	}
 
+	// ISO-639-2 codes (chi/zho/eng) used by Jellyfin/MKV + DefaultSubtitleTrack helper.
+	mkvSubs := []provider.PlaybackTrack{
+		{ID: "sub-4", Label: "English (PGS)", Language: "eng"},
+		{ID: "sub-5", Label: "Chinese (PGS)", Language: "chi", Default: true},
+	}
+	if m, ok := MatchPreferredSubtitle(PlaybackSubtitleChinese, mkvSubs); !ok || m.ID != "sub-5" {
+		t.Fatalf("expected chi subtitle sub-5 for Chinese pref, got %+v ok=%v", m, ok)
+	}
+	if m, ok := MatchPreferredSubtitle(PlaybackSubtitleEnglish, mkvSubs); !ok || m.ID != "sub-4" {
+		t.Fatalf("expected eng subtitle sub-4 for English pref, got %+v ok=%v", m, ok)
+	}
+	if m, ok := DefaultSubtitleTrack(mkvSubs, "zh-Hans"); !ok || m.ID != "sub-5" {
+		t.Fatalf("expected DefaultSubtitleTrack(zh-Hans) to return sub-5, got %+v ok=%v", m, ok)
+	}
+	if m, ok := DefaultSubtitleTrack(mkvSubs, "en"); !ok || m.ID != "sub-4" {
+		t.Fatalf("expected DefaultSubtitleTrack(en) to prefer current-locale sub-4, got %+v ok=%v", m, ok)
+	}
+	aiDefault := []provider.PlaybackTrack{{ID: "ai-zh", Label: "中文（AI）", Language: "ai-zh", Default: true}}
+	if _, ok := DefaultSubtitleTrack(aiDefault, "zh-Hans"); ok {
+		t.Fatal("expected DefaultSubtitleTrack to ignore AI default track")
+	}
+
 	// Wire Playback with PlaybackSettings and verify default speed, preferredQuality, in-place & cross-codec audio switches!
 	queue := make(chan func(), 16)
 	post := func(fn func()) { queue <- fn }

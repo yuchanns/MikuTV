@@ -67,9 +67,10 @@ func (v *View) playbackChoices(kind playbackSettingKind) (string, []playbackChoi
 		}
 	case playbackSettingSubtitles:
 		return l.Subtitles, []playbackChoice{
-			{label: l.SubtitlesOff, selected: cur.Subtitle == app.PlaybackSubtitleOff, apply: func(p *app.PlaybackPreferences) { p.Subtitle = app.PlaybackSubtitleOff }},
+			{label: l.QualityAuto, selected: cur.Subtitle == app.PlaybackSubtitleAuto, apply: func(p *app.PlaybackPreferences) { p.Subtitle = app.PlaybackSubtitleAuto }},
 			{label: l.SubtitlesChinese, selected: cur.Subtitle == app.PlaybackSubtitleChinese, apply: func(p *app.PlaybackPreferences) { p.Subtitle = app.PlaybackSubtitleChinese }},
 			{label: l.SubtitlesEnglish, selected: cur.Subtitle == app.PlaybackSubtitleEnglish, apply: func(p *app.PlaybackPreferences) { p.Subtitle = app.PlaybackSubtitleEnglish }},
+			{label: l.SubtitlesOff, selected: cur.Subtitle == app.PlaybackSubtitleOff, apply: func(p *app.PlaybackPreferences) { p.Subtitle = app.PlaybackSubtitleOff }},
 		}
 	default:
 		return "", nil
@@ -104,12 +105,14 @@ func (p *PageContext) playbackQualityPrefLabel(pref app.PlaybackQualityPref) str
 func (p *PageContext) playbackSubtitlePrefLabel(pref app.PlaybackSubtitlePref) string {
 	l := p.Assets.Text.PlaybackPrefs
 	switch pref {
+	case app.PlaybackSubtitleOff:
+		return l.SubtitlesOff
 	case app.PlaybackSubtitleChinese:
 		return l.SubtitlesChinese
 	case app.PlaybackSubtitleEnglish:
 		return l.SubtitlesEnglish
 	default:
-		return l.SubtitlesOff
+		return l.QualityAuto
 	}
 }
 

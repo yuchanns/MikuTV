@@ -15,6 +15,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/player"
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
@@ -44,6 +45,10 @@ type playbackContent struct {
 	subtitleChosen         bool
 	subtitleQuery          context.CancelFunc
 	cues                   []provider.SubtitleCue
+	pgsTrack               *player.PGSTrack
+	pgsCueIndex            int
+	pgsFrame               player.PGSFrame
+	pgsBitmap              *ui.Bitmap
 	danmakuQuery           context.CancelFunc
 	danmakuSegment         int
 	danmakuRetry           time.Time
@@ -100,14 +105,23 @@ func danmakuLaneBounds(area app.DanmakuArea, size app.DanmakuFontSize) (scrollMa
 	}
 }
 
-func (s *playbackContent) clearTracks() {
+func (s *playbackContent) clearSubtitle() {
 	if s.subtitleQuery != nil {
 		s.subtitleQuery()
 	}
+	if s.pgsTrack != nil {
+		s.pgsTrack.Close()
+	}
+	s.subtitle, s.cues, s.subtitleQuery = "", nil, nil
+	s.pgsTrack, s.pgsCueIndex, s.pgsFrame, s.pgsBitmap = nil, -1, player.PGSFrame{}, nil
+}
+
+func (s *playbackContent) clearTracks() {
+	s.clearSubtitle()
+	s.subtitleChosen = false
 	if s.danmakuQuery != nil {
 		s.danmakuQuery()
 	}
-	s.subtitle, s.subtitleChosen, s.cues, s.subtitleQuery = "", false, nil, nil
 	s.danmakuQuery, s.danmaku, s.danmakuSegment = nil, nil, 0
 	s.danmakuGen++
 	s.danmakuSchedule = nil
@@ -226,6 +240,9 @@ func (s *playbackContent) refresh(v *View, state app.PlaybackState) time.Duratio
 		v.DanmakuRules.EnsureSynced()
 		s.loadDanmaku(v, state)
 	}
+	if s.pgsTrack != nil && state.Playing {
+		return 80 * time.Millisecond
+	}
 	if state.Playing || state.Loading || state.Switching || s.subtitle != "" {
 		return 160 * time.Millisecond
 	}
@@ -282,11 +299,30 @@ func (s *playbackContent) loadDanmaku(v *View, state app.PlaybackState) {
 }
 
 func (s *playbackContent) setSubtitle(v *View, track provider.PlaybackTrack) {
-	if s.subtitleQuery != nil {
-		s.subtitleQuery()
-	}
-	s.subtitle, s.cues, s.subtitleQuery = track.ID, nil, nil
+	s.clearSubtitle()
+	s.subtitle = track.ID
 	if track.ID == "" {
+		return
+	}
+	if player.IsPGSTrack(track) && len(track.Resource.URLs) > 0 && v.Playback != nil {
+		targetID := track.ID
+		s.subtitleQuery = v.Playback.OpenPGSSubtitle(track, func(pgs *player.PGSTrack, err error) {
+			s.subtitleQuery = nil
+			if s.subtitle != targetID {
+				if pgs != nil {
+					pgs.Close()
+				}
+				return
+			}
+			if err != nil || pgs == nil {
+				s.subtitle = ""
+				s.notice(v.Assets.Text.Playback.SubtitleFailed)
+				return
+			}
+			s.pgsTrack = pgs
+			s.pgsCueIndex = -1
+			s.pgsBitmap = nil
+		})
 		return
 	}
 	query := provider.PlaybackSubtitleQuery{PlaybackTarget: v.Playback.State().Target, Track: track}
@@ -299,6 +335,24 @@ func (s *playbackContent) setSubtitle(v *View, track provider.PlaybackTrack) {
 		}
 		s.cues = cues
 	})
+}
+
+func (s *playbackContent) pgsOverlay(position float64) (*ui.Bitmap, player.PGSFrame, bool) {
+	if s.pgsTrack == nil {
+		return nil, player.PGSFrame{}, false
+	}
+	frame, ok := s.pgsTrack.FrameAt(position)
+	if !ok || frame.Image == nil {
+		s.pgsCueIndex = -1
+		s.pgsBitmap = nil
+		return nil, player.PGSFrame{}, false
+	}
+	if frame.CueIndex != s.pgsCueIndex || s.pgsBitmap == nil {
+		s.pgsCueIndex = frame.CueIndex
+		s.pgsFrame = frame
+		s.pgsBitmap = ui.NewBitmap(frame.Image)
+	}
+	return s.pgsBitmap, s.pgsFrame, true
 }
 
 func playbackThumbnailTile(sheet *provider.PlaybackThumbnails, seconds float64) (int, string) {
@@ -345,6 +399,28 @@ func (p *PageContext) playbackTextLayers(c *ui.Context, state app.PlaybackState)
 			p.drawDanmaku(c, state)
 		}
 		if !state.AudioOnly {
+			if bmp, frame, ok := s.content.pgsOverlay(state.Position); ok && frame.VideoWidth > 0 && frame.VideoHeight > 0 {
+				sx := p.Width / float32(frame.VideoWidth)
+				sy := p.Height / float32(frame.VideoHeight)
+				scale := min(sx, sy)
+				offsetX := (p.Width - float32(frame.VideoWidth)*scale) * 0.5
+				offsetY := (p.Height - float32(frame.VideoHeight)*scale) * 0.5
+				left := offsetX + float32(frame.X)*scale
+				top := offsetY + float32(frame.Y)*scale
+				w := float32(frame.Image.Bounds().Dx()) * scale
+				h := float32(frame.Image.Bounds().Dy()) * scale
+				// Lift bottom-aligned PGS subtitles above the playback HUD when visible.
+				hudReserve := float32(0)
+				if s.visible {
+					hudReserve = 196
+				} else if s.trick.hudVisible(c.Now()) {
+					hudReserve = 152
+				}
+				if hudReserve > 0 && top+h > p.Height-hudReserve && top > p.Height*0.5 {
+					top = max(offsetY, p.Height-hudReserve-h)
+				}
+				ui.Image(c, bmp).Absolute().Left(left).Top(top).Width(w).Height(h).Fit(ui.Contain)
+			}
 			for _, cue := range s.content.cues {
 				if cue.Start > state.Position {
 					break

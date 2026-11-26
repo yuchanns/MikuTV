@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/yuchanns/MikuTV/internal/app"
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
@@ -14,11 +15,14 @@ const (
 )
 
 type playbackPositionEntry struct {
-	Key     string  `json:"k"`
-	Entry   string  `json:"e"`
-	Owner   string  `json:"o"`
-	Seconds float64 `json:"s"`
-	Order   int64   `json:"u"`
+	Key         string  `json:"k"`
+	Entry       string  `json:"e"`
+	Owner       string  `json:"o"`
+	Seconds     float64 `json:"s"`
+	Order       int64   `json:"u"`
+	Subtitle    string  `json:"sub,omitempty"`
+	SubtitleSet bool    `json:"subSet,omitempty"`
+	Audio       string  `json:"aud,omitempty"`
 }
 
 type playbackPositionStore struct {
@@ -70,6 +74,52 @@ func (s *playbackPositionStore) put(owner string, target provider.PlaybackTarget
 		Owner:   owner,
 		Seconds: seconds,
 		Order:   s.NextOrder,
+	})
+	s.Items = trimRecentByOrder(s.Items, maxPlaybackPositions, func(item playbackPositionEntry) int64 { return item.Order })
+}
+
+func (s *playbackPositionStore) getTracks(owner string, target provider.PlaybackTarget) (app.PlaybackTrackSelection, bool) {
+	key := playbackPositionItemKey(owner, target)
+	for _, item := range s.Items {
+		if item.Key == key {
+			if !item.SubtitleSet && item.Audio == "" {
+				return app.PlaybackTrackSelection{}, false
+			}
+			return app.PlaybackTrackSelection{
+				Subtitle:    item.Subtitle,
+				SubtitleSet: item.SubtitleSet,
+				Audio:       item.Audio,
+			}, true
+		}
+	}
+	return app.PlaybackTrackSelection{}, false
+}
+
+func (s *playbackPositionStore) putTracks(owner string, target provider.PlaybackTarget, sel app.PlaybackTrackSelection) {
+	key := playbackPositionItemKey(owner, target)
+	s.NextOrder++
+	for i := range s.Items {
+		if s.Items[i].Key == key {
+			if sel.SubtitleSet {
+				s.Items[i].Subtitle = sel.Subtitle
+				s.Items[i].SubtitleSet = true
+			}
+			if sel.Audio != "" {
+				s.Items[i].Audio = sel.Audio
+			}
+			s.Items[i].Order = s.NextOrder
+			return
+		}
+	}
+	s.Items = append(s.Items, playbackPositionEntry{
+		Key:         key,
+		Entry:       target.Ref.EntryID,
+		Owner:       owner,
+		Seconds:     -1,
+		Order:       s.NextOrder,
+		Subtitle:    sel.Subtitle,
+		SubtitleSet: sel.SubtitleSet,
+		Audio:       sel.Audio,
 	})
 	s.Items = trimRecentByOrder(s.Items, maxPlaybackPositions, func(item playbackPositionEntry) int64 { return item.Order })
 }

@@ -289,6 +289,20 @@ func TestPlaybackSettingsUIAndAudioTrackMenuAndAutoplay(t *testing.T) {
 	if view.focus.item(playerAudio) != nil {
 		t.Fatal("expected player/audio button hidden when only 1 audio track exists")
 	}
+
+	// 5. Explicit global Subtitle=Off must keep subtitles disabled (do not auto-enable locale match).
+	if err := prefsMgr.Update(func(cfg *app.PlaybackPreferences) { cfg.Subtitle = app.PlaybackSubtitleOff }); err != nil {
+		t.Fatal(err)
+	}
+	sess.subLoaded = nil
+	view.startPlaybackItem(0, nil)
+	waitDrain()
+	tester.Frame()
+	drain()
+	tester.Frame()
+	if len(sess.subLoaded) != 0 {
+		t.Fatalf("expected explicit Subtitle=Off to suppress auto subtitle, got %v", sess.subLoaded)
+	}
 }
 
 func TestPlaybackSettingsHidesSubtitlesWithoutCapability(t *testing.T) {

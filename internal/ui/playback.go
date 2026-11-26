@@ -982,21 +982,14 @@ func (s *playbackView) updatePlan(v *View, state app.PlaybackState) {
 	}
 	plan := state.Resolution.Plan
 	if s.hasPlanAudioOnly && s.lastAudioOnly != state.AudioOnly {
-		if s.content.subtitleQuery != nil {
-			s.content.subtitleQuery()
-			s.content.subtitleQuery = nil
-		}
-		s.content.subtitle = ""
-		s.content.cues = nil
+		s.content.clearSubtitle()
 		s.content.subtitleChosen = false
 	}
 	s.hasPlanAudioOnly, s.lastAudioOnly = true, state.AudioOnly
 	if !isLivePlayback(state, s.current()) && !s.content.subtitleChosen && len(plan.Subtitles) > 0 {
 		if entry, ok := v.State.Current(); ok && entry.Capabilities.Has(provider.ReadSubtitles) {
 			s.content.subtitleChosen = true
-			if matched, found := app.MatchPreferredSubtitle(v.playbackPreferences().Subtitle, plan.Subtitles); found {
-				s.content.setSubtitle(v, matched)
-			} else if state.AudioOnly {
+			if state.AudioOnly {
 				chosen := plan.Subtitles[0]
 				for _, track := range plan.Subtitles {
 					if track.Default {
@@ -1005,6 +998,27 @@ func (s *playbackView) updatePlan(v *View, state app.PlaybackState) {
 					}
 				}
 				s.content.setSubtitle(v, chosen)
+			} else if sel, ok := v.Playback.SavedTrackSelection(); ok && sel.SubtitleSet {
+				if sel.Subtitle != "" {
+					for _, track := range plan.Subtitles {
+						if track.ID == sel.Subtitle {
+							s.content.setSubtitle(v, track)
+							break
+						}
+					}
+				}
+			} else if pref := v.playbackPreferences().Subtitle; pref != app.PlaybackSubtitleOff {
+				if matched, found := app.MatchPreferredSubtitle(pref, plan.Subtitles); found {
+					s.content.setSubtitle(v, matched)
+				} else if pref == app.PlaybackSubtitleAuto {
+					langTag := "zh-CN"
+					if v.Assets != nil {
+						langTag = v.Assets.LangTag()
+					}
+					if defTrack, found := app.DefaultSubtitleTrack(plan.Subtitles, langTag); found {
+						s.content.setSubtitle(v, defTrack)
+					}
+				}
 			}
 		}
 	}

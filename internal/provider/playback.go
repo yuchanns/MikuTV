@@ -30,6 +30,7 @@ type PlaybackRequest struct {
 	Quality          string `json:"quality,omitempty"`
 	PreferredQuality string `json:"preferredQuality,omitempty"`
 	Line             string `json:"line,omitempty"`
+	AudioTrack       string `json:"audioTrack,omitempty"`
 	MediaKind        string `json:"mediaKind,omitempty"`
 	BranchID         string `json:"branchID,omitempty"`
 	BranchState      string `json:"branchState,omitempty"`
@@ -39,6 +40,13 @@ type PlaybackRequest struct {
 
 type PlaybackTransport interface {
 	OpenResource(ctx context.Context, resource PlaybackResource, method, byteRange string) (*http.Response, error)
+}
+
+// PlaybackSubtitleTransport is optionally implemented by a PlaybackTransport
+// to fetch subtitle streams (such as server-extracted PGS bitmaps) with a
+// longer response-header budget than short media segments.
+type PlaybackSubtitleTransport interface {
+	OpenSubtitleResource(ctx context.Context, resource PlaybackResource) (*http.Response, error)
 }
 
 // PlaybackHealthReporter is optionally implemented by a PlaybackTransport that
@@ -74,6 +82,8 @@ type PlaybackPlan struct {
 	Qualities             []PlaybackQuality   `json:"qualities,omitempty"`
 	Line                  string              `json:"line,omitempty"`
 	Lines                 []PlaybackLine      `json:"lines,omitempty"`
+	AudioTrack            string              `json:"audioTrack,omitempty"`
+	AudioTracks           []PlaybackTrack     `json:"audioTracks,omitempty"`
 	AvailableKinds        []string            `json:"availableKinds,omitempty"`
 	Streams               []PlaybackStream    `json:"streams,omitempty"`
 	Chapters              []PlaybackChapter   `json:"chapters,omitempty"`
@@ -182,6 +192,7 @@ type PlaybackProgress struct {
 	ItemID   string `json:"itemID,omitempty"`
 	Seconds  int64  `json:"seconds"`
 	Finished bool   `json:"finished,omitempty"`
+	Stopped  bool   `json:"stopped,omitempty"`
 }
 
 type PlaybackThumbnails struct {

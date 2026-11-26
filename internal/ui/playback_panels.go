@@ -412,12 +412,18 @@ func (p *PageContext) playbackOptions(c *ui.Context, state app.PlaybackState) {
 		option("", text.Off, "", s.content.subtitle == "", func() {
 			s.content.subtitleChosen = true
 			s.content.setSubtitle(v, provider.PlaybackTrack{})
+			if !state.AudioOnly {
+				v.Playback.SaveSubtitleSelection("")
+			}
 			s.closePanel(v)
 		})
 		for _, track := range plan.Subtitles {
 			option(track.ID, track.Label, "", s.content.subtitle == track.ID, func() {
 				s.content.subtitleChosen = true
 				s.content.setSubtitle(v, track)
+				if !state.AudioOnly {
+					v.Playback.SaveSubtitleSelection(track.ID)
+				}
 				s.closePanel(v)
 			})
 		}

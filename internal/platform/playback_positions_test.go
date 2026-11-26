@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/yuchanns/MikuTV/internal/app"
 	"github.com/yuchanns/MikuTV/internal/provider"
 )
 
@@ -61,5 +62,40 @@ func TestPlaybackPositionStoreBoundsLRUAndClearsScopes(t *testing.T) {
 	}
 	if sec, ok := restored.get("user-a", secondEntry); !ok || sec != 99 {
 		t.Fatalf("other-entry damaged by clearEntry: (%v, %v)", sec, ok)
+	}
+}
+
+func TestPlaybackPositionStorePersistsTrackSelectionsIndependently(t *testing.T) {
+	var store playbackPositionStore
+	target := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "jellyfin", Kind: provider.Movie, ID: "avengers"}}
+
+	// Saving a track selection before any position must not create a fake 0s resume.
+	store.putTracks("u1", target, app.PlaybackTrackSelection{Subtitle: "sub-5", SubtitleSet: true})
+	if sec, ok := store.get("u1", target); ok {
+		t.Fatalf("expected no saved resume position yet, got (%v, %v)", sec, ok)
+	}
+	if sel, ok := store.getTracks("u1", target); !ok || !sel.SubtitleSet || sel.Subtitle != "sub-5" || sel.Audio != "" {
+		t.Fatalf("unexpected saved tracks: %+v ok=%v", sel, ok)
+	}
+
+	// Saving audio track preserves subtitle; saving position preserves both tracks.
+	store.putTracks("u1", target, app.PlaybackTrackSelection{Audio: "audio-2"})
+	store.put("u1", target, 125)
+	encoded, err := store.encode()
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	restored := parsePlaybackPositionStore(encoded)
+	if sec, ok := restored.get("u1", target); !ok || sec != 125 {
+		t.Fatalf("expected preserved position 125, got (%v, %v)", sec, ok)
+	}
+	if sel, ok := restored.getTracks("u1", target); !ok || !sel.SubtitleSet || sel.Subtitle != "sub-5" || sel.Audio != "audio-2" {
+		t.Fatalf("expected preserved tracks after position save, got %+v ok=%v", sel, ok)
+	}
+
+	// Explicit Off ("") overrides previous subtitle while keeping audio intact.
+	restored.putTracks("u1", target, app.PlaybackTrackSelection{Subtitle: "", SubtitleSet: true})
+	if sel, ok := restored.getTracks("u1", target); !ok || !sel.SubtitleSet || sel.Subtitle != "" || sel.Audio != "audio-2" {
+		t.Fatalf("expected explicit off subtitle with preserved audio, got %+v ok=%v", sel, ok)
 	}
 }

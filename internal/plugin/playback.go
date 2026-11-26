@@ -38,7 +38,7 @@ func validPlaybackMediaKind(kind string) bool {
 func (s *Session) ResolvePlayback(ctx context.Context, request provider.PlaybackRequest) (provider.Playback, error) {
 	var result provider.Playback
 	if !s.ownsPlayback(request.PlaybackTarget) || len(request.Quality) > 512 || !validPreferredQuality(request.PreferredQuality) ||
-		len(request.Line) > 128 || !validPlaybackMediaKind(request.MediaKind) || len(request.BranchID) > 256 || len(request.BranchState) > 4096 {
+		len(request.Line) > 128 || len(request.AudioTrack) > 128 || !validPlaybackMediaKind(request.MediaKind) || len(request.BranchID) > 256 || len(request.BranchState) > 4096 {
 		return result, &provider.Error{Code: provider.Denied}
 	}
 	s.requests.RLock()
@@ -63,6 +63,8 @@ func (s *Session) ResolvePlayback(ctx context.Context, request provider.Playback
 	mediaClient.Timeout = 0
 	singleClient := *client
 	singleClient.Timeout = 0
+	subtitleClient := *client
+	subtitleClient.Timeout = 0
 	if transport, ok := client.Transport.(*http.Transport); ok && transport != nil {
 		cloned := transport.Clone()
 		cloned.ResponseHeaderTimeout = 5 * time.Second
@@ -77,6 +79,10 @@ func (s *Session) ResolvePlayback(ctx context.Context, request provider.Playback
 			singleCloned.MaxIdleConnsPerHost = 8
 		}
 		singleClient.Transport = singleCloned
+
+		subCloned := transport.Clone()
+		subCloned.ResponseHeaderTimeout = 90 * time.Second
+		subtitleClient.Transport = subCloned
 	}
 	checkRedirect := func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
@@ -106,11 +112,12 @@ func (s *Session) ResolvePlayback(ctx context.Context, request provider.Playback
 	}
 	mediaClient.CheckRedirect = checkRedirect
 	singleClient.CheckRedirect = checkRedirect
+	subtitleClient.CheckRedirect = checkRedirect
 	cdn := s.cdn
 	if cdn == nil {
 		cdn = newCDNTracker()
 	}
-	result.Transport = &playbackTransport{session: s, client: &mediaClient, singleClient: &singleClient, scope: scope, allow: allowed, cdn: cdn}
+	result.Transport = &playbackTransport{session: s, client: &mediaClient, singleClient: &singleClient, subtitleClient: &subtitleClient, scope: scope, allow: allowed, cdn: cdn}
 	return result, nil
 }
 
@@ -159,6 +166,41 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 		lines[line.ID] = true
 	}
 	if plan.Line != "" && !lines[plan.Line] {
+		return false
+	}
+	if len(plan.AudioTracks) > 0 {
+		seenPlanAudio := make(map[string]bool, len(plan.AudioTracks))
+		audioTracks := plan.AudioTracks[:0]
+		for i := range plan.AudioTracks {
+			track := plan.AudioTracks[i]
+			track.ID = strings.TrimSpace(track.ID)
+			track.Label = strings.TrimSpace(track.Label)
+			track.Language = strings.TrimSpace(track.Language)
+			track.Codec = strings.TrimSpace(track.Codec)
+			if track.ID == "" || len(track.ID) > 128 || track.Label == "" || len(track.Label) > 128 || track.Bandwidth < 0 {
+				return false
+			}
+			if len(track.Language) > 64 {
+				track.Language = track.Language[:64]
+			}
+			if len(track.Codec) > 64 {
+				track.Codec = track.Codec[:64]
+			}
+			if len(track.Resource.URLs) > 0 && !s.ownPlaybackResource(&track.Resource, allow) {
+				return false
+			}
+			if seenPlanAudio[track.ID] {
+				continue
+			}
+			seenPlanAudio[track.ID] = true
+			audioTracks = append(audioTracks, track)
+		}
+		plan.AudioTracks = audioTracks
+		plan.AudioTrack = strings.TrimSpace(plan.AudioTrack)
+		if plan.AudioTrack != "" && !seenPlanAudio[plan.AudioTrack] {
+			return false
+		}
+	} else if plan.AudioTrack != "" {
 		return false
 	}
 	if len(plan.AvailableKinds) > 0 {
@@ -242,8 +284,16 @@ func (s *Session) ownPlaybackPlan(plan *provider.PlaybackPlan, request provider.
 		track.ID = strings.TrimSpace(track.ID)
 		track.Label = strings.TrimSpace(track.Label)
 		track.Language = strings.TrimSpace(track.Language)
+		track.Codec = strings.ToLower(strings.TrimSpace(track.Codec))
+		track.ContentType = strings.TrimSpace(track.ContentType)
 		if len(track.Language) > 64 {
 			track.Language = track.Language[:64]
+		}
+		if len(track.Codec) > 64 {
+			track.Codec = track.Codec[:64]
+		}
+		if len(track.ContentType) > 128 {
+			track.ContentType = track.ContentType[:128]
 		}
 		if track.ID == "" || track.Label == "" {
 			return false
@@ -560,12 +610,13 @@ func (c *cdnTracker) hasHealthyAlternative(urls []string, currentURL string, now
 }
 
 type playbackTransport struct {
-	session      *Session
-	client       *http.Client
-	singleClient *http.Client
-	scope        context.Context
-	allow        func(*http.Request) error
-	cdn          *cdnTracker
+	session        *Session
+	client         *http.Client
+	singleClient   *http.Client
+	subtitleClient *http.Client
+	scope          context.Context
+	allow          func(*http.Request) error
+	cdn            *cdnTracker
 }
 
 func (t *playbackTransport) ReportSlow(rawURL string) {
@@ -577,6 +628,14 @@ func (t *playbackTransport) HasHealthyAlternative(urls []string, currentURL stri
 }
 
 func (t *playbackTransport) OpenResource(ctx context.Context, resource provider.PlaybackResource, method, byteRange string) (*http.Response, error) {
+	return t.openWithClient(ctx, resource, method, byteRange, nil)
+}
+
+func (t *playbackTransport) OpenSubtitleResource(ctx context.Context, resource provider.PlaybackResource) (*http.Response, error) {
+	return t.openWithClient(ctx, resource, http.MethodGet, "", t.subtitleClient)
+}
+
+func (t *playbackTransport) openWithClient(ctx context.Context, resource provider.PlaybackResource, method, byteRange string, overrideClient *http.Client) (*http.Response, error) {
 	if (method != http.MethodGet && method != http.MethodHead) || t.session == nil || !t.session.ownPlaybackResource(&resource, t.allow) {
 		return nil, &provider.Error{Code: provider.Denied}
 	}
@@ -585,9 +644,12 @@ func (t *playbackTransport) OpenResource(ctx context.Context, resource provider.
 	closeRequest := func() { stop(); cancel() }
 	code := provider.Network
 	candidates := t.cdn.order(resource.URLs, time.Now())
-	httpClient := t.client
-	if len(candidates) <= 1 && t.singleClient != nil {
-		httpClient = t.singleClient
+	httpClient := overrideClient
+	if httpClient == nil {
+		httpClient = t.client
+		if len(candidates) <= 1 && t.singleClient != nil {
+			httpClient = t.singleClient
+		}
 	}
 	for _, address := range candidates {
 		if err := t.scope.Err(); err != nil {

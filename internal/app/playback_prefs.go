@@ -21,6 +21,7 @@ const (
 type PlaybackSubtitlePref string
 
 const (
+	PlaybackSubtitleAuto    PlaybackSubtitlePref = ""
 	PlaybackSubtitleOff     PlaybackSubtitlePref = "off"
 	PlaybackSubtitleChinese PlaybackSubtitlePref = "zh"
 	PlaybackSubtitleEnglish PlaybackSubtitlePref = "en"
@@ -50,7 +51,7 @@ func DefaultPlaybackPreferences() PlaybackPreferences {
 	return PlaybackPreferences{
 		Quality:  PlaybackQualityAuto,
 		Speed:    1.0,
-		Subtitle: PlaybackSubtitleOff,
+		Subtitle: PlaybackSubtitleAuto,
 		Autoplay: true,
 	}
 }
@@ -74,9 +75,9 @@ func (p PlaybackPreferences) Normalize() PlaybackPreferences {
 		p.Speed = best
 	}
 	switch p.Subtitle {
-	case PlaybackSubtitleOff, PlaybackSubtitleChinese, PlaybackSubtitleEnglish:
+	case PlaybackSubtitleAuto, PlaybackSubtitleOff, PlaybackSubtitleChinese, PlaybackSubtitleEnglish:
 	default:
-		p.Subtitle = PlaybackSubtitleOff
+		p.Subtitle = PlaybackSubtitleAuto
 	}
 	switch p.LoopMode {
 	case PlaybackLoopSequential, PlaybackLoopRepeatAll, PlaybackLoopRepeatOne, PlaybackLoopShuffle:
@@ -149,7 +150,7 @@ func (s *PlaybackSettings) Update(update func(*PlaybackPreferences)) error {
 }
 
 func MatchPreferredSubtitle(pref PlaybackSubtitlePref, tracks []provider.PlaybackTrack) (provider.PlaybackTrack, bool) {
-	if pref == PlaybackSubtitleOff || len(tracks) == 0 {
+	if pref == PlaybackSubtitleAuto || pref == PlaybackSubtitleOff || len(tracks) == 0 {
 		return provider.PlaybackTrack{}, false
 	}
 	var aiFallback *provider.PlaybackTrack
@@ -172,6 +173,62 @@ func MatchPreferredSubtitle(pref PlaybackSubtitlePref, tracks []provider.Playbac
 	return provider.PlaybackTrack{}, false
 }
 
+// DefaultSubtitleTrack picks a sensible initial non-AI subtitle track when the
+// user has neither a saved per-item choice nor an explicit global override:
+//  1. A Default=true non-AI track matching uiLocale,
+//  2. Any non-AI track matching uiLocale,
+//  3. Any Default=true non-AI track.
+func DefaultSubtitleTrack(tracks []provider.PlaybackTrack, uiLocale string) (provider.PlaybackTrack, bool) {
+	if len(tracks) == 0 {
+		return provider.PlaybackTrack{}, false
+	}
+	var localeMatch *provider.PlaybackTrack
+	var defaultMatch *provider.PlaybackTrack
+	for i := range tracks {
+		t := tracks[i]
+		if isAISubtitle(t) {
+			continue
+		}
+		matchesLang := subtitleMatchesLocale(uiLocale, t)
+		if t.Default && matchesLang {
+			return t, true
+		}
+		if matchesLang && localeMatch == nil {
+			localeMatch = &tracks[i]
+		}
+		if t.Default && defaultMatch == nil {
+			defaultMatch = &tracks[i]
+		}
+	}
+	if localeMatch != nil {
+		return *localeMatch, true
+	}
+	if defaultMatch != nil {
+		return *defaultMatch, true
+	}
+	return provider.PlaybackTrack{}, false
+}
+
+func subtitleMatchesLocale(uiLocale string, t provider.PlaybackTrack) bool {
+	tag := strings.ToLower(strings.TrimSpace(uiLocale))
+	switch {
+	case strings.HasPrefix(tag, "zh"):
+		return subtitleMatchesPref(PlaybackSubtitleChinese, t)
+	case strings.HasPrefix(tag, "en"):
+		return subtitleMatchesPref(PlaybackSubtitleEnglish, t)
+	case strings.HasPrefix(tag, "ja"):
+		id := strings.ToLower(strings.TrimSpace(t.ID))
+		lang := strings.ToLower(strings.TrimSpace(t.Language))
+		label := strings.ToLower(strings.TrimSpace(t.Label))
+		for _, token := range []string{"ja", "jpn", "jp", "japanese", "\u65e5\u8bed", "\u65e5\u6587", "\u65e5\u672c\u8a9e"} {
+			if strings.Contains(lang, token) || strings.Contains(label, token) || strings.HasPrefix(id, token) || strings.Contains(id, "-"+token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isAISubtitle(t provider.PlaybackTrack) bool {
 	id := strings.ToLower(t.ID)
 	lang := strings.ToLower(t.Language)
@@ -185,7 +242,7 @@ func subtitleMatchesPref(pref PlaybackSubtitlePref, t provider.PlaybackTrack) bo
 	label := strings.ToLower(strings.TrimSpace(t.Label))
 	switch pref {
 	case PlaybackSubtitleChinese:
-		for _, token := range []string{"zh", "cn", "chs", "cht", "\u4e2d\u6587", "\u7b80\u4f53", "\u7e41\u4f53", "\u6c49\u8bed", "\u56fd\u8bed"} {
+		for _, token := range []string{"zh", "chi", "zho", "cn", "chs", "cht", "chinese", "\u4e2d\u6587", "\u7b80\u4f53", "\u7e41\u4f53", "\u6c49\u8bed", "\u56fd\u8bed"} {
 			if strings.Contains(lang, token) || strings.Contains(label, token) || strings.HasPrefix(id, token) || strings.Contains(id, "-"+token) {
 				return true
 			}
@@ -196,8 +253,8 @@ func subtitleMatchesPref(pref PlaybackSubtitlePref, t provider.PlaybackTrack) bo
 				return true
 			}
 		}
-		if lang == "en" || strings.HasPrefix(lang, "en-") || strings.HasPrefix(lang, "en_") || strings.HasPrefix(lang, "ai-en") ||
-			id == "en" || strings.HasPrefix(id, "en-") || strings.HasPrefix(id, "en_") || strings.HasPrefix(id, "ai-en") {
+		if lang == "en" || lang == "eng" || strings.HasPrefix(lang, "en-") || strings.HasPrefix(lang, "en_") || strings.HasPrefix(lang, "eng-") || strings.HasPrefix(lang, "eng_") || strings.HasPrefix(lang, "ai-en") ||
+			id == "en" || id == "eng" || strings.HasPrefix(id, "en-") || strings.HasPrefix(id, "en_") || strings.HasPrefix(id, "ai-en") {
 			return true
 		}
 	}
