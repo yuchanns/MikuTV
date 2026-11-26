@@ -1,5 +1,5 @@
 ---
-import { LAUNCH_VIDEO_URL } from '../data/catalog'
+import { HERO_VIDEOS } from '../data/catalog'
 import { COPY, type Lang } from '../data/i18n'
 
 interface Props {
@@ -10,41 +10,38 @@ const { lang } = Astro.props
 const t = COPY[lang]
 const prefix = lang === 'zh' ? '/zh' : ''
 const pluginsHref = `${prefix}/plugins/`
-const heroVideoSrc = `${LAUNCH_VIDEO_URL}#t=34.5`
 ---
 
 <!-- ================= 00 HERO ================= -->
 <section class="hero-stage">
   <div class="hero-screen-col">
-    <div class="hero-media-wrap" transition:persist="hero-tv-media">
-      <div class="hero-spill" aria-hidden="true">
+    <div class="hero-media-wrap" id="hero-media-wrap" transition:persist="hero-tv-media">
+      <div class="hero-spill" id="hero-spill" aria-hidden="true">
         <img src="/images/cinema-home.jpg" alt="" class="spill-base" />
-        <video
-          id="hero-spill-video"
-          src={heroVideoSrc}
-          autoplay
-          muted
-          loop
-          playsinline
-          preload="auto"
-        ></video>
+        <canvas id="hero-spill-canvas" width="64" height="36"></canvas>
       </div>
 
-      <div class="hero-tv-frame">
+      <div class="hero-tv-frame" id="hero-tv-frame">
         <img
           src="/images/cinema-home.jpg"
           alt="MikuTV on Apple TV 4K"
           class="hero-tv-poster"
         />
-        <video
-          id="hero-main-video"
-          src={heroVideoSrc}
-          autoplay
-          muted
-          loop
-          playsinline
-          preload="auto"
-        ></video>
+        {HERO_VIDEOS.map((clip, index) => (
+          <video
+            class:list={['hero-tv-video', { 'is-active': index === 0 }]}
+            data-hero-slot={index}
+            data-clip-id={clip.id}
+            data-src={clip.src}
+            data-initial-start={clip.initialStart}
+            data-loop-start={clip.loopStart}
+            src={index === 0 ? `${clip.src}#t=${clip.initialStart}` : undefined}
+            autoplay={index === 0}
+            muted
+            playsinline
+            preload={index === 0 ? 'auto' : 'none'}
+          ></video>
+        ))}
       </div>
     </div>
 
@@ -267,76 +264,537 @@ const heroVideoSrc = `${LAUNCH_VIDEO_URL}#t=34.5`
 </section>
 
 <script>
-  function initHome() {
-    const mainVid = document.getElementById('hero-main-video') as HTMLVideoElement | null
-    const spillVid = document.getElementById('hero-spill-video') as HTMLVideoElement | null
-    const soundBtn = document.getElementById('hero-sound-btn') as HTMLButtonElement | null
+  interface HeroController {
+    bindSoundButton: (btn: HTMLButtonElement | null) => void
+    resume: () => void
+    onVisibilityChange: () => void
+    dispose: () => void
+  }
+
+  const heroControllers = new WeakMap<HTMLElement, HeroController>()
+  let mountedHeroWrap: HTMLElement | null = null
+  let globalHeroListenersBound = false
+
+  function ensureGlobalHeroListeners() {
+    if (globalHeroListenersBound) return
+    globalHeroListenersBound = true
+    document.addEventListener('visibilitychange', () => {
+      if (!mountedHeroWrap) return
+      if (!mountedHeroWrap.isConnected) {
+        heroControllers.get(mountedHeroWrap)?.dispose()
+        mountedHeroWrap = null
+        return
+      }
+      heroControllers.get(mountedHeroWrap)?.onVisibilityChange()
+    })
+    document.addEventListener('astro:after-swap', () => {
+      if (mountedHeroWrap && !mountedHeroWrap.isConnected) {
+        heroControllers.get(mountedHeroWrap)?.dispose()
+        mountedHeroWrap = null
+      }
+    })
+  }
+
+  function createHeroController(wrap: HTMLElement): HeroController {
+    const frame = wrap.querySelector<HTMLElement>('#hero-tv-frame')
+    const spill = wrap.querySelector<HTMLElement>('#hero-spill')
+    const spillCanvas = wrap.querySelector<HTMLCanvasElement>('#hero-spill-canvas')
+    const spillCtx = spillCanvas?.getContext('2d', { alpha: false }) ?? null
+    const videos = Array.from(wrap.querySelectorAll<HTMLVideoElement>('video[data-hero-slot]'))
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
-    if (mainVid && spillVid && !mainVid.dataset.synced) {
-      mainVid.dataset.synced = '1'
-      if (reducedMotion) {
-        mainVid.pause()
-        spillVid.pause()
-      } else {
-        const SEEK_START = 34.5
-        const ensureLitStart = () => {
-          if (mainVid.duration && mainVid.currentTime < SEEK_START - 0.5) {
-            try {
-              mainVid.currentTime = SEEK_START
-              spillVid.currentTime = SEEK_START
-            } catch {
-              // ignore seek error before metadata ready
-            }
-          }
-        }
-        const revealWhenLit = () => {
-          if (mainVid.readyState >= 2 && mainVid.currentTime >= SEEK_START - 0.5) {
-            mainVid.classList.add('is-ready')
-            if (spillVid.readyState >= 2) {
-              spillVid.classList.add('is-ready')
-            }
-          }
-        }
-        const syncSpill = () => {
-          if (Math.abs(spillVid.currentTime - mainVid.currentTime) > 0.25) {
-            spillVid.currentTime = mainVid.currentTime
-          }
-          revealWhenLit()
-        }
+    let activeIndex = 0
+    let pendingIndex: number | null = null
+    let soundEnabled = false
+    let initialRevealed = false
+    let preloadScheduled = false
+    let switchGen = 0
+    let rafId = 0
+    let lastSpillDraw = 0
+    let soundBtn: HTMLButtonElement | null = null
+    const retryCounts = videos.map(() => 0)
 
-        mainVid.addEventListener('loadedmetadata', ensureLitStart)
-        mainVid.addEventListener('seeked', revealWhenLit)
-        mainVid.addEventListener('playing', revealWhenLit)
-        mainVid.addEventListener('timeupdate', syncSpill)
-        mainVid.addEventListener('play', () => spillVid.play().catch(() => {}))
-        mainVid.addEventListener('pause', () => spillVid.pause())
-        spillVid.addEventListener('canplay', revealWhenLit)
+    const getInitialStart = (index: number): number =>
+      Number(videos[index]?.dataset.initialStart || 0) || 0
 
-        if (mainVid.readyState >= 1) ensureLitStart()
-        revealWhenLit()
-        mainVid.play().catch(() => {})
-        spillVid.play().catch(() => {})
+    const getLoopStart = (index: number): number =>
+      Number(videos[index]?.dataset.loopStart || 0) || 0
+
+    const syncSoundButton = () => {
+      if (!soundBtn) return
+      soundBtn.setAttribute('aria-pressed', String(soundEnabled))
+      soundBtn.textContent = soundEnabled
+        ? soundBtn.dataset.labelOn || 'SOUND ON'
+        : soundBtn.dataset.labelOff || 'SOUND OFF'
+    }
+
+    const drawSpillFrame = (vid: HTMLVideoElement | undefined) => {
+      if (!spillCanvas || !spillCtx || !vid || vid.readyState < 2 || vid.videoWidth === 0) return
+      try {
+        spillCtx.drawImage(vid, 0, 0, spillCanvas.width, spillCanvas.height)
+        if (!spillCanvas.classList.contains('is-ready')) {
+          spillCanvas.classList.add('is-ready')
+          spill?.classList.add('has-video')
+        }
+      } catch {
+        // Ignore transient decode frame errors
       }
     }
 
-    if (soundBtn && mainVid) {
-      soundBtn.setAttribute('aria-pressed', String(!mainVid.muted))
-      soundBtn.textContent = mainVid.muted
-        ? soundBtn.dataset.labelOff || 'SOUND OFF'
-        : soundBtn.dataset.labelOn || 'SOUND ON'
-
-      if (!soundBtn.dataset.bound) {
-        soundBtn.dataset.bound = '1'
-        soundBtn.addEventListener('click', () => {
-          mainVid.muted = !mainVid.muted
-          soundBtn.setAttribute('aria-pressed', String(!mainVid.muted))
-          soundBtn.textContent = mainVid.muted
-            ? soundBtn.dataset.labelOff || 'SOUND OFF'
-            : soundBtn.dataset.labelOn || 'SOUND ON'
-          if (mainVid.paused) mainVid.play().catch(() => {})
-        })
+    const stopSpillLoop = () => {
+      if (rafId) {
+        window.cancelAnimationFrame(rafId)
+        rafId = 0
       }
+    }
+
+    const startSpillLoop = () => {
+      if (reducedMotion || !spillCtx || rafId || document.hidden || !wrap.isConnected) return
+      const tick = (now: number) => {
+        if (!wrap.isConnected || document.hidden) {
+          rafId = 0
+          return
+        }
+        if (now - lastSpillDraw >= 50) {
+          lastSpillDraw = now
+          const activeVid = videos[activeIndex]
+          if (activeVid && activeVid.classList.contains('is-ready')) {
+            drawSpillFrame(activeVid)
+          }
+        }
+        rafId = window.requestAnimationFrame(tick)
+      }
+      rafId = window.requestAnimationFrame(tick)
+    }
+
+    const handleVisibilityChange = () => {
+      if (!wrap.isConnected) {
+        stopSpillLoop()
+        return
+      }
+      if (document.hidden) {
+        stopSpillLoop()
+      } else {
+        startSpillLoop()
+      }
+    }
+
+    const ensureLoaded = (index: number) => {
+      const vid = videos[index]
+      if (!vid || vid.dataset.loaded === '1') return
+      const rawSrc = vid.dataset.src
+      if (!rawSrc) return
+      vid.dataset.loaded = '1'
+      vid.preload = 'auto'
+      vid.src = rawSrc
+      vid.load()
+    }
+
+    const schedulePreloadNext = () => {
+      if (preloadScheduled || videos.length < 2) return
+      preloadScheduled = true
+      window.setTimeout(() => {
+        if (!wrap.isConnected || reducedMotion) return
+        ensureLoaded((activeIndex + 1) % videos.length)
+      }, 1500)
+    }
+
+    const promoteActive = (nextIndex: number, prevIndex: number) => {
+      const prevVid = videos[prevIndex]
+      const nextVid = videos[nextIndex]
+      if (!nextVid) return
+
+      activeIndex = nextIndex
+      nextVid.volume = 1
+      nextVid.muted = !soundEnabled
+      nextVid.classList.add('is-active', 'is-ready')
+      if (!initialRevealed) {
+        initialRevealed = true
+        window.setTimeout(() => {
+          if (wrap.isConnected) frame?.classList.add('has-video')
+        }, 650)
+      }
+      drawSpillFrame(nextVid)
+      startSpillLoop()
+
+      if (prevVid && prevVid !== nextVid) {
+        prevVid.muted = true
+        prevVid.classList.remove('is-active')
+        window.setTimeout(() => {
+          if (activeIndex === prevIndex || pendingIndex === prevIndex || !wrap.isConnected) return
+          prevVid.pause()
+          prevVid.muted = true
+          const rewindTarget = getLoopStart(prevIndex)
+          if (prevVid.readyState >= 1) {
+            try {
+              prevVid.currentTime = rewindTarget
+            } catch {
+              // ignore rewind error
+            }
+          }
+        }, 240)
+      }
+
+      if (videos.length > 1) {
+        ensureLoaded((nextIndex + 1) % videos.length)
+      }
+      syncSoundButton()
+    }
+
+    const unlockForSound = (slotIndex: number) => {
+      const vid = videos[slotIndex]
+      if (!vid || vid.dataset.soundUnlocked === '1') return
+      ensureLoaded(slotIndex)
+      vid.volume = 0
+      vid.muted = false
+      const playPromise = vid.play()
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(() => {
+            if (activeIndex !== slotIndex && pendingIndex !== slotIndex) {
+              vid.pause()
+              const target = getLoopStart(slotIndex)
+              if (vid.readyState >= 1) {
+                try {
+                  vid.currentTime = target
+                } catch {
+                  // ignore before seekable
+                }
+              }
+            }
+            vid.volume = 1
+            vid.muted = !soundEnabled || (activeIndex !== slotIndex && pendingIndex !== slotIndex)
+            vid.dataset.soundUnlocked = '1'
+          })
+          .catch(() => {
+            vid.volume = 1
+            vid.muted = true
+          })
+      }
+    }
+
+    const refreshClip = (index: number, playWhenReady: boolean) => {
+      const vid = videos[index]
+      const rawSrc = vid?.dataset.src
+      if (!vid || !rawSrc) return
+      retryCounts[index] += 1
+      if (retryCounts[index] > 2) {
+        if (playWhenReady && videos.length > 1) {
+          const fallbackIndex = (index + 1) % videos.length
+          if (retryCounts[fallbackIndex] <= 2) {
+            void switchTo(fallbackIndex)
+          }
+        }
+        return
+      }
+      const target =
+        index === 0 && vid.dataset.initialSeekDone !== '1'
+          ? getInitialStart(index)
+          : getLoopStart(index)
+      vid.dataset.loaded = '1'
+      vid.dataset.pendingSeek = String(target)
+      vid.preload = 'auto'
+      vid.src = target > 0 ? `${rawSrc}#t=${target}` : rawSrc
+      vid.load()
+      if (playWhenReady) {
+        const gen = ++switchGen
+        const prevIndex = activeIndex
+        pendingIndex = index
+        vid.volume = 1
+        vid.muted = !soundEnabled
+        vid
+          .play()
+          .then(() => {
+            if (gen === switchGen && wrap.isConnected) {
+              pendingIndex = null
+              promoteActive(index, prevIndex)
+            }
+          })
+          .catch(() => {
+            if (gen !== switchGen) return
+            if (!vid.muted) {
+              soundEnabled = false
+              vid.muted = true
+              syncSoundButton()
+              vid
+                .play()
+                .then(() => {
+                  if (gen === switchGen && wrap.isConnected) {
+                    pendingIndex = null
+                    promoteActive(index, prevIndex)
+                  }
+                })
+                .catch(() => {
+                  if (gen === switchGen) pendingIndex = null
+                })
+            } else {
+              pendingIndex = null
+            }
+          })
+      }
+    }
+
+    const switchTo = async (nextIndex: number) => {
+      if (!wrap.isConnected || reducedMotion || videos.length === 0) return
+      const gen = ++switchGen
+      const prevIndex = activeIndex
+      const prevVid = videos[prevIndex]
+      const nextVid = videos[nextIndex]
+      if (!nextVid) return
+
+      pendingIndex = nextIndex
+      ensureLoaded(nextIndex)
+
+      const targetStart = getLoopStart(nextIndex)
+      if (nextVid.readyState >= 1) {
+        if (Math.abs(nextVid.currentTime - targetStart) > 0.15) {
+          try {
+            nextVid.currentTime = targetStart
+          } catch {
+            // ignore seek error before seekable
+          }
+        }
+      } else {
+        nextVid.dataset.pendingSeek = String(targetStart)
+      }
+
+      if (prevVid && prevVid !== nextVid) {
+        prevVid.muted = true
+      }
+
+      nextVid.volume = 1
+      nextVid.muted = !soundEnabled
+
+      let started = false
+      try {
+        await nextVid.play()
+        started = true
+      } catch {
+        if (gen !== switchGen) return
+        if (!nextVid.muted) {
+          soundEnabled = false
+          nextVid.muted = true
+          syncSoundButton()
+          try {
+            await nextVid.play()
+            started = true
+          } catch {
+            started = false
+          }
+        }
+      }
+
+      if (gen !== switchGen || !wrap.isConnected) {
+        if (started && activeIndex !== nextIndex) {
+          nextVid.pause()
+          nextVid.muted = true
+        }
+        return
+      }
+
+      pendingIndex = null
+
+      if (!started) {
+        refreshClip(nextIndex, true)
+        return
+      }
+
+      promoteActive(nextIndex, prevIndex)
+    }
+
+    if (reducedMotion) {
+      for (const vid of videos) {
+        vid.pause()
+      }
+    } else if (videos.length > 0) {
+      const firstVid = videos[0]
+      firstVid.dataset.loaded = '1'
+      const firstInitialStart = getInitialStart(0)
+
+      const ensureFirstLitStart = () => {
+        if (firstVid.dataset.initialSeekDone === '1') return
+        if (firstVid.duration && firstVid.duration > firstInitialStart) {
+          if (firstVid.currentTime < firstInitialStart - 0.5) {
+            try {
+              firstVid.currentTime = firstInitialStart
+            } catch {
+              return
+            }
+          }
+          if (firstVid.currentTime >= firstInitialStart - 0.5) {
+            firstVid.dataset.initialSeekDone = '1'
+          }
+        }
+      }
+
+      const revealFirstWhenLit = () => {
+        if (initialRevealed || activeIndex !== 0) return
+        if (firstVid.readyState >= 2 && firstVid.currentTime >= firstInitialStart - 0.5) {
+          firstVid.dataset.initialSeekDone = '1'
+          initialRevealed = true
+          firstVid.classList.add('is-ready')
+          drawSpillFrame(firstVid)
+          startSpillLoop()
+          schedulePreloadNext()
+          window.setTimeout(() => {
+            if (wrap.isConnected) {
+              frame?.classList.add('has-video')
+            }
+          }, 650)
+        }
+      }
+
+      videos.forEach((vid, index) => {
+        vid.addEventListener('loadedmetadata', () => {
+          if (index === 0 && vid.dataset.initialSeekDone !== '1') {
+            ensureFirstLitStart()
+          }
+          if (vid.dataset.pendingSeek !== undefined) {
+            const target = Number(vid.dataset.pendingSeek)
+            delete vid.dataset.pendingSeek
+            if (!Number.isNaN(target) && vid.duration && target < vid.duration) {
+              try {
+                vid.currentTime = target
+              } catch {
+                // ignore seek error
+              }
+            }
+          }
+        })
+
+        vid.addEventListener('canplay', () => {
+          if (index === 0 && vid.dataset.initialSeekDone !== '1') {
+            ensureFirstLitStart()
+          }
+        })
+
+        vid.addEventListener('playing', () => {
+          retryCounts[index] = 0
+          if (index === 0) {
+            revealFirstWhenLit()
+          }
+          if (index === activeIndex && (index !== 0 || initialRevealed)) {
+            vid.classList.add('is-ready')
+            drawSpillFrame(vid)
+            startSpillLoop()
+          }
+        })
+
+        vid.addEventListener('seeked', () => {
+          if (index === 0) revealFirstWhenLit()
+        })
+
+        vid.addEventListener('timeupdate', () => {
+          if (index === 0 && !initialRevealed) {
+            revealFirstWhenLit()
+          }
+        })
+
+        vid.addEventListener('ended', () => {
+          if (index !== activeIndex) return
+          const nextIndex = (index + 1) % videos.length
+          void switchTo(nextIndex)
+        })
+
+        vid.addEventListener('error', () => {
+          if (vid.dataset.loaded !== '1') return
+          refreshClip(index, index === activeIndex)
+        })
+      })
+
+      if (firstVid.readyState >= 1) ensureFirstLitStart()
+      revealFirstWhenLit()
+      firstVid.play().catch(() => {})
+    }
+
+    return {
+      bindSoundButton(btn) {
+        soundBtn = btn
+        if (!btn || videos.length === 0) return
+        syncSoundButton()
+        if (btn.dataset.bound === '1') return
+        btn.dataset.bound = '1'
+        btn.addEventListener('click', () => {
+          soundEnabled = !soundEnabled
+          const hasPendingHandoff = pendingIndex !== null && pendingIndex !== activeIndex
+          const activeVid = videos[activeIndex]
+          if (activeVid) {
+            if (hasPendingHandoff || activeVid.ended) {
+              activeVid.muted = true
+            } else {
+              activeVid.volume = 1
+              activeVid.muted = !soundEnabled
+              if (activeVid.paused && !reducedMotion) {
+                activeVid.play().catch(() => {})
+              }
+            }
+          }
+          if (soundEnabled) {
+            if (hasPendingHandoff && pendingIndex !== null) {
+              const pendingVid = videos[pendingIndex]
+              if (pendingVid) {
+                pendingVid.volume = 1
+                pendingVid.muted = false
+              }
+            }
+            videos.forEach((_, idx) => {
+              if (idx !== activeIndex && idx !== pendingIndex) {
+                unlockForSound(idx)
+              }
+            })
+          } else {
+            videos.forEach((vid) => {
+              vid.muted = true
+            })
+          }
+          syncSoundButton()
+        })
+      },
+      resume() {
+        if (reducedMotion || !wrap.isConnected) return
+        if (pendingIndex !== null && pendingIndex !== activeIndex) {
+          startSpillLoop()
+          return
+        }
+        const activeVid = videos[activeIndex]
+        if (activeVid && activeVid.paused && !activeVid.ended) {
+          activeVid.play().catch(() => {})
+        }
+        startSpillLoop()
+      },
+      onVisibilityChange: handleVisibilityChange,
+      dispose() {
+        switchGen += 1
+        pendingIndex = null
+        soundBtn = null
+        stopSpillLoop()
+        for (const vid of videos) {
+          vid.pause()
+          vid.muted = true
+        }
+      },
+    }
+  }
+
+  function initHome() {
+    ensureGlobalHeroListeners()
+    const wrap = document.getElementById('hero-media-wrap')
+    const soundBtn = document.getElementById('hero-sound-btn') as HTMLButtonElement | null
+
+    if (mountedHeroWrap && mountedHeroWrap !== wrap && !mountedHeroWrap.isConnected) {
+      heroControllers.get(mountedHeroWrap)?.dispose()
+      mountedHeroWrap = null
+    }
+
+    if (wrap) {
+      mountedHeroWrap = wrap
+      let controller = heroControllers.get(wrap)
+      if (!controller) {
+        controller = createHeroController(wrap)
+        heroControllers.set(wrap, controller)
+      }
+      controller.bindSoundButton(soundBtn)
+      controller.resume()
     }
 
     // Sunset diagonal wipe interactive scrub (complements scroll-driven CSS animation)
