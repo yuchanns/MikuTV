@@ -228,16 +228,27 @@ func TestPluginLicenseExtractionAndAboutPageAndModals(t *testing.T) {
 		Version: "0.1.0",
 		Build:   "286",
 		Commit:  "abc123def456",
-		Plugins: []app.AboutPlugin{{
-			ID:           src.Manifest().ID,
-			Name:         src.Manifest().Name,
-			Kind:         string(src.Manifest().Kind),
-			Version:      src.Manifest().Version,
-			Bundled:      false,
-			SourceCommit: "deadbeef1234567890",
-			License:      src.Manifest().License,
-			LicenseText:  src.LicenseText(),
-		}},
+		Plugins: []app.AboutPlugin{
+			{
+				ID:           src.Manifest().ID,
+				Name:         src.Manifest().Name,
+				Kind:         string(src.Manifest().Kind),
+				Version:      src.Manifest().Version,
+				Bundled:      false,
+				SourceCommit: "deadbeef1234567890",
+				License:      src.Manifest().License,
+				LicenseText:  src.LicenseText(),
+			},
+			{
+				ID:          "demo-theme",
+				Name:        "Demo Theme",
+				Kind:        "theme",
+				Version:     "1.0.0",
+				Bundled:     false,
+				License:     "Apache-2.0",
+				LicenseText: "Apache License\nCopyright (c) Theme Author",
+			},
+		},
 		Dependencies: []app.AboutDependency{
 			{Module: "github.com/example/alpha", Version: "v1.0.0", License: "MIT", LicenseText: "MIT License\nCopyright (c) Alpha"},
 			{Module: "github.com/example/beta", Version: "v2.0.0", License: "BSD-3-Clause", Indirect: true, LicenseText: "BSD-3-Clause\nCopyright (c) Beta"},
@@ -275,13 +286,15 @@ func TestPluginLicenseExtractionAndAboutPageAndModals(t *testing.T) {
 	view.Theme = theme.Default()
 	tester.Frame()
 
-	// 2. Open Open Source Licenses drawer and verify build, plugin, plugin LICENSE text, and dynamic dependencies.
+	// 2. Open Open Source Licenses drawer and verify build, compact plugin license list (without plugin LICENSE bodies), and dynamic dependencies.
 	doc := buildLicenseDocument(about.Normalized(""), assets.License, assets.Text.About)
 	for _, needle := range []string{
 		"MikuTV 0.1.0 (286)",
 		"Commit: abc123def456",
 		"Demo Source (demo-src) v1.2.3",
-		"Copyright (c) Demo Author",
+		"MIT",
+		"Demo Theme (demo-theme) v1.0.0",
+		"Apache-2.0",
 		"github.com/example/alpha v1.0.0 (MIT)",
 		"github.com/example/beta v2.0.0 (BSD-3-Clause) [indirect]",
 		"Copyright (c) Alpha",
@@ -290,6 +303,14 @@ func TestPluginLicenseExtractionAndAboutPageAndModals(t *testing.T) {
 	} {
 		if !strings.Contains(doc, needle) {
 			t.Errorf("composed license document missing %q", needle)
+		}
+	}
+	for _, forbidden := range []string{
+		"Copyright (c) Demo Author",
+		"Copyright (c) Theme Author",
+	} {
+		if strings.Contains(doc, forbidden) {
+			t.Errorf("composed license document should omit plugin full license text %q", forbidden)
 		}
 	}
 
