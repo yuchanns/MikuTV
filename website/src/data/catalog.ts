@@ -36,6 +36,31 @@ export interface PluginEntry {
 export const LAUNCH_VIDEO_URL =
   'https://github.com/user-attachments/assets/f3868d0c-1b14-4be0-ae68-f7bb5268de82'
 
+export const MUSIC_VIDEO_URL =
+  'https://github.com/user-attachments/assets/81299464-082c-4507-b58f-6160f1e5cbb1'
+
+export interface HeroVideoEntry {
+  id: string
+  src: string
+  initialStart: number
+  loopStart: number
+}
+
+export const HERO_VIDEOS: readonly HeroVideoEntry[] = [
+  {
+    id: 'launch',
+    src: LAUNCH_VIDEO_URL,
+    initialStart: 34.5,
+    loopStart: 1.2,
+  },
+  {
+    id: 'music',
+    src: MUSIC_VIDEO_URL,
+    initialStart: 0,
+    loopStart: 0,
+  },
+] as const
+
 export const OFFICIAL_THEMES: ThemeSpec[] = [
   {
     id: 'mikutv-dark',

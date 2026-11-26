@@ -302,7 +302,7 @@ pre {
 }
 
 .hero-spill img,
-.hero-spill video {
+.hero-spill canvas {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -311,19 +311,23 @@ pre {
   filter: blur(84px) saturate(1.2);
   opacity: 0.3;
   transform: scale(1.18);
-}
-
-.hero-spill video {
-  opacity: 0;
   transition: opacity 0.6s ease;
 }
 
-.hero-spill video.is-ready {
+.hero-spill.has-video .spill-base {
+  opacity: 0;
+}
+
+.hero-spill canvas {
+  opacity: 0;
+}
+
+.hero-spill canvas.is-ready {
   opacity: 0.3;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero-spill video {
+  .hero-spill canvas {
     display: none;
   }
 }
@@ -333,7 +337,7 @@ pre {
   z-index: 1;
   aspect-ratio: 16 / 9;
   width: 100%;
-  background: #0b0f17;
+  background: #000000;
   border: 1px solid rgb(255 255 255 / 0.12);
   border-right: none;
   border-radius: 18px 0 0 18px;
@@ -342,7 +346,7 @@ pre {
 }
 
 .hero-tv-frame .hero-tv-poster,
-.hero-tv-frame video {
+.hero-tv-frame .hero-tv-video {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -350,12 +354,30 @@ pre {
   object-fit: cover;
 }
 
-.hero-tv-frame video {
-  opacity: 0;
+.hero-tv-frame .hero-tv-poster {
+  z-index: 1;
+  opacity: 1;
   transition: opacity 0.6s ease;
 }
 
-.hero-tv-frame video.is-ready {
+.hero-tv-frame.has-video .hero-tv-poster {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hero-tv-frame .hero-tv-video {
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+}
+
+.hero-tv-frame.has-video .hero-tv-video {
+  transition: opacity 0.18s linear;
+}
+
+.hero-tv-frame .hero-tv-video.is-active.is-ready {
+  z-index: 3;
   opacity: 1;
 }
 
