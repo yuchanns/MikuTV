@@ -118,6 +118,7 @@ type Playback struct {
 	onReported func()
 
 	state            PlaybackState
+	initialTarget    provider.PlaybackTarget
 	owner            string
 	syncSource       bool
 	active           bool
@@ -302,6 +303,7 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 		p.engine.Fullscreen(true)
 	}
 	p.active, p.owner, p.syncSource = true, owner, syncSource
+	p.initialTarget = target
 	revision := p.state.Revision
 	var position float64
 	if start != nil {
@@ -786,6 +788,15 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	p.autoStallActive = false
 	p.state.Revision++
 	p.applyRate()
+	if !preserve && !plan.Live && p.selectedAudio == "" && target.PartID != "" && p.initialTarget.PartID == "" {
+		if ts, ok := p.store.(PlaybackTrackStore); ok {
+			if sel, found := ts.PlaybackTrackSelection(p.owner, target); found && sel.Audio != "" && sel.Audio != p.state.ActiveAudio {
+				if slices.ContainsFunc(p.state.AudioTracks, func(t provider.PlaybackTrack) bool { return t.ID == sel.Audio }) {
+					p.ChooseAudioTrack(sel.Audio)
+				}
+			}
+		}
+	}
 }
 
 func defaultPlanAudioID(tracks []provider.PlaybackTrack) string {

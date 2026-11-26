@@ -21,6 +21,7 @@ const (
 type PlaybackSubtitlePref string
 
 const (
+	PlaybackSubtitleAuto    PlaybackSubtitlePref = ""
 	PlaybackSubtitleOff     PlaybackSubtitlePref = "off"
 	PlaybackSubtitleChinese PlaybackSubtitlePref = "zh"
 	PlaybackSubtitleEnglish PlaybackSubtitlePref = "en"
@@ -50,7 +51,7 @@ func DefaultPlaybackPreferences() PlaybackPreferences {
 	return PlaybackPreferences{
 		Quality:  PlaybackQualityAuto,
 		Speed:    1.0,
-		Subtitle: PlaybackSubtitleOff,
+		Subtitle: PlaybackSubtitleAuto,
 		Autoplay: true,
 	}
 }
@@ -74,9 +75,9 @@ func (p PlaybackPreferences) Normalize() PlaybackPreferences {
 		p.Speed = best
 	}
 	switch p.Subtitle {
-	case PlaybackSubtitleOff, PlaybackSubtitleChinese, PlaybackSubtitleEnglish:
+	case PlaybackSubtitleAuto, PlaybackSubtitleOff, PlaybackSubtitleChinese, PlaybackSubtitleEnglish:
 	default:
-		p.Subtitle = PlaybackSubtitleOff
+		p.Subtitle = PlaybackSubtitleAuto
 	}
 	switch p.LoopMode {
 	case PlaybackLoopSequential, PlaybackLoopRepeatAll, PlaybackLoopRepeatOne, PlaybackLoopShuffle:
@@ -149,7 +150,7 @@ func (s *PlaybackSettings) Update(update func(*PlaybackPreferences)) error {
 }
 
 func MatchPreferredSubtitle(pref PlaybackSubtitlePref, tracks []provider.PlaybackTrack) (provider.PlaybackTrack, bool) {
-	if pref == PlaybackSubtitleOff || len(tracks) == 0 {
+	if pref == PlaybackSubtitleAuto || pref == PlaybackSubtitleOff || len(tracks) == 0 {
 		return provider.PlaybackTrack{}, false
 	}
 	var aiFallback *provider.PlaybackTrack

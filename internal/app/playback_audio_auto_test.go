@@ -36,6 +36,7 @@ type hlsPlanAudioSession struct {
 	reports       chan provider.PlaybackProgress
 	failAudio     string
 	restrictAudio string
+	resolvedPart  string
 }
 
 func (s *hlsPlanAudioSession) ResolvePlayback(_ context.Context, req provider.PlaybackRequest) (provider.Playback, error) {
@@ -53,12 +54,17 @@ func (s *hlsPlanAudioSession) ResolvePlayback(_ context.Context, req provider.Pl
 	if quality == "" {
 		quality = "original"
 	}
+	partID := req.PartID
+	if partID == "" {
+		partID = s.resolvedPart
+	}
 	var restriction provider.PlaybackLimit
 	if s.restrictAudio != "" && req.AudioTrack == s.restrictAudio {
 		restriction = provider.PlaybackMembership
 	}
 	return provider.Playback{
 		Plan: provider.PlaybackPlan{
+			PartID:      partID,
 			ItemID:      req.Ref.ID,
 			Duration:    300,
 			Access:      provider.VideoAccessGranted,
@@ -334,6 +340,42 @@ func TestPlaybackRemembersPerItemSubtitleAndAudioTracks(t *testing.T) {
 		t.Fatalf("unexpected remembered tracks on re-entry: %+v ok=%v", sel, ok)
 	}
 	pb.Close()
+
+	// Unresolved initial target (empty PartID -> provider resolves PartID="ep-1")
+	// must also restore remembered audio track "2" after part identity resolves.
+	seriesSource := &hlsPlanAudioSession{requests: make(chan provider.PlaybackRequest, 8), resolvedPart: "ep-1"}
+	seriesCat := &Catalog{entryID: "entry", session: seriesSource, canReport: true}
+	pb2 := NewPlayback(seriesCat, player.Engine{
+		Open:         func(string, float64) bool { return true },
+		Snapshot:     func() player.Status { return player.Status{HasFrame: true, Duration: 300, Position: 10} },
+		SetRate:      func(float64) {},
+		Capabilities: func() player.Capabilities { return player.Capabilities{HDR: true, HEVC: true} },
+	}, store, func(fn func()) { deliveries <- fn }, func() {})
+
+	unresolved := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "entry", Kind: provider.Series, ID: "show-1"}}
+	pb2.Start(unresolved, "user", true, nil)
+	deliver()
+	<-seriesSource.requests
+	if !pb2.ChooseAudioTrack("2") {
+		t.Fatal("ChooseAudioTrack(2) on resolved part returned false")
+	}
+	deliver()
+	<-seriesSource.requests
+	pb2.Close()
+
+	// Re-entering with empty PartID resolves ep-1 and automatically restores audio "2".
+	pb2.Start(unresolved, "user", true, nil)
+	deliver() // initial resolve (PartID="" -> ep-1), which triggers ChooseAudioTrack("2")
+	<-seriesSource.requests
+	deliver() // restored audio resolve
+	reAudioReq := <-seriesSource.requests
+	if reAudioReq.PartID != "ep-1" || reAudioReq.AudioTrack != "2" {
+		t.Fatalf("expected restored audio 2 on resolved ep-1, got part=%q audio=%q", reAudioReq.PartID, reAudioReq.AudioTrack)
+	}
+	if pb2.State().ActiveAudio != "2" {
+		t.Fatalf("expected ActiveAudio=2 after unresolved re-entry, got %q", pb2.State().ActiveAudio)
+	}
+	pb2.Close()
 }
 
 func TestQueueReportPreservesStoppedBeforeNewStart(t *testing.T) {

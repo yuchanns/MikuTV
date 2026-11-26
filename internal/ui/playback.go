@@ -1007,10 +1007,18 @@ func (s *playbackView) updatePlan(v *View, state app.PlaybackState) {
 						}
 					}
 				}
-			} else if matched, found := app.MatchPreferredSubtitle(v.playbackPreferences().Subtitle, plan.Subtitles); found {
-				s.content.setSubtitle(v, matched)
-			} else if defTrack, found := app.DefaultSubtitleTrack(plan.Subtitles, v.Assets.LangTag()); found {
-				s.content.setSubtitle(v, defTrack)
+			} else if pref := v.playbackPreferences().Subtitle; pref != app.PlaybackSubtitleOff {
+				if matched, found := app.MatchPreferredSubtitle(pref, plan.Subtitles); found {
+					s.content.setSubtitle(v, matched)
+				} else if pref == app.PlaybackSubtitleAuto {
+					langTag := "zh-CN"
+					if v.Assets != nil {
+						langTag = v.Assets.LangTag()
+					}
+					if defTrack, found := app.DefaultSubtitleTrack(plan.Subtitles, langTag); found {
+						s.content.setSubtitle(v, defTrack)
+					}
+				}
 			}
 		}
 	}

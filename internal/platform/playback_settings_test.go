@@ -29,7 +29,7 @@ func TestPlaybackPreferencesPersistenceCodec(t *testing.T) {
 	}
 	// Invalid values normalize cleanly.
 	norm, ok := parsePlaybackPreferences(`{"quality":"bogus","speed":1.3,"subtitle":"jp","autoplay":true}`)
-	if !ok || norm.Quality != app.PlaybackQualityAuto || norm.Speed != 1.25 || norm.Subtitle != app.PlaybackSubtitleOff || !norm.Autoplay {
+	if !ok || norm.Quality != app.PlaybackQualityAuto || norm.Speed != 1.25 || norm.Subtitle != app.PlaybackSubtitleAuto || !norm.Autoplay {
 		t.Fatalf("normalized = %+v ok=%v", norm, ok)
 	}
 }
