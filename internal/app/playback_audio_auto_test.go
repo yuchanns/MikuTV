@@ -148,6 +148,17 @@ func TestPlaybackPlanAudioSwitchingStoppedReportAndNoFastLANAutoDowngrade(t *tes
 		clock.Buffering = false
 		pb.Tick(bootAt.Add(time.Duration(i*300+250) * time.Millisecond))
 	}
+	// First Tick with HasFrame + Position>=1 emits initial playback start report.
+	select {
+	case rep := <-source.reports:
+		if rep.Stopped || rep.Seconds != 42 {
+			t.Fatalf("unexpected initial start report: %+v", rep)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for initial video start report")
+	}
+	deliver() // start report completion callback
+
 	if pb.State().Switching || pb.State().Resolution.Plan.Quality != "original" {
 		t.Fatalf("startup buffering flickers falsely downgraded: switching=%v quality=%q", pb.State().Switching, pb.State().Resolution.Plan.Quality)
 	}
@@ -235,6 +246,94 @@ func TestPlaybackPlanAudioSwitchingStoppedReportAndNoFastLANAutoDowngrade(t *tes
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Stopped=true report on Close")
 	}
+}
+
+type trackMemoryStore struct {
+	pos    map[savedPositionKey]float64
+	tracks map[savedPositionKey]PlaybackTrackSelection
+}
+
+func (s *trackMemoryStore) PlaybackPosition(owner string, target provider.PlaybackTarget) (float64, bool) {
+	v, ok := s.pos[savedPositionKey{owner, target}]
+	return v, ok
+}
+
+func (s *trackMemoryStore) SavePlaybackPosition(owner string, target provider.PlaybackTarget, seconds float64) error {
+	if s.pos == nil {
+		s.pos = make(map[savedPositionKey]float64)
+	}
+	s.pos[savedPositionKey{owner, target}] = seconds
+	return nil
+}
+
+func (s *trackMemoryStore) PlaybackTrackSelection(owner string, target provider.PlaybackTarget) (PlaybackTrackSelection, bool) {
+	v, ok := s.tracks[savedPositionKey{owner, target}]
+	return v, ok
+}
+
+func (s *trackMemoryStore) SavePlaybackTrackSelection(owner string, target provider.PlaybackTarget, sel PlaybackTrackSelection) error {
+	if s.tracks == nil {
+		s.tracks = make(map[savedPositionKey]PlaybackTrackSelection)
+	}
+	cur := s.tracks[savedPositionKey{owner, target}]
+	if sel.SubtitleSet {
+		cur.Subtitle = sel.Subtitle
+		cur.SubtitleSet = true
+	}
+	if sel.Audio != "" {
+		cur.Audio = sel.Audio
+	}
+	s.tracks[savedPositionKey{owner, target}] = cur
+	return nil
+}
+
+func TestPlaybackRemembersPerItemSubtitleAndAudioTracks(t *testing.T) {
+	deliveries := make(chan func(), 16)
+	deliver := func() {
+		t.Helper()
+		select {
+		case fn := <-deliveries:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for playback delivery")
+		}
+	}
+	store := &trackMemoryStore{}
+	source := &hlsPlanAudioSession{requests: make(chan provider.PlaybackRequest, 8)}
+	cat := &Catalog{entryID: "entry", session: source, canReport: true}
+	pb := NewPlayback(cat, player.Engine{
+		Open:         func(string, float64) bool { return true },
+		Snapshot:     func() player.Status { return player.Status{HasFrame: true, Duration: 300, Position: 10} },
+		SetRate:      func(float64) {},
+		Capabilities: func() player.Capabilities { return player.Capabilities{HDR: true, HEVC: true} },
+	}, store, func(fn func()) { deliveries <- fn }, func() {})
+
+	target := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "entry", Kind: provider.Movie, ID: "avengers"}}
+	pb.Start(target, "user", true, nil)
+	deliver()
+	<-source.requests
+
+	// User picks subtitle "sub-5" and audio "2", then closes playback.
+	pb.SaveSubtitleSelection("sub-5")
+	if !pb.ChooseAudioTrack("2") {
+		t.Fatal("ChooseAudioTrack(2) returned false")
+	}
+	deliver()
+	<-source.requests
+	pb.Close()
+
+	// Re-entering the same movie must immediately request saved AudioTrack="2"
+	// and report saved Subtitle="sub-5".
+	pb.Start(target, "user", true, nil)
+	deliver()
+	reReq := <-source.requests
+	if reReq.AudioTrack != "2" {
+		t.Fatalf("re-entry requested AudioTrack=%q, want 2", reReq.AudioTrack)
+	}
+	if sel, ok := pb.SavedTrackSelection(); !ok || !sel.SubtitleSet || sel.Subtitle != "sub-5" || sel.Audio != "2" {
+		t.Fatalf("unexpected remembered tracks on re-entry: %+v ok=%v", sel, ok)
+	}
+	pb.Close()
 }
 
 func TestQueueReportPreservesStoppedBeforeNewStart(t *testing.T) {

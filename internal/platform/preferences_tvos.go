@@ -165,6 +165,35 @@ func (p *Preferences) SavePlaybackPosition(owner string, target provider.Playbac
 	return saveErr
 }
 
+func (p *Preferences) PlaybackTrackSelection(owner string, target provider.PlaybackTarget) (app.PlaybackTrackSelection, bool) {
+	var sel app.PlaybackTrackSelection
+	var ok bool
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		store := p.loadPlaybackPositionsLocked()
+		sel, ok = store.getTracks(owner, target)
+	})
+	return sel, ok
+}
+
+func (p *Preferences) SavePlaybackTrackSelection(owner string, target provider.PlaybackTarget, sel app.PlaybackTrackSelection) error {
+	var saveErr error
+	withAutoreleasePool(func() {
+		p.writes.Lock()
+		defer p.writes.Unlock()
+		store := p.loadPlaybackPositionsLocked()
+		store.putTracks(owner, target, sel)
+		encoded, err := store.encode()
+		if err != nil {
+			saveErr = err
+			return
+		}
+		saveErr = p.saveStringLocked(p.positionsKey, nsStringObj(encoded), "", 0)
+	})
+	return saveErr
+}
+
 func (p *Preferences) ClearPlaybackPositions(entryID, owner string) error {
 	var clearErr error
 	withAutoreleasePool(func() {

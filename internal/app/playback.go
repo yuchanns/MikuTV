@@ -18,6 +18,21 @@ type PlaybackStore interface {
 	SavePlaybackPosition(owner string, target provider.PlaybackTarget, seconds float64) error
 }
 
+// PlaybackTrackSelection stores per-item remembered subtitle and audio track IDs.
+// SubtitleSet distinguishes an explicit "Off" choice (Subtitle == "") from unset.
+type PlaybackTrackSelection struct {
+	Subtitle    string `json:"sub,omitempty"`
+	SubtitleSet bool   `json:"subSet,omitempty"`
+	Audio       string `json:"aud,omitempty"`
+}
+
+// PlaybackTrackStore is optionally implemented by a PlaybackStore to remember
+// per-item subtitle and audio track selections across playback sessions.
+type PlaybackTrackStore interface {
+	PlaybackTrackSelection(owner string, target provider.PlaybackTarget) (PlaybackTrackSelection, bool)
+	SavePlaybackTrackSelection(owner string, target provider.PlaybackTarget, sel PlaybackTrackSelection) error
+}
+
 const (
 	playbackStallTimeout      = 25 * time.Second
 	autoDowngradeCooldown     = 8 * time.Second
@@ -263,9 +278,17 @@ func (p *Playback) SetBackdropBlur(radius float32) bool {
 // Start resumes a saved position when start is nil.
 func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSource bool, start *float64) {
 	p.StopInlinePreview()
+	var savedAudio string
+	if target.Ref.Kind != provider.Live {
+		if ts, ok := p.store.(PlaybackTrackStore); ok {
+			if sel, found := ts.PlaybackTrackSelection(owner, target); found {
+				savedAudio = sel.Audio
+			}
+		}
+	}
 	var hit *preloadedPlayback
 	prefQ := p.preferredQuality()
-	if p.preloaded != nil && p.preloaded.target == target && p.preloaded.owner == owner && p.preloaded.preferredQuality == prefQ &&
+	if savedAudio == "" && p.preloaded != nil && p.preloaded.target == target && p.preloaded.owner == owner && p.preloaded.preferredQuality == prefQ &&
 		(p.preloaded.result.Plan.ExpiresAt == 0 || time.Now().Unix()+preloadExpiryMarginSec < p.preloaded.result.Plan.ExpiresAt) {
 		hit = p.preloaded
 		p.preloaded = nil
@@ -289,7 +312,7 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 	p.liveEndChecked, p.pausedAt = false, time.Time{}
 	p.previewConfirmed, p.hdrBlocked = false, false
 	p.branchID, p.branchState, p.branchTriggered = "", "", false
-	p.selectedAudio = ""
+	p.selectedAudio = savedAudio
 	p.mediaKind = ""
 	p.lastSaved, p.savedAsEnd = -1, false
 	p.trickRate = 0
@@ -749,6 +772,9 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 		p.selectedAudio = ""
 	}
 	p.state.SelectedAudio = p.selectedAudio
+	if preserve && p.selectedAudio != "" && !plan.Live {
+		p.saveAudioSelection(p.selectedAudio)
+	}
 	p.state.Position, p.state.Duration, p.state.VideoRange = position, plan.Duration, media.VideoRange
 	p.state.AudioOnly = media.AudioOnly
 	p.state.AudioDimmed = false
@@ -912,11 +938,15 @@ func (p *Playback) Tick(now time.Time) {
 	if p.positionAt.IsZero() {
 		p.positionAt = now
 	}
-	if p.state.AudioOnly && p.loaded && !p.reportedStart && p.state.Playing &&
+	if p.loaded && !p.reportedStart && p.state.Playing &&
 		p.state.Target.Ref.ID != "" && p.state.Resolution.Plan.Branch == nil && p.state.BranchHistory == 0 &&
 		(p.state.Position >= 1 || now.Sub(p.positionAt) >= 2*time.Second) {
 		p.reportedStart = true
-		p.queueReport(p.state.Target, 0, false, false)
+		startSec := int64(p.state.Position)
+		if p.state.AudioOnly {
+			startSec = 0
+		}
+		p.queueReport(p.state.Target, startSec, false, false)
 	}
 	if p.state.Playing && now.Sub(p.positionAt) >= 30*time.Second {
 		p.saveAsync()
@@ -1286,6 +1316,7 @@ func (p *Playback) ChooseAudioTrack(trackID string) bool {
 			p.selectedAudio = trackID
 			p.state.SelectedAudio = trackID
 			p.state.ActiveAudio = trackID
+			p.saveAudioSelection(trackID)
 			p.changed()
 			return true
 		}
@@ -1335,6 +1366,7 @@ func (p *Playback) ChooseAudioTrack(trackID string) bool {
 			p.state.AudioTracks = media.AudioTracks()
 			p.state.DefaultAudio = media.DefaultAudioID()
 			p.state.ActiveAudio = media.ActiveAudioID()
+			p.saveAudioSelection(trackID)
 			p.state.VideoRange = media.VideoRange
 			p.state.Clock = player.Status{Position: position, Buffering: true}
 			p.startedAt = time.Now()
@@ -1758,6 +1790,44 @@ func (p *Playback) drainPositionSaves() {
 			}
 		}
 	}
+}
+
+func (p *Playback) SavedTrackSelection() (PlaybackTrackSelection, bool) {
+	if p == nil || !p.active || p.state.Target.Ref.ID == "" {
+		return PlaybackTrackSelection{}, false
+	}
+	ts, ok := p.store.(PlaybackTrackStore)
+	if !ok {
+		return PlaybackTrackSelection{}, false
+	}
+	return ts.PlaybackTrackSelection(p.owner, p.state.Target)
+}
+
+func (p *Playback) SaveSubtitleSelection(trackID string) {
+	if p == nil || !p.active || p.isLive() || p.state.Target.Ref.ID == "" {
+		return
+	}
+	ts, ok := p.store.(PlaybackTrackStore)
+	if !ok {
+		return
+	}
+	_ = ts.SavePlaybackTrackSelection(p.owner, p.state.Target, PlaybackTrackSelection{
+		Subtitle:    trackID,
+		SubtitleSet: true,
+	})
+}
+
+func (p *Playback) saveAudioSelection(trackID string) {
+	if p == nil || !p.active || p.isLive() || p.state.Target.Ref.ID == "" || trackID == "" {
+		return
+	}
+	ts, ok := p.store.(PlaybackTrackStore)
+	if !ok {
+		return
+	}
+	_ = ts.SavePlaybackTrackSelection(p.owner, p.state.Target, PlaybackTrackSelection{
+		Audio: trackID,
+	})
 }
 
 func (p *Playback) OpenPGSSubtitle(track provider.PlaybackTrack, accept func(*player.PGSTrack, error)) context.CancelFunc {
