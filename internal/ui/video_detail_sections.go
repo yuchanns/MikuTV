@@ -404,21 +404,41 @@ func (p *PageContext) videoEpisode(c *ui.Context, detail *videoDetailState, segm
 				})
 				return
 			}
-			if detail.item.VideoDetails.SegmentKind == provider.VideoParts {
-				p.dispatch(func() {
+			p.dispatch(func() {
+				info := detail.item.VideoDetails
+				episodes := videoEpisodes(info)
+				if info == nil || index < 0 || index >= len(episodes) {
+					return
+				}
+				seg := episodes[index]
+				if seg.Unavailable {
+					detail.feedback = videoDetailFeedback{text: text.EpisodeUpcomingNotice}
+					return
+				}
+				if info.SegmentKind == provider.VideoParts {
 					detail.part = index
 					if p.host.Trace {
 						log.Printf("video detail part: selected=%d", index+1)
 					}
-					if (detail.item.Ref.Kind == provider.Series || detail.item.Ref.Kind == provider.Course) && p.canPlay(detail.item.Ref) {
-						p.startDetailPlayback(detail.item, nil)
+					if seg.Ref != nil || seg.PartID != "" {
+						targetRef := detail.item.Ref
+						if seg.Ref != nil {
+							targetRef = *seg.Ref
+						}
+						if p.canPlay(targetRef) {
+							p.startDetailSegmentPlayback(detail.item, seg, index)
+						}
 					}
-				})
-			} else if segment.Ref != nil && *segment.Ref != detail.item.Ref {
-				p.dispatch(func() {
-					p.openRelatedVideoDetail(provider.MediaItem{Ref: *segment.Ref, Title: segment.Title}, nil, 0)
-				})
-			}
+				} else if seg.Ref != nil {
+					if p.canPlay(*seg.Ref) {
+						p.startDetailSegmentPlayback(detail.item, seg, index)
+						return
+					}
+					if *seg.Ref != detail.item.Ref {
+						p.openRelatedVideoDetail(provider.MediaItem{Ref: *seg.Ref, Title: seg.Title}, nil, 0)
+					}
+				}
+			})
 		})
 	foreground = p.animateFocus(e, background, foreground)
 	p.addVideoFocusShadow(e, focused)

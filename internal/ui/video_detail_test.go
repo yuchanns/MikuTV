@@ -11,6 +11,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
+	"github.com/yuchanns/MikuTV/internal/player"
 	"github.com/yuchanns/MikuTV/internal/provider"
 	"github.com/yuchanns/MikuTV/internal/theme"
 )
@@ -1071,5 +1072,264 @@ func TestVideoDetailCommentsLazyLoadsHotWhenUnpopulated(t *testing.T) {
 	case extra := <-session.queries:
 		t.Fatalf("unexpected query when comment count is explicitly 0: %+v", extra)
 	default:
+	}
+}
+
+type detailSegmentPlaybackSession struct {
+	viewCatalogSession
+	resolved    []provider.PlaybackRequest
+	planForItem func(provider.PlaybackRequest) provider.PlaybackPlan
+}
+
+func (*detailSegmentPlaybackSession) Browse(context.Context, provider.BrowseRequest) (provider.CollectionPage, error) {
+	return provider.CollectionPage{}, nil
+}
+
+func (s *detailSegmentPlaybackSession) ResolvePlayback(_ context.Context, req provider.PlaybackRequest) (provider.Playback, error) {
+	s.resolved = append(s.resolved, req)
+	plan := provider.PlaybackPlan{
+		ItemID:   req.Ref.ID,
+		PartID:   req.PartID,
+		Duration: 300,
+		Access:   provider.VideoAccessGranted,
+		Streams: []provider.PlaybackStream{{
+			Format: provider.PlaybackDirect,
+			Video: provider.PlaybackTrack{
+				ContentType: "video/mp4",
+				Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/video.mp4"}},
+			},
+		}},
+	}
+	if s.planForItem != nil {
+		plan = s.planForItem(req)
+	}
+	return provider.Playback{
+		Plan:      plan,
+		Transport: modesTestTransport{},
+	}, nil
+}
+
+func TestVideoDetailSegmentClickPlaysDirectly(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := testEntries()
+	entries[0].Capabilities = []provider.Capability{provider.GetCatalogItem, provider.ResolvePlayback}
+	state, err := app.NewState(entries, entries[0].ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := &detailSegmentPlaybackSession{}
+	queue := make(chan func(), 32)
+	drain := func() {
+		for {
+			select {
+			case fn := <-queue:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	catalog := app.NewCatalog(func(string) provider.Session { return sess }, func(fn func()) { queue <- fn }, func() {})
+	t.Cleanup(catalog.Close)
+	clock := player.Status{HasFrame: true, Duration: 300}
+	pb := app.NewPlayback(catalog, player.Engine{
+		Open:     func(string, float64) bool { return true },
+		Snapshot: func() player.Status { return clock },
+	}, nil, func(fn func()) { queue <- fn }, func() {})
+	t.Cleanup(pb.Close)
+
+	view := newTestView(t, Options{State: state, Catalog: catalog, Pages: pages, Assets: assets, Theme: theme.Default()})
+	view.Playback = pb
+	view.SyncEntry()
+	if !state.Push(app.Route{Page: app.VideoDetail}) {
+		t.Fatal("could not open VideoDetail")
+	}
+
+	tester := ui.NewTester(view.Render, 1920, 1080)
+	waitLoaded := func() {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for pb.State().Loading && time.Now().Before(deadline) {
+			select {
+			case fn := <-queue:
+				fn()
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		drain()
+		tester.Frame()
+	}
+
+	// 1. Regular multi-part Video (VideoParts): clicking part 2 selects it and plays immediately.
+	videoRef := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "BV1parts"}
+	view.videoDetail.item = provider.MediaItem{
+		Ref: videoRef, Title: "Multi-Part Upload",
+		VideoDetails: &provider.VideoDetails{
+			SegmentKind: provider.VideoParts,
+			Segments: []provider.VideoSegment{
+				{Title: "Part 1", PartID: "cid-1"},
+				{Title: "Part 2", PartID: "cid-2"},
+				{Title: "Part 3", PartID: "cid-3"},
+			},
+		},
+	}
+	view.videoDetail.tab = videoDetailEpisodes
+	view.videoDetail.part = 0
+	state.Focus = videoSegmentFocus(1)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	waitLoaded()
+
+	if state.Page != app.Player {
+		t.Fatalf("clicking part 2 on Video detail stayed on %s, want Player", state.Page)
+	}
+	if view.videoDetail.part != 1 || pb.State().Target.Ref != videoRef || pb.State().Target.PartID != "cid-2" {
+		t.Fatalf("part 2 playback mismatch: detail.part=%d target=%+v", view.videoDetail.part, pb.State().Target)
+	}
+	if len(view.player.items) != 3 || view.player.index != 1 {
+		t.Fatalf("expected 3-part queue at index 1, got len=%d idx=%d", len(view.player.items), view.player.index)
+	}
+	// Escape hides controls then returns to VideoDetail with part 2 selected.
+	tester.Key(0, ui.KeyEscape)
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+	if state.Page != app.VideoDetail || view.videoDetail.part != 1 {
+		t.Fatalf("expected return to VideoDetail with part=1, got page=%s part=%d", state.Page, view.videoDetail.part)
+	}
+
+	// 2. Collection Video (VideoCollection): clicking another upload or the current upload plays directly
+	// and preserves the collection queue even when the resolved video returns its own PartID and Episodes.
+	refA := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "BV1colA"}
+	refB := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "BV1colB"}
+	refC := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "BV1colC"}
+	sess.planForItem = func(req provider.PlaybackRequest) provider.PlaybackPlan {
+		plan := provider.PlaybackPlan{
+			ItemID:   req.Ref.ID,
+			PartID:   req.PartID,
+			Duration: 300,
+			Access:   provider.VideoAccessGranted,
+			Streams: []provider.PlaybackStream{{
+				Format: provider.PlaybackDirect,
+				Video: provider.PlaybackTrack{
+					ContentType: "video/mp4",
+					Resource:    provider.PlaybackResource{URLs: []string{"https://cdn.example/video.mp4"}},
+				},
+			}},
+		}
+		if req.Ref == refB {
+			plan.PartID = "sub-cid-1"
+			plan.Episodes = []provider.VideoSegment{
+				{Title: "Subpart 1", PartID: "sub-cid-1"},
+				{Title: "Subpart 2", PartID: "sub-cid-2"},
+			}
+		}
+		return plan
+	}
+	view.videoDetail.item = provider.MediaItem{
+		Ref: refA, Title: "Collection Upload A",
+		VideoDetails: &provider.VideoDetails{
+			SegmentKind: provider.VideoCollection,
+			Segments: []provider.VideoSegment{
+				{Title: "Episode A", Ref: &refA},
+				{Title: "Episode B", Ref: &refB},
+				{Title: "Episode C", Ref: &refC},
+			},
+		},
+	}
+	view.videoDetail.tab = videoDetailEpisodes
+	state.Focus = videoSegmentFocus(1)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	waitLoaded()
+
+	if state.Page != app.Player || pb.State().Target.Ref != refB || !view.player.keepQueue ||
+		len(view.player.items) != 3 || view.player.index != 1 ||
+		view.player.items[0].item.Ref != refA || view.player.items[2].item.Ref != refC {
+		t.Fatalf("clicking collection episode B lost collection queue: page=%s target=%+v keep=%t items=%+v idx=%d",
+			state.Page, pb.State().Target, view.player.keepQueue, view.player.items, view.player.index)
+	}
+	sess.planForItem = nil
+	tester.Key(0, ui.KeyEscape)
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+
+	// Clicking the currently viewed collection upload (Episode A) also plays directly.
+	state.Focus = videoSegmentFocus(0)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	waitLoaded()
+	if state.Page != app.Player || pb.State().Target.Ref != refA || len(view.player.items) != 3 || view.player.index != 0 {
+		t.Fatalf("clicking current collection episode A got page=%s target=%+v len=%d idx=%d",
+			state.Page, pb.State().Target, len(view.player.items), view.player.index)
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+
+	// 3. Series/Playlist with per-track Ref + PartID: preserves full tracklist and syncs detail.part on step.
+	seriesRef := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Series, ID: "al:42"}
+	track1 := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "101"}
+	track2 := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "102"}
+	view.videoDetail.item = provider.MediaItem{
+		Ref: seriesRef, Title: "Album 42",
+		VideoDetails: &provider.VideoDetails{
+			SegmentKind: provider.VideoParts,
+			Segments: []provider.VideoSegment{
+				{Title: "Track 1", PartID: "101", Ref: &track1},
+				{Title: "Track 2", PartID: "102", Ref: &track2},
+			},
+		},
+	}
+	view.videoDetail.tab = videoDetailEpisodes
+	view.videoDetail.part = 0
+	state.Focus = videoSegmentFocus(1)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	waitLoaded()
+
+	if state.Page != app.Player || pb.State().Target.Ref != track2 || pb.State().Target.PartID != "102" ||
+		len(view.player.items) != 2 || view.player.index != 1 {
+		t.Fatalf("clicking track 2 in album got page=%s target=%+v len=%d idx=%d",
+			state.Page, pb.State().Target, len(view.player.items), view.player.index)
+	}
+	// Stepping back to track 1 updates videoDetail.part back to 0.
+	view.startPlaybackItem(0, nil)
+	waitLoaded()
+	if view.videoDetail.part != 0 {
+		t.Fatalf("expected stepping album playback to track 1 to sync detail.part=0, got %d", view.videoDetail.part)
+	}
+	tester.Key(0, ui.KeyEscape)
+	tester.Key(0, ui.KeyEscape)
+	tester.Frame()
+
+	// 4. Untargetable VideoParts segment (neither Ref nor PartID): selection-only, does not start playback.
+	untargetableRef := provider.MediaRef{EntryID: entries[0].ID, Kind: provider.Video, ID: "BV1noid"}
+	view.videoDetail.item = provider.MediaItem{
+		Ref: untargetableRef, Title: "Untargetable Parts",
+		VideoDetails: &provider.VideoDetails{
+			SegmentKind: provider.VideoParts,
+			Segments: []provider.VideoSegment{
+				{Title: "Part A", PartID: "cid-a"},
+				{Title: "Part B without ID"},
+			},
+		},
+	}
+	view.videoDetail.tab = videoDetailEpisodes
+	view.videoDetail.part = 0
+	state.Focus = videoSegmentFocus(1)
+	tester.Frame()
+	tester.Key(0, ui.KeyEnter)
+	drain()
+	tester.Frame()
+	if state.Page != app.VideoDetail || view.videoDetail.part != 1 {
+		t.Fatalf("expected untargetable part click to remain selection-only on VideoDetail, got page=%s part=%d",
+			state.Page, view.videoDetail.part)
 	}
 }
