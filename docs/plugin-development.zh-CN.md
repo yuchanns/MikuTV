@@ -165,10 +165,10 @@ MikuTV 通过 GitHub Topic **`mikutv-plugin`**（或用户直接输入的 `owner
 内容源插件可直接提供纯音频或音视频双模式内容（`"minAppVersion": "0.1.5"`）：
 
 - **纯音频流**：在 `resolvePlayback` 返回的 `PlaybackStream`（`format: "direct"` 或 `"hls"`）中留空 `video.resource.urls`、仅填写 `audio`（含 `resource.urls` 及可选 `contentType`/`codec`/`bandwidth`），宿主会自动进入纯音频播放舞台（大屏封面、后台持续听歌、侧栏「正在播放」入口与 48 MiB 内存直连缓冲）。
-- **同步歌词**：复用 `playback.subtitles` 能力——在 `PlaybackPlan.subtitles` 声明歌词轨，并在 `readSubtitles` 中返回 `{ start, end, text }[]` 时间轴条目（`text` 内含 `\n` 可渲染双语/多行歌词）。
+- **同步歌词**：复用 `playback.subtitles` 能力——在 `PlaybackPlan.subtitles` 声明歌词轨（`resource.urls` 可省略），并在 `readSubtitles` 中返回 `{ cues: [{ start, end, text }] }` 时间轴对象（`text` 内含 `\n` 可渲染双语/多行歌词）。
 - **音视频切换**：若同一条目同时具备音频与视频版本，在 `PlaybackPlan.availableKinds` 返回 `["audio", "video"]`；用户切换时，宿主会携带 `req.mediaKind`（`"audio"` 或 `"video"`）再次调用 `resolvePlayback`。
 - **播放模式与自动连播（`playback.modes`）**：在 `capabilities` 中声明 `"playback.modes"`（无需额外导出函数），宿主会开启顺序/单曲循环/随机播放控制，并在首页、搜索、排行、创作者及片库列表中点击任意条目时自动带入整组播放队列。
-- **纯音频进度上报**：若同时声明 `playback.progress`，纯音频起播后会先触发一次 `reportPlayback({ seconds: 0, finished: false })` 供远端记录播放开始（不写入本地续播断点），播完或切歌时再上报实际播放时长。
+- **纯音频进度上报**：若同时声明 `playback.progress`，纯音频起播后会先以 `data.seconds = 0` 触发一次 `reportPlayback`（不写入本地续播断点），播完或切歌时再上报实际 `data.seconds`（播完附带 `data.finished = true`）。
 
 ### 界面文案定制（`presentation`）
 

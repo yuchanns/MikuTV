@@ -52,7 +52,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          printf 'GITHUB_TOKEN=%s\n' "$GITHUB_TOKEN" > .dev.vars
+          echo "GITHUB_TOKEN=$GITHUB_TOKEN" > .dev.vars
           pnpm run start > worker.log 2>&1 &
           worker_pid=$!
           trap 'rm -f .dev.vars; kill "$worker_pid" || true' EXIT

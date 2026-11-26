@@ -166,10 +166,10 @@ Inside `moejs`, plugins have standard ES module syntax, restricted `fetch`, and 
 Source plugins can serve audio-only or dual audio/video media (`"minAppVersion": "0.1.5"`):
 
 - **Audio-Only Streams**: In `resolvePlayback`, return a `PlaybackStream` (`format: "direct"` or `"hls"`) with empty `video.resource.urls` and a populated `audio` track (`resource.urls`, plus optional `contentType`/`codec`/`bandwidth`). MikuTV switches automatically to the ambient audio stage with large artwork, background playback, sidebar "Now Playing" entry, and 48 MiB in-memory direct buffering.
-- **Synced Lyrics**: Reuse `playback.subtitles` by listing lyric tracks in `PlaybackPlan.subtitles` and returning `{ start, end, text }[]` cues from `readSubtitles` (embed `\n` inside `text` for bilingual/multi-line lyrics).
+- **Synced Lyrics**: Reuse `playback.subtitles` by listing lyric tracks in `PlaybackPlan.subtitles` (optional `resource.urls`) and returning `{ cues: [{ start, end, text }] }` from `readSubtitles` (embed `\n` inside `text` for bilingual/multi-line lyrics).
 - **Audio/Video Switching**: Return `availableKinds: ["audio", "video"]` in `PlaybackPlan`. When the user switches modes, MikuTV invokes `resolvePlayback` with `req.mediaKind` (`"audio"` or `"video"`).
 - **Playback Modes & Auto-Queue (`playback.modes`)**: Declare `"playback.modes"` in `capabilities` (no extra export required) to enable loop-all, loop-one, and shuffle controls and automatically queue the surrounding list when starting an item from Home, Search, Rankings, Creator, or Library views.
-- **Audio Progress Reporting**: When `playback.progress` is declared, audio-only playback sends an early `reportPlayback({ seconds: 0, finished: false })` right after start (without writing a local resume position), followed by actual elapsed duration on finish or track change.
+- **Audio Progress Reporting**: When `playback.progress` is declared, audio-only playback invokes `reportPlayback` with `data.seconds = 0` right after start (without writing a local resume position), followed by actual elapsed `data.seconds` (and `data.finished = true` when completed) on finish or track change.
 
 ### Customizing UI Copy (`presentation`)
 
