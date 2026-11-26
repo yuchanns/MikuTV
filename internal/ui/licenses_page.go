@@ -78,11 +78,6 @@ func buildLicenseDocument(info app.AboutInfo, baseLicense string, about aboutLab
 				line += " · " + short
 			}
 			b.WriteString(line)
-			if text := strings.TrimSpace(pl.LicenseText); text != "" {
-				b.WriteString("\n\n")
-				b.WriteString(text)
-				b.WriteByte('\n')
-			}
 		}
 	}
 
