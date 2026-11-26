@@ -142,18 +142,41 @@ Source plugins targeting self-hosted media servers (e.g. Jellyfin) or username/p
 ```
 
 - Export `signInWithCredentials(req)` receiving `{ serverURL, username, password }` and returning `{ account, secret }`.
-- MikuTV stores `secret` and the normalized `serverOrigin` in the tvOS Keychain, passes `secret` directly to `restoreAccount(secret)` and `signOut(secret)`, and injects `req.secret` into subsequent `browse`, `getItem`, `search`, `searchSuggest`, `resolvePlayback`, `readSubtitles`, and `readAccount` calls for that session.
+- MikuTV stores `secret` and the normalized `serverOrigin` in the tvOS Keychain, passes `secret` directly to `restoreAccount(secret)` and `signOut(secret)`, and automatically injects `req.secret` into all authenticated read and write calls for that session (including `browse`, `getItem`, `search`, `searchSuggest`, `readSeries`, `readLive`, `readCreator`, `readFollowing`, `videoComments`, `videoFavoriteFolders`, `resolvePlayback`, `readSubtitles`, `readDanmaku`, `readDanmakuRules`, `readAccount`, and account/playback mutations).
 - Reference implementation: [`yuchanns/mikutv-plugin-jellyfin`](https://github.com/yuchanns/mikutv-plugin-jellyfin).
 
 ### Sandbox Host API (`globalThis.host`)
 
-Inside `moejs`, plugins have standard ES module syntax, restricted `fetch`, and the `host` global object (`internal/plugin/host.go`):
+Inside `moejs`, plugins have standard ES module syntax, restricted `fetch`, and the `host` global object (`internal/plugin/host.go`, `internal/plugin/host_crypto.go`, `internal/plugin/cache.go`):
 
 - `host.storage.get(key)` / `host.storage.set(key, value)` / `host.storage.delete(key)` — Per-plugin persistent key-value store (**8 KiB total quota**).
+- `host.cache.get(key)` / `host.cache.set(key, value, ttlSeconds?)` / `host.cache.delete(key)` / `host.cache.clear()` — Session-scoped in-memory LRU + TTL cache shared across exported calls (`minAppVersion: "0.1.5"`). Capped at **4 MiB total**, **256 KiB per entry** (`key + value`), and **4096 live keys**; omitting `ttlSeconds` (or `0`) keeps the entry until LRU eviction. Automatically cleared on account switch or entry close, and isolated as a no-op during `account.signIn`.
 - `host.locale.current()` — Returns the currently active normalized BCP-47 language tag (e.g. `"zh-Hans"`, `"en"`, `"ja"`), allowing source plugins to localize tab titles, shelf labels, and API requests dynamically.
-- `host.crypto.sha256(input)` — Lowercase hex SHA-256 digest.
-- `host.crypto.encryptRSAOAEP(base64SPKIDer, plaintext)` — Hex-encoded RSA-OAEP-SHA256 ciphertext.
-- `host.compress.inflateZlib(bytes)` — Zlib inflate (up to 4 MiB output).
+- `host.crypto` — Built-in cryptographic primitives (all `"bytes"` outputs return an indexable `Uint8Array`):
+  - `sha256(input)` / `md5(input)` — Accepts a UTF-8 string or `Uint8Array` (up to 1 MiB) and returns a lowercase hex digest.
+  - `hmac(algo, key, data)` — Supports `"sha1"`, `"sha256"`, and `"md5"`, returning lowercase hex.
+  - `aesEncrypt(opts)` / `aesDecrypt(opts)` — Supports `mode` `"cbc"`, `"ecb"`, `"ctr"`, and `"gcm"`, `padding` `"pkcs7"` (default for `cbc`/`ecb`) or `"none"`, and field encodings `"utf8"`, `"hex"`, `"base64"`, and `"bytes"` (`Uint8Array`). Input capped at 1 MiB for encryption and 4 MiB for decryption.
+  - `rsaEncrypt(opts)` — Supports `mode` `"oaep-sha256"` (default), `"pkcs1v15"`, and `"raw"`, keyed by either `pem` (PEM or base64 SPKI/PKCS#1 DER) or `modulusHex` + `exponentHex` (512–4096 bits), with `outputEncoding` `"hex"` (default), `"base64"`, or `"bytes"`.
+  - `encryptRSAOAEP(base64SPKIDer, plaintext)` — Shorthand returning hex-encoded RSA-OAEP-SHA256 ciphertext.
+  - `randomBytes(length, encoding?)` — Cryptographic random bytes (`1–1024`), `encoding` defaults to `"hex"` (`"hex"`, `"base64"`, `"utf8"`, or `"bytes"`).
+- `host.compress.inflateZlib(bytes)` / `host.compress.gunzip(bytes)` — Zlib / Gzip decompression (up to 4 MiB); `gunzip` returns a `Uint8Array`.
+
+### Audio Playback, Lyrics & Playback Modes
+
+Source plugins can serve audio-only or dual audio/video media (`"minAppVersion": "0.1.5"`):
+
+- **Audio-Only Streams**: In `resolvePlayback`, return a `PlaybackStream` (`format: "direct"` or `"hls"`) with empty `video.resource.urls` and a populated `audio` track (`resource.urls`, plus optional `contentType`/`codec`/`bandwidth`). MikuTV switches automatically to the ambient audio stage with large artwork, background playback, sidebar "Now Playing" entry, and 48 MiB in-memory direct buffering.
+- **Synced Lyrics**: Reuse `playback.subtitles` by listing lyric tracks in `PlaybackPlan.subtitles` and returning `{ start, end, text }[]` cues from `readSubtitles` (embed `\n` inside `text` for bilingual/multi-line lyrics).
+- **Audio/Video Switching**: Return `availableKinds: ["audio", "video"]` in `PlaybackPlan`. When the user switches modes, MikuTV invokes `resolvePlayback` with `req.mediaKind` (`"audio"` or `"video"`).
+- **Playback Modes & Auto-Queue (`playback.modes`)**: Declare `"playback.modes"` in `capabilities` (no extra export required) to enable loop-all, loop-one, and shuffle controls and automatically queue the surrounding list when starting an item from Home, Search, Rankings, Creator, or Library views.
+- **Audio Progress Reporting**: When `playback.progress` is declared, audio-only playback sends an early `reportPlayback({ seconds: 0, finished: false })` right after start (without writing a local resume position), followed by actual elapsed duration on finish or track change.
+
+### Customizing UI Copy (`presentation`)
+
+Source plugins may declare an optional top-level `presentation` object in `plugin.json` — with per-language overrides under `locales.<tag>.presentation` — so audio, podcast, or cloud-drive sources use natural domain copy instead of generic video labels:
+
+- Customizable groups include `home` (picks, continue, ranking copy), `sections` (`library`, `history`, `favorites`, `folderUnit`, `watchLater`, `tracking`, `courses`, guest copy), `search`, `creator`, `detail`, `series`, plus `creatorGroupTitle`, `membership`, and `mobileApp`.
+- For the exact field schema, see `SourcePresentation` in [`internal/provider/catalog.go`](../internal/provider/catalog.go).
 
 ### Capabilities ↔ Required ES Module Exports (`internal/plugin/package.go`)
 
@@ -175,6 +198,7 @@ Every capability declared in `capabilities` MUST have its matching named export(
 | `playback.progress` | `reportPlayback` | Requires `account.signIn` |
 | `playback.danmaku` | `readDanmaku` | — |
 | `playback.subtitles` | `readSubtitles` | — |
+| `playback.modes` | — | — |
 | `live.chat` | `connectLiveChat` | — |
 | `live.chatWrite` | `sendLiveChat` | Requires `live.chat` + `account.signIn` |
 | `account.signIn` | `restoreAccount`, `signOut`, plus `beginSignIn` & `pollSignIn` (for `"qrCode"`) and/or `signInWithCredentials` (for `"credentials"`) | Requires `authentication.methods` (`"qrCode"` and/or `"credentials"`) |
