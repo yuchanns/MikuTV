@@ -164,7 +164,9 @@ func (p *PageContext) canPlay(ref provider.MediaRef) bool {
 }
 
 func (p *PageContext) startDetailPlayback(item provider.MediaItem, start *float64) {
+	targetRef := item.Ref
 	partID := ""
+	targetIndex := -1
 	fallback := 0
 	detail := &p.host.videoDetail
 	if detail.item.Ref == item.Ref {
@@ -172,12 +174,29 @@ func (p *PageContext) startDetailPlayback(item provider.MediaItem, start *float6
 		if idx := detail.episodeIndex(); idx >= 0 {
 			episodes := videoEpisodes(item.VideoDetails)
 			if idx < len(episodes) && !episodes[idx].Unavailable {
+				targetIndex = idx
 				partID = episodes[idx].PartID
+				if episodes[idx].Ref != nil {
+					targetRef = *episodes[idx].Ref
+				}
 			}
 		}
 	}
-	items, selected := playbackEpisodes(item, nil, partID, fallback)
-	if len(items) == 1 && detail.item.Ref == item.Ref && len(detail.queue) > 1 &&
+	p.startDetailTargetPlayback(item, targetRef, partID, targetIndex, fallback, start)
+}
+
+func (p *PageContext) startDetailSegmentPlayback(item provider.MediaItem, segment provider.VideoSegment, index int) {
+	targetRef := item.Ref
+	if segment.Ref != nil {
+		targetRef = *segment.Ref
+	}
+	p.startDetailTargetPlayback(item, targetRef, segment.PartID, index, index, nil)
+}
+
+func (p *PageContext) startDetailTargetPlayback(item provider.MediaItem, targetRef provider.MediaRef, partID string, targetIndex, fallback int, start *float64) {
+	detail := &p.host.videoDetail
+	items, selected := playbackEpisodes(item, nil, targetRef, partID, targetIndex, fallback)
+	if len(items) == 1 && detail.item.Ref == item.Ref && targetRef == item.Ref && len(detail.queue) > 1 &&
 		detail.queueIndex >= 0 && detail.queueIndex < len(detail.queue) &&
 		detail.queue[detail.queueIndex].item.Ref == item.Ref {
 		queued := slices.Clone(detail.queue)
@@ -185,19 +204,23 @@ func (p *PageContext) startDetailPlayback(item provider.MediaItem, start *float6
 		p.openPlayback(queued, detail.queueIndex, true, start)
 		return
 	}
-	p.openPlayback(items, selected, false, start)
+	keepQueue := len(items) > 1 && item.VideoDetails != nil && item.VideoDetails.SegmentKind == provider.VideoCollection
+	p.openPlayback(items, selected, keepQueue, start)
 }
 
-func playbackEpisodes(item provider.MediaItem, segments []provider.VideoSegment, partID string, fallback int) ([]playbackItem, int) {
+func playbackEpisodes(item provider.MediaItem, segments []provider.VideoSegment, targetRef provider.MediaRef, partID string, targetIndex, fallback int) ([]playbackItem, int) {
 	if len(segments) == 0 && item.VideoDetails != nil {
 		detail := item.VideoDetails
 		if detail.SegmentKind == provider.VideoParts || detail.SegmentKind == provider.VideoCollection {
 			segments = detail.Segments
 		}
 	}
+	if targetRef.ID == "" {
+		targetRef = item.Ref
+	}
 	items := make([]playbackItem, 0, len(segments))
 	selected := -1
-	for _, segment := range segments {
+	for i, segment := range segments {
 		if segment.Unavailable || segment.Ref == nil && segment.PartID == "" {
 			continue
 		}
@@ -205,14 +228,27 @@ func playbackEpisodes(item provider.MediaItem, segments []provider.VideoSegment,
 		if segment.Ref != nil && *segment.Ref != item.Ref {
 			row.item = provider.MediaItem{Ref: *segment.Ref, Title: segment.Title, DurationSeconds: segment.DurationSeconds}
 		}
-		if row.item.Ref == item.Ref && (row.partID == partID || row.partID == "" && segment.Ref != nil) {
+		matched := false
+		if targetIndex >= 0 {
+			matched = i == targetIndex
+		} else if selected < 0 {
+			matched = (partID != "" && row.partID == partID && (segment.Ref == nil || row.item.Ref == targetRef || targetRef == item.Ref)) ||
+				(row.item.Ref == targetRef && (row.partID == partID || row.partID == "" && segment.Ref != nil))
+		}
+		if matched {
 			selected = len(items)
-			row.partID = partID
+			if partID != "" {
+				row.partID = partID
+			}
 		}
 		items = append(items, row)
 	}
 	if len(items) == 0 || selected < 0 && partID != "" {
-		return []playbackItem{{item: item, partID: partID}}, 0
+		targetItem := item
+		if targetRef != item.Ref {
+			targetItem = provider.MediaItem{Ref: targetRef}
+		}
+		return []playbackItem{{item: targetItem, partID: partID}}, 0
 	}
 	if selected < 0 {
 		selected = min(max(0, fallback), len(items)-1)
@@ -290,17 +326,24 @@ func (v *View) startPlaybackItem(index int, start *float64) {
 	s.showAccessHelp = false
 	s.resetNetworkSpeed()
 	item, part := s.items[index].item, s.items[index].partID
-	if !s.keepQueue && v.videoDetail.item.Ref == item.Ref &&
-		v.videoDetail.item.VideoDetails != nil && v.videoDetail.item.VideoDetails.SegmentKind == provider.VideoParts {
+	if !s.keepQueue && v.videoDetail.item.VideoDetails != nil && v.videoDetail.item.VideoDetails.SegmentKind == provider.VideoParts {
 		episodes := videoEpisodes(v.videoDetail.item.VideoDetails)
-		if part != "" {
+		if v.videoDetail.item.Ref == item.Ref {
+			if part != "" {
+				if idx := slices.IndexFunc(episodes, func(seg provider.VideoSegment) bool {
+					return !seg.Unavailable && seg.PartID == part
+				}); idx >= 0 {
+					v.videoDetail.part = idx
+				}
+			} else if index < len(episodes) && !episodes[index].Unavailable {
+				v.videoDetail.part = index
+			}
+		} else if s.origin.Page == app.VideoDetail {
 			if idx := slices.IndexFunc(episodes, func(seg provider.VideoSegment) bool {
-				return !seg.Unavailable && seg.PartID == part
+				return !seg.Unavailable && seg.Ref != nil && *seg.Ref == item.Ref && (part == "" || seg.PartID == part)
 			}); idx >= 0 {
 				v.videoDetail.part = idx
 			}
-		} else if index < len(episodes) && !episodes[index].Unavailable {
-			v.videoDetail.part = index
 		}
 	}
 	s.discussion.seed, s.discussion.item = item, item
@@ -976,7 +1019,7 @@ func (s *playbackView) updatePlan(v *View, state app.PlaybackState) {
 	}
 	current := s.current()
 	if len(plan.Episodes) > 0 {
-		s.items, s.index = playbackEpisodes(current.item, plan.Episodes, state.Target.PartID, s.index)
+		s.items, s.index = playbackEpisodes(current.item, plan.Episodes, current.item.Ref, state.Target.PartID, -1, s.index)
 	} else if len(s.items) > 0 {
 		s.items[s.index].partID = state.Target.PartID
 	}
