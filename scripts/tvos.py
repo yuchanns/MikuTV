@@ -22,7 +22,7 @@ APP = BUILD / "Payload/MikuTV.app"
 # layerutil reads the scale suffix from layered PSD filenames.
 APP_ICON = "MikuTVHomeIcon@2x"
 MINIMUM = "18.0"
-APP_VERSION = "0.1.7"
+APP_VERSION = "0.1.8"
 VERSION_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 

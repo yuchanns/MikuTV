@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.8 - 2026-11-26
+
+## What's Changed
+* Show only license names for loaded plugins on Licenses page by @yuchanns in https://github.com/yuchanns/MikuTV/pull/15
+* Add plan-level audio switching, native PGS subtitles, stop reports, and fix SDR auto-quality stalls by @yuchanns in https://github.com/yuchanns/MikuTV/pull/16
+
+
+**Full Changelog**: https://github.com/yuchanns/MikuTV/compare/v0.1.7...v0.1.8
+
 ## 0.1.7 - 2026-11-26
 
 ## What's Changed
