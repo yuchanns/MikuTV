@@ -141,18 +141,41 @@ MikuTV 通过 GitHub Topic **`mikutv-plugin`**（或用户直接输入的 `owner
 ```
 
 - 导出 `signInWithCredentials(req)`，接收 `{ serverURL, username, password }` 并返回 `{ account, secret }`。
-- MikuTV 会将 `secret` 与规范化后的 `serverOrigin` 安全写入 tvOS Keychain，向 `restoreAccount(secret)` 与 `signOut(secret)` 直接传入 `secret`，并在同一会话的 `browse`、`getItem`、`search`、`searchSuggest`、`resolvePlayback`、`readSubtitles`、`readAccount` 请求中注入 `req.secret`。
+- MikuTV 会将 `secret` 与规范化后的 `serverOrigin` 安全写入 tvOS Keychain，向 `restoreAccount(secret)` 与 `signOut(secret)` 直接传入 `secret`，并在会话登录后的全部读/写导出请求中自动注入 `req.secret`（包括 `browse`、`getItem`、`search`、`searchSuggest`、`readSeries`、`readLive`、`readCreator`、`readFollowing`、`videoComments`、`videoFavoriteFolders`、`resolvePlayback`、`readSubtitles`、`readDanmaku`、`readDanmakuRules`、`readAccount` 及各类账号/播放写接口）。
 - 参考实现：[`yuchanns/mikutv-plugin-jellyfin`](https://github.com/yuchanns/mikutv-plugin-jellyfin)。
 
 ### 沙箱宿主 API（`globalThis.host`）
 
-在 `moejs` 运行时中，插件可使用标准 ES 模块语法、受域名白名单约束的 `fetch`，以及宿主提供的 `host` 全局对象（定义见 `internal/plugin/host.go`）：
+在 `moejs` 运行时中，插件可使用标准 ES 模块语法、受域名白名单约束的 `fetch`，以及宿主提供的 `host` 全局对象（定义见 `internal/plugin/host.go`、`internal/plugin/host_crypto.go`、`internal/plugin/cache.go`）：
 
 - `host.storage.get(key)` / `host.storage.set(key, value)` / `host.storage.delete(key)` — 插件专属持久化键值存储（**单插件总额 8 KiB**）。
+- `host.cache.get(key)` / `host.cache.set(key, value, ttlSeconds?)` / `host.cache.delete(key)` / `host.cache.clear()` — 入口会话级内存 LRU + TTL 缓存，跨导出调用共享（`minAppVersion: "0.1.5"`）。单入口上限 **4 MiB**、单项（`key + value`）上限 **256 KiB**、最多 **4096** 条；`ttlSeconds` 为可选秒数（省略或 `0` 表示不过期直至 LRU 驱逐）。**切换账号或退出入口时自动清空**，登录流程（`account.signIn`）中隔离为空操作。
 - `host.locale.current()` — 返回当前生效的规范化 BCP-47 语言标签（如 `"zh-Hans"`、`"en"`、`"ja"`），方便内容源插件按语言动态返回分区名、标题和接口参数。
-- `host.crypto.sha256(input)` — 返回小写十六进制 SHA-256 摘要。
-- `host.crypto.encryptRSAOAEP(base64SPKIDer, plaintext)` — 返回十六进制 RSA-OAEP-SHA256 密文。
-- `host.compress.inflateZlib(bytes)` — Zlib 解压（输出上限 4 MiB）。
+- `host.crypto` — 内置加密与摘要原语（所有 `"bytes"` 输出均返回可下标读取的 `Uint8Array`）：
+  - `sha256(input)` / `md5(input)`：接受 UTF-8 字符串或 `Uint8Array`（上限 1 MiB），返回小写十六进制摘要。
+  - `hmac(algo, key, data)`：`algo` 支持 `"sha1"`、`"sha256"`、`"md5"`，返回小写十六进制。
+  - `aesEncrypt(opts)` / `aesDecrypt(opts)`：`mode` 支持 `"cbc"`、`"ecb"`、`"ctr"`、`"gcm"`，`padding` 支持 `"pkcs7"`（`cbc`/`ecb` 默认）或 `"none"`，各字段编码支持 `"utf8"`、`"hex"`、`"base64"`、`"bytes"`（`Uint8Array`）；加密输入上限 1 MiB，解密上限 4 MiB。
+  - `rsaEncrypt(opts)`：`mode` 支持 `"oaep-sha256"`（默认）、`"pkcs1v15"`、`"raw"`，公钥支持 `pem`（PEM 或 Base64 SPKI/PKCS#1 DER）或 `modulusHex` + `exponentHex`（512–4096 位），输出支持 `"hex"`（默认）、`"base64"`、`"bytes"`。
+  - `encryptRSAOAEP(base64SPKIDer, plaintext)`：便捷方法，返回十六进制 RSA-OAEP-SHA256 密文。
+  - `randomBytes(length, encoding?)`：生成 `1–1024` 字节密码学随机数，`encoding` 默认 `"hex"`（支持 `"hex"`、`"base64"`、`"utf8"`、`"bytes"`）。
+- `host.compress.inflateZlib(bytes)` / `host.compress.gunzip(bytes)` — Zlib / Gzip 解压（上限 4 MiB），`gunzip` 返回 `Uint8Array`。
+
+### 纯音频播放、歌词与播放模式
+
+内容源插件可直接提供纯音频或音视频双模式内容（`"minAppVersion": "0.1.5"`）：
+
+- **纯音频流**：在 `resolvePlayback` 返回的 `PlaybackStream`（`format: "direct"` 或 `"hls"`）中留空 `video.resource.urls`、仅填写 `audio`（含 `resource.urls` 及可选 `contentType`/`codec`/`bandwidth`），宿主会自动进入纯音频播放舞台（大屏封面、后台持续听歌、侧栏「正在播放」入口与 48 MiB 内存直连缓冲）。
+- **同步歌词**：复用 `playback.subtitles` 能力——在 `PlaybackPlan.subtitles` 声明歌词轨（`resource.urls` 可省略），并在 `readSubtitles` 中返回 `{ cues: [{ start, end, text }] }` 时间轴对象（`text` 内含 `\n` 可渲染双语/多行歌词）。
+- **音视频切换**：若同一条目同时具备音频与视频版本，在 `PlaybackPlan.availableKinds` 返回 `["audio", "video"]`；用户切换时，宿主会携带 `req.mediaKind`（`"audio"` 或 `"video"`）再次调用 `resolvePlayback`。
+- **播放模式与自动连播（`playback.modes`）**：在 `capabilities` 中声明 `"playback.modes"`（无需额外导出函数），宿主会开启顺序/单曲循环/随机播放控制，并在首页、搜索、排行、创作者及片库列表中点击任意条目时自动带入整组播放队列。
+- **纯音频进度上报**：若同时声明 `playback.progress`，纯音频起播后会先以 `data.seconds = 0` 触发一次 `reportPlayback`（不写入本地续播断点），播完或切歌时再上报实际 `data.seconds`（播完附带 `data.finished = true`）。
+
+### 界面文案定制（`presentation`）
+
+内容源可在 `plugin.json` 顶层声明可选 `presentation` 对象，并在 `locales.<tag>.presentation` 中按语言覆写，用于让音乐、播客、网盘等非视频源贴合自身术语：
+
+- 可覆写区域包括 `home`（推荐、继续播放、排行文案）、`sections`（片库、历史、收藏、收藏夹单位 `folderUnit`、稍后再看、追更、课程及未登录提示）、`search`、`creator`、`detail`、`series`，以及 `creatorGroupTitle`、`membership`、`mobileApp`。
+- 完整字段名见 [`internal/provider/catalog.go`](../internal/provider/catalog.go) 中的 `SourcePresentation`。
 
 ### 能力声明 ↔ 必需导出函数（`internal/plugin/package.go`）
 
@@ -174,6 +197,7 @@ MikuTV 通过 GitHub Topic **`mikutv-plugin`**（或用户直接输入的 `owner
 | `playback.progress` | `reportPlayback` | 需同时声明 `account.signIn` |
 | `playback.danmaku` | `readDanmaku` | — |
 | `playback.subtitles` | `readSubtitles` | — |
+| `playback.modes` | — | — |
 | `live.chat` | `connectLiveChat` | — |
 | `live.chatWrite` | `sendLiveChat` | 需同时声明 `live.chat` + `account.signIn` |
 | `account.signIn` | `restoreAccount`、`signOut`，以及 `beginSignIn` + `pollSignIn`（`"qrCode"`）和/或 `signInWithCredentials`（`"credentials"`） | 需声明 `authentication.methods`（`"qrCode"` 和/或 `"credentials"`） |

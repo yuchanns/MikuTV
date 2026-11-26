@@ -138,11 +138,11 @@ const releaseWorkflow = [
       <p>
         {isZh ? (
           <>
-            内容源插件声明 <code>kind: &quot;source&quot;</code>，入口为运行在 <code>moejs</code> 中的 ES 模块。所有出站域名必须写入 <code>permissions.network</code>；连接自建服务器时，可声明 <code>credentials</code> 与 <code>serverURL: &quot;required&quot;</code>，登录时仅放行用户输入的单个地址；需凭会话 Cookie 加载封面的登录源（<code>minAppVersion: &quot;0.1.4&quot;</code>）可额外通过 <code>permissions.artwork</code> 指定精确封面域名与 <code>referer</code>（跨源重定向自动剥离 Cookie）。
+            内容源插件声明 <code>kind: &quot;source&quot;</code>，入口为运行在 <code>moejs</code> 中的 ES 模块。出站域名声明于 <code>permissions.network</code>；自建服务器可通过 <code>credentials</code> 与 <code>serverURL: &quot;required&quot;</code> 仅放行用户输入的单个地址；需凭会话 Cookie 加载封面时通过 <code>permissions.artwork</code> 指定精确域名与 <code>referer</code>。视频、直播与纯音频源共用同一套协议，支持 <code>playback.modes</code> 队列连播与 <code>presentation</code> 界面文案定制。
           </>
         ) : (
           <>
-            Source plugins declare <code>kind: &quot;source&quot;</code> with an ES module entry executed inside <code>moejs</code>. Every outbound host belongs in <code>permissions.network</code>; self-hosted servers may declare <code>credentials</code> and <code>serverURL: &quot;required&quot;</code> for single-origin LAN access; sign-in sources requiring cookie-authenticated thumbnails (<code>minAppVersion: &quot;0.1.4&quot;</code>) may opt in with exact hosts and optional <code>referer</code> via <code>permissions.artwork</code> (cookies stripped on cross-origin redirects).
+            Source plugins declare <code>kind: &quot;source&quot;</code> with an ES module entry inside <code>moejs</code>. Declare outbound hosts in <code>permissions.network</code>; self-hosted servers may use <code>credentials</code> and <code>serverURL: &quot;required&quot;</code> for single-origin access, and cookie-authenticated thumbnails opt in via <code>permissions.artwork</code>. Video, live, and audio-only sources share the same contract, with <code>playback.modes</code> for queue/loop controls and <code>presentation</code> for custom UI labels.
           </>
         )}
       </p>
@@ -182,19 +182,23 @@ const releaseWorkflow = [
         <tbody>
           <tr>
             <td><code>host.storage.get / set / delete</code></td>
-            <td>{isZh ? '每插件独立持久化 KV，总配额 8 KiB' : 'Per-plugin persistent KV store, 8 KiB total quota'}</td>
+            <td>{isZh ? '每插件持久化 KV（总配额 8 KiB）' : 'Per-plugin persistent KV (8 KiB quota)'}</td>
+          </tr>
+          <tr>
+            <td><code>host.cache.get / set / delete / clear</code></td>
+            <td>{isZh ? '会话级内存 LRU + TTL 缓存（4 MiB，切号或退出清空）' : 'Session-scoped in-memory LRU + TTL cache (4 MiB, cleared on switch/close)'}</td>
           </tr>
           <tr>
             <td><code>host.locale.current()</code></td>
             <td>{isZh ? '当前生效的 BCP-47 语言标签（如 zh-Hans、en、ja）' : 'Active normalized BCP-47 language tag (zh-Hans, en, ja)'}</td>
           </tr>
           <tr>
-            <td><code>host.crypto.sha256 / encryptRSAOAEP</code></td>
-            <td>{isZh ? '十六进制 SHA-256 与 RSA-OAEP-SHA256 加密' : 'Hex SHA-256 and RSA-OAEP-SHA256 helpers'}</td>
+            <td><code>host.crypto.*</code></td>
+            <td>{isZh ? 'sha256、md5、hmac、aesEncrypt/Decrypt、rsaEncrypt、randomBytes' : 'sha256, md5, hmac, aesEncrypt/Decrypt, rsaEncrypt, randomBytes'}</td>
           </tr>
           <tr>
-            <td><code>host.compress.inflateZlib(bytes)</code></td>
-            <td>{isZh ? 'Zlib 解压（上限 4 MiB 输出）' : 'Zlib inflate capped at 4 MiB output'}</td>
+            <td><code>host.compress.inflateZlib / gunzip</code></td>
+            <td>{isZh ? 'Zlib / Gzip 解压（上限 4 MiB）' : 'Zlib / Gzip decompression (4 MiB cap)'}</td>
           </tr>
         </tbody>
       </table>

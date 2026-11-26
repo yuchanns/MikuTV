@@ -49,10 +49,13 @@ jobs:
 
       - name: Smoke-test Cloudflare Worker & Static Assets
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "GITHUB_TOKEN=$GITHUB_TOKEN" > .dev.vars
           pnpm run start > worker.log 2>&1 &
           worker_pid=$!
-          trap 'kill "$worker_pid" || true' EXIT
+          trap 'rm -f .dev.vars; kill "$worker_pid" || true' EXIT
           for attempt in {1..45}; do
             if curl --fail --silent http://127.0.0.1:8789/ > /dev/null; then
               break
@@ -66,6 +69,7 @@ jobs:
           develop_html="$(curl --fail --silent http://127.0.0.1:8789/develop/)"
           grep -q "plugin.json" <<<"$develop_html"
           api_json="$(curl --fail --silent http://127.0.0.1:8789/api/plugins)"
+          grep -q '"source":"github-live"' <<<"$api_json"
           grep -q '"topic":"mikutv-plugin"' <<<"$api_json"
 
       - uses: actions/upload-artifact@v7

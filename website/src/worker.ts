@@ -1,4 +1,4 @@
-import { SEED_PLUGINS, THEME_SWATCH_MAP, type PluginEntry } from './data/catalog'
+import { THEME_SWATCH_MAP, type PluginEntry } from './data/catalog'
 
 interface GitHubRepoItem {
   full_name: string
@@ -154,22 +154,20 @@ async function handlePluginsApi(
   } catch (err) {
     console.error(
       JSON.stringify({
-        event: 'plugins_api_fallback',
+        event: 'plugins_api_error',
         message: err instanceof Error ? err.message : String(err),
       }),
     )
     return jsonResponse(
       {
-        source: 'snapshot-fallback',
+        error: 'GitHub Search API unavailable',
         topic: 'mikutv-plugin',
-        fetchedAt: new Date().toISOString(),
-        total: SEED_PLUGINS.length,
-        items: SEED_PLUGINS,
       },
       {
-        'cache-control': 'public, max-age=30, s-maxage=60',
-        'x-mikutv-cache': 'FALLBACK',
+        'cache-control': 'no-store',
+        'x-mikutv-cache': 'ERROR',
       },
+      502,
     )
   }
 }
