@@ -273,7 +273,7 @@ func (p *Playback) Start(target provider.PlaybackTarget, owner string, syncSourc
 	p.clearPreload()
 	p.clearAltMode()
 	if p.active {
-		p.save()
+		p.saveStopped()
 		p.clearStream()
 	} else if p.engine.Fullscreen != nil {
 		p.engine.Fullscreen(true)
@@ -315,7 +315,7 @@ func (p *Playback) Close() {
 		p.clearPreload()
 		return
 	}
-	p.save()
+	p.saveStopped()
 	p.clearPreload()
 	p.clearAltMode()
 	p.clearStream()
@@ -521,7 +521,7 @@ func (p *Playback) resolveMode(selected, requestQuality, selectedLine string, pr
 	resolver, _ := p.catalog.session.(provider.PlaybackReader)
 	input := provider.PlaybackRequest{
 		PlaybackTarget: p.state.Target, Quality: requestQuality, PreferredQuality: preferredQ, Line: selectedLine,
-		MediaKind: mediaKind, BranchID: p.branchID, BranchState: p.branchState, HDR: caps.HDR, HEVC: caps.HEVC,
+		AudioTrack: selectedAudio, MediaKind: mediaKind, BranchID: p.branchID, BranchState: p.branchState, HDR: caps.HDR, HEVC: caps.HEVC,
 	}
 	go func() {
 		var result provider.Playback
@@ -578,6 +578,7 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 			p.state.Limit, p.state.Failure = provider.PlaybackLogin, ""
 		}
 		if preserve && p.media != nil {
+			p.selectedAudio = p.state.SelectedAudio
 			if quality == "" {
 				p.state.Limit = ""
 			} else if p.state.Limit == "" {
@@ -724,9 +725,19 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	}
 	p.state.Target, p.state.Resolution = target, result
 	p.state.Selected, p.state.SelectedLine = quality, selectedLine
-	p.state.AudioTracks = media.AudioTracks()
-	p.state.DefaultAudio = media.DefaultAudioID()
-	p.state.ActiveAudio = media.ActiveAudioID()
+	if tracks := media.AudioTracks(); len(tracks) > 0 {
+		p.state.AudioTracks = tracks
+		p.state.DefaultAudio = media.DefaultAudioID()
+		p.state.ActiveAudio = media.ActiveAudioID()
+	} else if len(plan.AudioTracks) > 0 {
+		p.state.AudioTracks = slices.Clone(plan.AudioTracks)
+		p.state.DefaultAudio = defaultPlanAudioID(plan.AudioTracks)
+		p.state.ActiveAudio = activePlanAudioID(plan.AudioTracks, plan.AudioTrack, p.selectedAudio)
+	} else {
+		p.state.AudioTracks = nil
+		p.state.DefaultAudio = ""
+		p.state.ActiveAudio = ""
+	}
 	if p.selectedAudio != "" && !slices.ContainsFunc(p.state.AudioTracks, func(t provider.PlaybackTrack) bool { return t.ID == p.selectedAudio }) {
 		p.selectedAudio = ""
 	}
@@ -737,8 +748,33 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	p.state.Clock = player.Status{Position: position, Buffering: true, AudioOnly: media.AudioOnly}
 	p.startedAt = time.Now()
 	p.positionAt, p.bufferedAt = time.Time{}, time.Time{}
+	p.autoStallCount = 0
+	p.autoStallSince = time.Time{}
+	p.autoStallActive = false
 	p.state.Revision++
 	p.applyRate()
+}
+
+func defaultPlanAudioID(tracks []provider.PlaybackTrack) string {
+	for _, track := range tracks {
+		if track.Default {
+			return track.ID
+		}
+	}
+	if len(tracks) > 0 {
+		return tracks[0].ID
+	}
+	return ""
+}
+
+func activePlanAudioID(tracks []provider.PlaybackTrack, planAudio, selectedAudio string) string {
+	if planAudio != "" && slices.ContainsFunc(tracks, func(t provider.PlaybackTrack) bool { return t.ID == planAudio }) {
+		return planAudio
+	}
+	if selectedAudio != "" && slices.ContainsFunc(tracks, func(t provider.PlaybackTrack) bool { return t.ID == selectedAudio }) {
+		return selectedAudio
+	}
+	return defaultPlanAudioID(tracks)
 }
 
 func (p *Playback) Tick(now time.Time) {
@@ -873,7 +909,7 @@ func (p *Playback) Tick(now time.Time) {
 		p.state.Target.Ref.ID != "" && p.state.Resolution.Plan.Branch == nil && p.state.BranchHistory == 0 &&
 		(p.state.Position >= 1 || now.Sub(p.positionAt) >= 2*time.Second) {
 		p.reportedStart = true
-		p.queueReport(p.state.Target, 0, false)
+		p.queueReport(p.state.Target, 0, false, false)
 	}
 	if p.state.Playing && now.Sub(p.positionAt) >= 30*time.Second {
 		p.saveAsync()
@@ -913,8 +949,9 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 		return false
 	}
 	seekGrace := !p.seekSettledAt.IsZero() && now.Sub(p.seekSettledAt) < seekAutoQualityGrace
+	startupGrace := !p.startedAt.IsZero() && now.Sub(p.startedAt) < seekAutoQualityGrace
 	isRebuffering := clock.Buffering && clock.HasFrame && !seekGrace
-	if isRebuffering && !p.autoStallActive {
+	if isRebuffering && !startupGrace && !p.autoStallActive {
 		if p.autoStallSince.IsZero() || now.Sub(p.autoStallSince) > autoStallWindow {
 			p.autoStallSince = now
 			p.autoStallCount = 1
@@ -922,7 +959,7 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 			p.autoStallCount++
 		}
 	}
-	p.autoStallActive = isRebuffering
+	p.autoStallActive = isRebuffering && !startupGrace
 
 	plan := p.state.Resolution.Plan
 	playable := autoPlayableQualities(plan.Qualities)
@@ -969,8 +1006,8 @@ func (p *Playback) stepAutoQuality(now time.Time, clock player.Status) bool {
 			rebufStart = p.seekSettledAt
 		}
 		longRebuffer := isRebuffering && !rebufStart.IsZero() && now.Sub(rebufStart) >= rebufNeed
-		repeatedStalls := isRebuffering && p.autoStallCount >= 2 && !p.autoStallSince.IsZero() &&
-			now.Sub(p.autoStallSince) <= autoStallWindow && (!crossingHDR || underfed)
+		repeatedStalls := isRebuffering && !startupGrace && p.autoStallCount >= 2 && !p.autoStallSince.IsZero() &&
+			now.Sub(p.autoStallSince) <= autoStallWindow && underfed
 		slowStartup := !clock.HasFrame && now.Sub(p.startedAt) >= startupNeed && underfed
 		if longRebuffer || repeatedStalls || slowStartup {
 			if playbackTrace {
@@ -1229,6 +1266,11 @@ func (p *Playback) ChooseAudioTrack(trackID string) bool {
 		return false
 	}
 	if trackID == p.state.ActiveAudio {
+		return true
+	}
+	if len(p.media.AudioTracks()) == 0 && len(p.state.Resolution.Plan.AudioTracks) > 0 {
+		p.selectedAudio = trackID
+		p.resolveMode(p.state.Selected, p.effectiveQuality(), p.state.SelectedLine, p.media != nil && p.state.Failure == "", false)
 		return true
 	}
 	prev := p.state.ActiveAudio
@@ -1711,15 +1753,52 @@ func (p *Playback) drainPositionSaves() {
 	}
 }
 
+func (p *Playback) OpenPGSSubtitle(track provider.PlaybackTrack, accept func(*player.PGSTrack, error)) context.CancelFunc {
+	if !p.active || p.state.Resolution.Transport == nil || len(track.Resource.URLs) == 0 {
+		if accept != nil {
+			accept(nil, &provider.Error{Code: provider.Unsupported})
+		}
+		return func() {}
+	}
+	transport := p.state.Resolution.Transport
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		pgs, err := player.OpenPGSTrack(ctx, transport, track, func() {
+			p.post(func() {
+				if ctx.Err() == nil && p.active {
+					p.changed()
+				}
+			})
+		})
+		p.post(func() {
+			if ctx.Err() != nil || !p.active {
+				if pgs != nil {
+					pgs.Close()
+				}
+				return
+			}
+			if accept != nil {
+				accept(pgs, err)
+			}
+			p.changed()
+		})
+	}()
+	return cancel
+}
+
 func (p *Playback) save() {
-	p.savePosition(true)
+	p.savePosition(true, false)
 }
 
 func (p *Playback) saveAsync() {
-	p.savePosition(false)
+	p.savePosition(false, false)
 }
 
-func (p *Playback) savePosition(syncWait bool) {
+func (p *Playback) saveStopped() {
+	p.savePosition(true, true)
+}
+
+func (p *Playback) savePosition(syncWait, stopped bool) {
 	if !p.loaded || p.isLive() || p.state.PreviewPending || p.state.Target.Ref.ID == "" ||
 		p.state.Resolution.Plan.Branch != nil || p.state.BranchHistory > 0 {
 		return
@@ -1730,7 +1809,7 @@ func (p *Playback) savePosition(syncWait bool) {
 	if finished {
 		seconds = 0
 	}
-	if p.lastSaved == seconds && p.savedAsEnd == finished {
+	if !stopped && p.lastSaved == seconds && p.savedAsEnd == finished {
 		if syncWait {
 			p.flushPositionSaves()
 		}
@@ -1738,16 +1817,16 @@ func (p *Playback) savePosition(syncWait bool) {
 	}
 	p.lastSaved, p.savedAsEnd = seconds, finished
 	p.enqueuePositionSave(p.owner, target, float64(seconds), syncWait)
-	p.queueReport(target, seconds, finished)
+	p.queueReport(target, seconds, finished, stopped)
 }
 
-func (p *Playback) queueReport(target provider.PlaybackTarget, seconds int64, finished bool) {
+func (p *Playback) queueReport(target provider.PlaybackTarget, seconds int64, finished, stopped bool) {
 	reporter, _ := p.catalog.session.(provider.PlaybackReporter)
 	if !p.syncSource || p.owner == "" || reporter == nil || !p.catalog.CanReportPlayback() {
 		return
 	}
 	report := queuedPlaybackReport{reporter: reporter, owner: p.owner, report: provider.PlaybackProgress{
-		PlaybackTarget: target, Owner: p.owner, ItemID: p.state.Resolution.Plan.ItemID, Seconds: seconds, Finished: finished,
+		PlaybackTarget: target, Owner: p.owner, ItemID: p.state.Resolution.Plan.ItemID, Seconds: seconds, Finished: finished, Stopped: stopped,
 	}}
 	for i := range p.reports {
 		if p.reports[i].report.PlaybackTarget == target && p.reports[i].owner == p.owner {

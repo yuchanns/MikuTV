@@ -982,12 +982,7 @@ func (s *playbackView) updatePlan(v *View, state app.PlaybackState) {
 	}
 	plan := state.Resolution.Plan
 	if s.hasPlanAudioOnly && s.lastAudioOnly != state.AudioOnly {
-		if s.content.subtitleQuery != nil {
-			s.content.subtitleQuery()
-			s.content.subtitleQuery = nil
-		}
-		s.content.subtitle = ""
-		s.content.cues = nil
+		s.content.clearSubtitle()
 		s.content.subtitleChosen = false
 	}
 	s.hasPlanAudioOnly, s.lastAudioOnly = true, state.AudioOnly
