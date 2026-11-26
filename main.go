@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	appVersion = "0.1.5"
+	appVersion = "0.1.6"
 	appBuild   = ""
 	appCommit  = ""
 )
