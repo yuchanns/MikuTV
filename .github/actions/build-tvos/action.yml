@@ -34,15 +34,20 @@ runs:
         app=".build/tvos/Payload/MikuTV.app"
         ipa=".build/tvos/MikuTV-unsigned.ipa"
         test -f "$ipa"
-        if [ -n "$EXPECTED_VERSION" ]; then
-          for plist in "$app/Info.plist" "$app/PlugIns/TopShelf.appex/Info.plist"; do
+        for plist in "$app/Info.plist" "$app/PlugIns/TopShelf.appex/Info.plist"; do
+          got_platform="$(/usr/libexec/PlistBuddy -c 'Print :DTPlatformName' "$plist")"
+          if [ "$got_platform" != "appletvos" ]; then
+            echo "::error::DTPlatformName mismatch in $plist: got '$got_platform', expected 'appletvos'"
+            exit 1
+          fi
+          if [ -n "$EXPECTED_VERSION" ]; then
             got_ver="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
             if [ "$got_ver" != "$EXPECTED_VERSION" ]; then
               echo "::error::CFBundleShortVersionString mismatch in $plist: got '$got_ver', expected '$EXPECTED_VERSION'"
               exit 1
             fi
-          done
-        fi
+          fi
+        done
         for bin in "$app/MikuTV" "$app/PlugIns/TopShelf.appex/TopShelf"; do
           file_info="$(file "$bin")"
           printf '%s\n' "$file_info" | grep -q "arm64"

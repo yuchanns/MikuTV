@@ -115,6 +115,7 @@ def build():
         "CFBundleIcons": {"CFBundlePrimaryIcon": APP_ICON},
         "CFBundlePackageType": "APPL", "CFBundleShortVersionString": app_version,
         "CFBundleVersion": number, "CFBundleSupportedPlatforms": ["AppleTVOS"],
+        "DTPlatformName": "appletvos",
         "CFBundleLocalizations": ["zh-Hans", "en"],
         "LSApplicationCategoryType": "public.app-category.entertainment",
         "CFBundleURLTypes": [{
@@ -156,6 +157,7 @@ def bundle_topshelf(build_env, app_version, number):
         "CFBundleShortVersionString": app_version,
         "CFBundleVersion": number,
         "CFBundleSupportedPlatforms": ["AppleTVOS"],
+        "DTPlatformName": "appletvos",
         "CFBundleLocalizations": ["zh-Hans", "en"],
         "UIDeviceFamily": [3],
         "MinimumOSVersion": MINIMUM,
