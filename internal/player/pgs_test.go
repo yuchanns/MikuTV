@@ -186,3 +186,102 @@ func TestPGSTrackDecodesMultiFragmentEpochAndClear(t *testing.T) {
 		t.Fatal("expected screen cleared at t=6.0s")
 	}
 }
+
+func TestPGSPartialPaletteUpdatePreservesExistingEntries(t *testing.T) {
+	// Initial PDS sets entry 1 = opaque white, entry 2 = transparent.
+	pds1 := buildPDS(0,
+		[5]byte{1, 235, 128, 128, 255},
+		[5]byte{2, 16, 128, 128, 0},
+	)
+	// Subsequent partial PDS updates ONLY entry 2 = opaque red (must preserve entry 1 = white).
+	pds2 := buildPDS(0,
+		[5]byte{2, 81, 240, 90, 255},
+	)
+	// 2x1 bitmap: [1, 2]
+	rle := []byte{0x01, 0x02, 0x00, 0x00}
+	ods := buildODSFragments(0, 2, 1, rle, 0)[0]
+
+	var sup bytes.Buffer
+	objSpec := struct {
+		id      uint16
+		x, y    uint16
+		cropped bool
+		cx, cy  uint16
+		cw, ch  uint16
+	}{id: 0, x: 10, y: 10}
+	// Display Set 1 at t=1.0s (Epoch Start)
+	sup.Write(buildPGSSegment(1.0, pgsSegPCS, buildPCS(1920, 1080, 0x80, 0, objSpec)))
+	sup.Write(buildPGSSegment(1.0, pgsSegPDS, pds1))
+	sup.Write(buildPGSSegment(1.0, pgsSegODS, ods))
+	sup.Write(buildPGSSegment(1.0, pgsSegEND, nil))
+
+	// Display Set 2 at t=3.0s (Normal state, partial palette update only)
+	sup.Write(buildPGSSegment(3.0, pgsSegPCS, buildPCS(1920, 1080, 0x00, 0, objSpec)))
+	sup.Write(buildPGSSegment(3.0, pgsSegPDS, pds2))
+	sup.Write(buildPGSSegment(3.0, pgsSegEND, nil))
+
+	track, err := OpenPGSBytes(sup.Bytes())
+	if err != nil {
+		t.Fatalf("OpenPGSBytes: %v", err)
+	}
+	defer track.Close()
+
+	// Earlier cue must retain its original palette (pixel 0 white, pixel 1 transparent).
+	f1, ok := track.FrameAt(1.5)
+	if !ok {
+		t.Fatal("expected frame 1")
+	}
+	if p0 := f1.Image.NRGBAAt(0, 0); p0.R < 245 || p0.A != 255 {
+		t.Fatalf("frame 1 pixel 0 = %+v, want opaque white", p0)
+	}
+	if p1 := f1.Image.NRGBAAt(1, 0); p1.A != 0 {
+		t.Fatalf("frame 1 pixel 1 = %+v, want transparent", p1)
+	}
+
+	// Second cue must preserve untouched entry 1 (white) AND apply updated entry 2 (red).
+	f2, ok := track.FrameAt(3.5)
+	if !ok {
+		t.Fatal("expected frame 2")
+	}
+	if p0 := f2.Image.NRGBAAt(0, 0); p0.R < 245 || p0.G < 245 || p0.B < 245 || p0.A != 255 {
+		t.Fatalf("frame 2 pixel 0 = %+v, want preserved opaque white", p0)
+	}
+	if p1 := f2.Image.NRGBAAt(1, 0); p1.R < 200 || p1.A != 255 {
+		t.Fatalf("frame 2 pixel 1 = %+v, want updated opaque red", p1)
+	}
+}
+
+func TestPGSOversizedCanvasRejectedWithoutOOM(t *testing.T) {
+	pds := buildPDS(0, [5]byte{1, 235, 128, 128, 255})
+	rle := []byte{0x01, 0x00, 0x00}
+	ods0 := buildODSFragments(0, 1, 1, rle, 0)[0]
+	ods1 := buildODSFragments(1, 1, 1, rle, 0)[0]
+
+	var sup bytes.Buffer
+	type compSpec = struct {
+		id      uint16
+		x, y    uint16
+		cropped bool
+		cx, cy  uint16
+		cw, ch  uint16
+	}
+	// Malformed 65535x65535 canvas with widely separated objects must be rejected cleanly.
+	sup.Write(buildPGSSegment(1.0, pgsSegPCS, buildPCS(65535, 65535, 0x80, 0,
+		compSpec{id: 0, x: 0, y: 0},
+		compSpec{id: 1, x: 65000, y: 65000},
+	)))
+	sup.Write(buildPGSSegment(1.0, pgsSegPDS, pds))
+	sup.Write(buildPGSSegment(1.0, pgsSegODS, ods0))
+	sup.Write(buildPGSSegment(1.0, pgsSegODS, ods1))
+	sup.Write(buildPGSSegment(1.0, pgsSegEND, nil))
+
+	track, err := OpenPGSBytes(sup.Bytes())
+	if err != nil {
+		t.Fatalf("OpenPGSBytes: %v", err)
+	}
+	defer track.Close()
+
+	if _, ok := track.FrameAt(1.5); ok {
+		t.Fatal("expected oversized canvas cue to be rejected")
+	}
+}

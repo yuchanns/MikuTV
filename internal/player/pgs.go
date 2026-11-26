@@ -20,11 +20,14 @@ import (
 )
 
 const (
-	pgsMaxFileBytes  = 256 << 20 // 256 MiB disk cache cap for a single PGS track
-	pgsMaxObjWidth   = 4096
-	pgsMaxObjHeight  = 2160
-	pgsMaxObjPayload = 8 << 20
-	pgsNotifyStride  = 32
+	pgsMaxFileBytes    = 256 << 20 // 256 MiB disk cache cap for a single PGS track
+	pgsMaxCanvasWidth  = 4096
+	pgsMaxCanvasHeight = 2160
+	pgsMaxCanvasPixels = pgsMaxCanvasWidth * pgsMaxCanvasHeight
+	pgsMaxObjWidth     = 4096
+	pgsMaxObjHeight    = 2160
+	pgsMaxObjPayload   = 8 << 20
+	pgsNotifyStride    = 32
 
 	pgsSegPDS = 0x14
 	pgsSegODS = 0x15
@@ -60,12 +63,17 @@ type pgsCueObj struct {
 	spans   []pgsSpan
 }
 
+type pgsPaletteState struct {
+	entries [256]color.NRGBA
+	shared  bool
+}
+
 type pgsCue struct {
 	start       float64
 	end         float64
 	videoWidth  int
 	videoHeight int
-	palette     pgsSpan
+	palette     *[256]color.NRGBA
 	objects     []pgsCueObj
 }
 
@@ -228,7 +236,7 @@ func (t *PGSTrack) ingest(ctx context.Context, body io.ReadCloser, onUpdate func
 	var header [13]byte
 	payloadBuf := make([]byte, 0, 64<<10)
 
-	epochPalettes := make(map[byte]pgsSpan)
+	epochPalettes := make(map[byte]*pgsPaletteState)
 	epochObjects := make(map[uint16][]pgsSpan)
 	inProgressObj := make(map[uint16][]pgsSpan)
 	var pcs pgsPendingPCS
@@ -249,7 +257,7 @@ func (t *PGSTrack) ingest(ctx context.Context, body io.ReadCloser, onUpdate func
 		hasObjects := len(pcs.objects) > 0
 		if hasObjects {
 			pal, hasPal := epochPalettes[pcs.paletteID]
-			if hasPal {
+			if hasPal && pal != nil {
 				objs := make([]pgsCueObj, 0, len(pcs.objects))
 				for _, co := range pcs.objects {
 					spans := epochObjects[co.objectID]
@@ -270,11 +278,12 @@ func (t *PGSTrack) ingest(ctx context.Context, body io.ReadCloser, onUpdate func
 					})
 				}
 				if len(objs) > 0 {
+					pal.shared = true
 					cue = pgsCue{
 						start:       pts,
 						videoWidth:  pcs.videoWidth,
 						videoHeight: pcs.videoHeight,
-						palette:     pal,
+						palette:     &pal.entries,
 						objects:     objs,
 					}
 				} else {
@@ -342,9 +351,10 @@ func (t *PGSTrack) ingest(ctx context.Context, body io.ReadCloser, onUpdate func
 			}
 		}
 
-		// Persist only PDS and ODS payloads needed for on-demand bitmap decode.
+		// Persist only ODS payloads needed for on-demand bitmap decode; palettes
+		// are accumulated cumulatively per epoch in RAM.
 		var span pgsSpan
-		if (segType == pgsSegPDS || segType == pgsSegODS) && segLen > 0 {
+		if segType == pgsSegODS && segLen > 0 {
 			span = pgsSpan{offset: filePos, length: uint32(segLen)}
 			if _, err := writer.Write(payloadBuf); err != nil {
 				t.mu.Lock()
@@ -369,6 +379,10 @@ func (t *PGSTrack) ingest(ctx context.Context, body io.ReadCloser, onUpdate func
 				clear(epochPalettes)
 				clear(epochObjects)
 				clear(inProgressObj)
+			}
+			if vw <= 0 || vh <= 0 || vw > pgsMaxCanvasWidth || vh > pgsMaxCanvasHeight {
+				pcs = pgsPendingPCS{}
+				continue
 			}
 			objs := make([]pgsCompObject, 0, numObjs)
 			off := 11
@@ -404,7 +418,21 @@ func (t *PGSTrack) ingest(ctx context.Context, body io.ReadCloser, onUpdate func
 		case pgsSegPDS:
 			if segLen >= 2 {
 				palID := payloadBuf[0]
-				epochPalettes[palID] = span
+				st := epochPalettes[palID]
+				if st == nil {
+					st = &pgsPaletteState{}
+					epochPalettes[palID] = st
+				} else if st.shared {
+					// Copy-on-write so cues referencing the prior snapshot keep
+					// their exact palette while untouched entries carry forward.
+					next := &pgsPaletteState{entries: st.entries}
+					epochPalettes[palID] = next
+					st = next
+				}
+				for off := 2; off+5 <= segLen; off += 5 {
+					entryID := payloadBuf[off]
+					st.entries[entryID] = pgsYCrCbAToNRGBA(payloadBuf[off+1], payloadBuf[off+2], payloadBuf[off+3], payloadBuf[off+4])
+				}
 			}
 
 		case pgsSegODS:
@@ -497,18 +525,11 @@ func (t *PGSTrack) FrameAt(position float64) (PGSFrame, bool) {
 }
 
 func decodePGSCue(f *os.File, idx int, cue pgsCue) (PGSFrame, bool) {
-	if len(cue.objects) == 0 || cue.palette.length < 2 || cue.videoWidth <= 0 || cue.videoHeight <= 0 {
+	if len(cue.objects) == 0 || cue.palette == nil || cue.videoWidth <= 0 || cue.videoHeight <= 0 ||
+		cue.videoWidth > pgsMaxCanvasWidth || cue.videoHeight > pgsMaxCanvasHeight {
 		return PGSFrame{}, false
 	}
-	palBuf := make([]byte, cue.palette.length)
-	if _, err := f.ReadAt(palBuf, cue.palette.offset); err != nil {
-		return PGSFrame{}, false
-	}
-	var palette [256]color.NRGBA
-	for off := 2; off+5 <= len(palBuf); off += 5 {
-		entryID := palBuf[off]
-		palette[entryID] = pgsYCrCbAToNRGBA(palBuf[off+1], palBuf[off+2], palBuf[off+3], palBuf[off+4])
-	}
+	palette := cue.palette
 
 	type decodedObj struct {
 		obj    pgsCueObj
@@ -562,6 +583,9 @@ func decodePGSCue(f *os.File, idx int, cue pgsCue) (PGSFrame, bool) {
 
 	boxW := maxX - minX
 	boxH := maxY - minY
+	if boxW <= 0 || boxH <= 0 || boxW > pgsMaxCanvasWidth || boxH > pgsMaxCanvasHeight || int64(boxW)*int64(boxH) > pgsMaxCanvasPixels {
+		return PGSFrame{}, false
+	}
 	img := image.NewNRGBA(image.Rect(0, 0, boxW, boxH))
 	hasVisible := false
 	for _, d := range decoded {

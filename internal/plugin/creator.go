@@ -32,7 +32,7 @@ func (s *Session) ReadCreator(ctx context.Context, request provider.CreatorReque
 		return provider.CreatorPage{}, &provider.Error{Code: provider.PluginFailed}
 	}
 	if page.Profile != nil {
-		if err := sanitizeCreatorProfile(page.Profile, request.CreatorID); err != nil {
+		if err := s.sanitizeCreatorProfile(page.Profile, request.CreatorID); err != nil {
 			return provider.CreatorPage{}, err
 		}
 	}
@@ -44,7 +44,7 @@ func (s *Session) ReadCreator(ctx context.Context, request provider.CreatorReque
 		if post.ID == "" || len(post.ID) > maxCreatorIDLength || post.PublishedAt < 0 {
 			return provider.CreatorPage{}, &provider.Error{Code: provider.PluginFailed}
 		}
-		if post.ImageURL != "" && httpsURL(post.ImageURL) == nil {
+		if post.ImageURL != "" && s.allowedURL(post.ImageURL) == nil {
 			post.ImageURL = ""
 		}
 		if post.Item != nil {
@@ -66,17 +66,17 @@ func (s *Session) ReadCreator(ctx context.Context, request provider.CreatorReque
 	return page, nil
 }
 
-func sanitizeCreatorProfile(profile *provider.CreatorProfile, expectedID string) error {
+func (s *Session) sanitizeCreatorProfile(profile *provider.CreatorProfile, expectedID string) error {
 	if profile.Creator.ID != expectedID || strings.TrimSpace(profile.Creator.Name) == "" {
 		return &provider.Error{Code: provider.PluginFailed}
 	}
 	if profile.Followers != nil && *profile.Followers < 0 || profile.Works != nil && *profile.Works < 0 {
 		return &provider.Error{Code: provider.PluginFailed}
 	}
-	if profile.Creator.AvatarURL != "" && httpsURL(profile.Creator.AvatarURL) == nil {
+	if profile.Creator.AvatarURL != "" && s.allowedURL(profile.Creator.AvatarURL) == nil {
 		profile.Creator.AvatarURL = ""
 	}
-	if profile.BackdropURL != "" && httpsURL(profile.BackdropURL) == nil {
+	if profile.BackdropURL != "" && s.allowedURL(profile.BackdropURL) == nil {
 		profile.BackdropURL = ""
 	}
 	if len(profile.Tabs) != 0 {

@@ -606,6 +606,7 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	endedPreview := p.didEnd && p.state.Resolution.Plan.Access == provider.VideoAccessPreview
 	p.state.Limit = plan.Restriction
 	if preserve && plan.Restriction != "" {
+		p.selectedAudio = p.state.SelectedAudio
 		if quality == "" {
 			p.state.Limit = ""
 		} else {
@@ -616,6 +617,9 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	if endedPreview && (plan.Access == provider.VideoAccessPreview || plan.Access == provider.VideoAccessRestricted) {
 		if media != nil {
 			media.CloseAsync()
+		}
+		if preserve {
+			p.selectedAudio = p.state.SelectedAudio
 		}
 		// An unchanged entitlement keeps the finished preview and its last frame.
 		p.state.Limit = ""
@@ -678,6 +682,9 @@ func (p *Playback) accept(result provider.Playback, media *player.Media, err err
 	if p.engine.Open == nil || media == nil || !p.engine.Open(media.URL, position) {
 		if media != nil {
 			media.CloseAsync()
+		}
+		if preserve && p.media != nil {
+			p.selectedAudio = p.state.SelectedAudio
 		}
 		p.state.Failure = provider.Unsupported
 		return
@@ -1828,10 +1835,18 @@ func (p *Playback) queueReport(target provider.PlaybackTarget, seconds int64, fi
 	report := queuedPlaybackReport{reporter: reporter, owner: p.owner, report: provider.PlaybackProgress{
 		PlaybackTarget: target, Owner: p.owner, ItemID: p.state.Resolution.Plan.ItemID, Seconds: seconds, Finished: finished, Stopped: stopped,
 	}}
-	for i := range p.reports {
-		if p.reports[i].report.PlaybackTarget == target && p.reports[i].owner == p.owner {
-			p.reports[i] = report
-			return
+	// Coalesce only consecutive non-lifecycle progress updates for the same
+	// target/owner; never overwrite or reorder past a queued Stopped/Finished
+	// lifecycle transition (e.g. closing an item and immediately replaying it).
+	if !finished && !stopped {
+		for i := len(p.reports) - 1; i >= 0; i-- {
+			if p.reports[i].report.PlaybackTarget == target && p.reports[i].owner == p.owner {
+				if !p.reports[i].report.Stopped && !p.reports[i].report.Finished {
+					p.reports[i] = report
+					return
+				}
+				break
+			}
 		}
 	}
 	p.reports = append(p.reports, report)

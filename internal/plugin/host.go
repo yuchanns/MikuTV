@@ -228,12 +228,19 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, cac
 		}
 		return rt.FromGo(currentHostLocale())
 	})
+	features := map[string]any{
+		"planAudioTracks":     true,
+		"pgsSubtitles":        true,
+		"playbackStopped":     true,
+		"autoQualityUnderfed": true,
+	}
 	hostObj := map[string]any{
 		"storage":  map[string]any{"get": get, "set": set, "delete": remove},
 		"cache":    map[string]any{"get": cacheGet, "set": cacheSet, "delete": cacheDelete, "clear": cacheClear},
 		"crypto":   hostCryptoFunctions(ctx, rt),
 		"compress": map[string]any{"inflateZlib": inflateZlib, "gunzip": gunzip},
 		"locale":   map[string]any{"current": currentLocale},
+		"features": features,
 	}
 	for k, v := range extra {
 		hostObj[k] = v

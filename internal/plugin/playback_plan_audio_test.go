@@ -68,3 +68,17 @@ func TestOwnPlaybackPlanAudioTracksAndPGSSubtitleMetadata(t *testing.T) {
 		t.Fatal("expected plan with AudioTrack but empty AudioTracks to fail validation")
 	}
 }
+
+func TestHostFeaturesExposed(t *testing.T) {
+	rt := newTestHostRuntime(t, t.Context())
+	got := evalString(t, rt, `JSON.stringify({
+		planAudioTracks: host.features.planAudioTracks,
+		pgsSubtitles: host.features.pgsSubtitles,
+		playbackStopped: host.features.playbackStopped,
+		autoQualityUnderfed: host.features.autoQualityUnderfed
+	})`)
+	want := `{"planAudioTracks":true,"pgsSubtitles":true,"playbackStopped":true,"autoQualityUnderfed":true}`
+	if got != want {
+		t.Fatalf("host.features = %s, want %s", got, want)
+	}
+}

@@ -32,9 +32,10 @@ func (hlsPlanAudioTransport) OpenResource(_ context.Context, res provider.Playba
 
 type hlsPlanAudioSession struct {
 	provider.Session
-	requests  chan provider.PlaybackRequest
-	reports   chan provider.PlaybackProgress
-	failAudio string
+	requests      chan provider.PlaybackRequest
+	reports       chan provider.PlaybackProgress
+	failAudio     string
+	restrictAudio string
 }
 
 func (s *hlsPlanAudioSession) ResolvePlayback(_ context.Context, req provider.PlaybackRequest) (provider.Playback, error) {
@@ -52,12 +53,17 @@ func (s *hlsPlanAudioSession) ResolvePlayback(_ context.Context, req provider.Pl
 	if quality == "" {
 		quality = "original"
 	}
+	var restriction provider.PlaybackLimit
+	if s.restrictAudio != "" && req.AudioTrack == s.restrictAudio {
+		restriction = provider.PlaybackMembership
+	}
 	return provider.Playback{
 		Plan: provider.PlaybackPlan{
-			ItemID:     req.Ref.ID,
-			Duration:   300,
-			Access:     provider.VideoAccessGranted,
-			Quality:    quality,
+			ItemID:      req.Ref.ID,
+			Duration:    300,
+			Access:      provider.VideoAccessGranted,
+			Restriction: restriction,
+			Quality:     quality,
 			Qualities: []provider.PlaybackQuality{
 				{ID: "original", Label: "1080p · Original", Bandwidth: 8_000_000},
 				{ID: "720p-4m", Label: "720p · 4 Mbps", Bandwidth: 4_000_000},
@@ -67,6 +73,7 @@ func (s *hlsPlanAudioSession) ResolvePlayback(_ context.Context, req provider.Pl
 				{ID: "1", Label: "English 7.1", Language: "eng", Default: true},
 				{ID: "2", Label: "Chinese 7.1", Language: "zho"},
 				{ID: "3", Label: "Commentary", Language: "eng"},
+				{ID: "4", Label: "VIP Atmos", Language: "eng"},
 			},
 			Streams: []provider.PlaybackStream{{
 				Format: provider.PlaybackHLS,
@@ -101,9 +108,10 @@ func TestPlaybackPlanAudioSwitchingStoppedReportAndNoFastLANAutoDowngrade(t *tes
 	}
 
 	source := &hlsPlanAudioSession{
-		requests:  make(chan provider.PlaybackRequest, 8),
-		reports:   make(chan provider.PlaybackProgress, 8),
-		failAudio: "3",
+		requests:      make(chan provider.PlaybackRequest, 8),
+		reports:       make(chan provider.PlaybackProgress, 8),
+		failAudio:     "3",
+		restrictAudio: "4",
 	}
 	clock := player.Status{HasFrame: true, Duration: 300, Position: 42, BufferEnd: 55}
 	var openedAt []float64
@@ -127,7 +135,7 @@ func TestPlaybackPlanAudioSwitchingStoppedReportAndNoFastLANAutoDowngrade(t *tes
 		t.Fatalf("initial AudioTrack = %q, want empty", req.AudioTrack)
 	}
 	st := pb.State()
-	if len(st.AudioTracks) != 3 || st.DefaultAudio != "1" || st.ActiveAudio != "1" {
+	if len(st.AudioTracks) != 4 || st.DefaultAudio != "1" || st.ActiveAudio != "1" {
 		t.Fatalf("unexpected plan audio state: tracks=%d default=%q active=%q", len(st.AudioTracks), st.DefaultAudio, st.ActiveAudio)
 	}
 
@@ -189,6 +197,23 @@ func TestPlaybackPlanAudioSwitchingStoppedReportAndNoFastLANAutoDowngrade(t *tes
 		t.Fatalf("expected rollback to audio 2 after failed switch, got active=%q selected=%q", pb.State().ActiveAudio, pb.selectedAudio)
 	}
 
+	// Restricted replacement plan for track "4" must also roll back selectedAudio
+	// so a subsequent quality change keeps requesting active track "2".
+	if !pb.ChooseAudioTrack("4") {
+		t.Fatal("ChooseAudioTrack(4) returned false")
+	}
+	deliver()
+	<-source.requests
+	if pb.State().ActiveAudio != "2" || pb.selectedAudio != "2" {
+		t.Fatalf("expected rollback to audio 2 after restricted switch, got active=%q selected=%q", pb.State().ActiveAudio, pb.selectedAudio)
+	}
+	pb.ChooseQuality("720p-4m")
+	deliver()
+	qReq := <-source.requests
+	if qReq.AudioTrack != "2" || qReq.Quality != "720p-4m" {
+		t.Fatalf("subsequent quality change requested audio=%q quality=%q, want audio=2 quality=720p-4m", qReq.AudioTrack, qReq.Quality)
+	}
+
 	// Closing playback must emit a final Stopped=true report even if position was already saved.
 	pb.save()
 	select {
@@ -210,4 +235,63 @@ func TestPlaybackPlanAudioSwitchingStoppedReportAndNoFastLANAutoDowngrade(t *tes
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Stopped=true report on Close")
 	}
+}
+
+func TestQueueReportPreservesStoppedBeforeNewStart(t *testing.T) {
+	gate := make(chan struct{})
+	delivered := make(chan provider.PlaybackProgress, 8)
+	deliveries := make(chan func(), 16)
+	reporter := &blockingReportSession{
+		gate:      gate,
+		delivered: delivered,
+	}
+	cat := &Catalog{entryID: "entry", session: reporter, canReport: true}
+	pb := NewPlayback(cat, player.Engine{}, nil, func(fn func()) { deliveries <- fn }, func() {})
+	pb.owner = "user"
+	pb.syncSource = true
+	pb.state.Resolution.Plan.ItemID = "track-1"
+
+	target := provider.PlaybackTarget{Ref: provider.MediaRef{EntryID: "entry", Kind: provider.Video, ID: "track-1"}}
+	// First report enters in-flight state (blocked on gate).
+	pb.queueReport(target, 10, false, false)
+	// While in-flight, close queues Stopped=true, then immediate replay queues start (0s, Stopped=false),
+	// followed by a newer progress update (15s, Stopped=false) that coalesces with the replay's progress only.
+	pb.queueReport(target, 12, false, true)
+	pb.queueReport(target, 0, false, false)
+	pb.queueReport(target, 15, false, false)
+
+	close(gate)
+	var got []provider.PlaybackProgress
+	for i := 0; i < 3; i++ {
+		select {
+		case r := <-delivered:
+			got = append(got, r)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for report %d, got %+v", i, got)
+		}
+		select {
+		case fn := <-deliveries:
+			fn()
+		case <-time.After(3 * time.Second):
+			t.Fatalf("timed out waiting for completion callback %d", i)
+		}
+	}
+	if len(got) != 3 ||
+		got[0].Seconds != 10 || got[0].Stopped ||
+		got[1].Seconds != 12 || !got[1].Stopped ||
+		got[2].Seconds != 15 || got[2].Stopped {
+		t.Fatalf("unexpected report sequence: %+v", got)
+	}
+}
+
+type blockingReportSession struct {
+	provider.Session
+	gate      chan struct{}
+	delivered chan provider.PlaybackProgress
+}
+
+func (s *blockingReportSession) ReportPlayback(_ context.Context, report provider.PlaybackProgress) error {
+	<-s.gate
+	s.delivered <- report
+	return nil
 }
