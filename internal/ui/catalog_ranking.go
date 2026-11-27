@@ -62,12 +62,13 @@ func (p *PageContext) catalogRankingRow(c *ui.Context, id app.FocusID, item prov
 			ui.Column(c).Grow(1).MinWidth(0).Gap(7).Children(func() {
 				ui.Text(c, item.Title).FillWidth().SingleLine().FontSize(21).FontWeight(450)
 				metadata := item.Category
-				if item.Creator != nil {
+				hasCreator := item.Creator != nil && !item.Creator.HideName && strings.TrimSpace(item.Creator.Name) != ""
+				if hasCreator {
 					metadata = strings.TrimSuffix(item.Creator.Name+" \u00b7 "+metadata, " \u00b7 ")
 				}
 				if metadata != "" {
 					ui.Row(c).FillWidth().Gap(7).AlignItems(ui.Center).Children(func() {
-						if item.Creator != nil {
+						if hasCreator {
 							p.catalogCreatorPortrait(c, item.Creator.AvatarURL)
 						}
 						ui.Text(c, metadata).Shrink(1).SingleLine().FontSize(15).TextColor(secondary)

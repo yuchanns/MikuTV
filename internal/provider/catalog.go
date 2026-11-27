@@ -52,9 +52,10 @@ type MediaRef struct {
 
 type Creator struct {
 	ID        string `json:"id"`
-	Name      string `json:"name"`
+	Name      string `json:"name,omitempty"`
 	AvatarURL string `json:"avatarURL,omitempty"`
 	Following bool   `json:"following,omitempty"`
+	HideName  bool   `json:"hideName,omitempty"`
 }
 
 type VideoAccess string
@@ -182,6 +183,7 @@ type MediaItem struct {
 	Title           string        `json:"title"`
 	Subtitle        string        `json:"subtitle,omitempty"`
 	Creator         *Creator      `json:"creator,omitempty"`
+	Creators        []Creator     `json:"creators,omitempty"`
 	CoverURL        string        `json:"coverURL,omitempty"`
 	BackdropURL     string        `json:"backdropURL,omitempty"`
 	DurationSeconds *int64        `json:"durationSeconds,omitempty"`
@@ -190,6 +192,30 @@ type MediaItem struct {
 	Quality         string        `json:"quality,omitempty"`
 	ProgressSeconds *int64        `json:"progressSeconds,omitempty"`
 	VideoDetails    *VideoDetails `json:"videoDetails,omitempty"`
+}
+
+// DetailCreators returns the ordered creators to show on a detail screen.
+// When Creators is populated it takes precedence over the single Creator field.
+func (m MediaItem) DetailCreators() []Creator {
+	if len(m.Creators) > 0 {
+		return m.Creators
+	}
+	if m.Creator != nil {
+		return []Creator{*m.Creator}
+	}
+	return nil
+}
+
+// PrimaryCreator returns the primary creator for single-creator actions such as
+// detail-page follow, preferring Creator when present and falling back to Creators[0].
+func (m MediaItem) PrimaryCreator() *Creator {
+	if m.Creator != nil {
+		return m.Creator
+	}
+	if len(m.Creators) > 0 {
+		return &m.Creators[0]
+	}
+	return nil
 }
 
 type Collection struct {

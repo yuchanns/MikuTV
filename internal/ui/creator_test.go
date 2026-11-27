@@ -17,6 +17,7 @@ type uiCreatorSession struct {
 	readCalls    []provider.CreatorRequest
 	followCalls  []provider.CreatorFollowRequest
 	creatorPages map[provider.CreatorTab]provider.CreatorPage
+	creatorsByID map[string]provider.CreatorPage
 	searchPage   provider.SearchPage
 }
 
@@ -41,6 +42,9 @@ func (s *uiCreatorSession) ReadCreator(_ context.Context, req provider.CreatorRe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.readCalls = append(s.readCalls, req)
+	if page, ok := s.creatorsByID[req.CreatorID]; ok {
+		return page, nil
+	}
 	tab := req.Tab
 	if tab == "" {
 		tab = provider.CreatorTabVideos
@@ -415,5 +419,259 @@ func TestCreatorCapabilityHidingAndSearchEntry(t *testing.T) {
 	tester.Frame()
 	if view.State.Page != app.Search || view.State.Focus != cardID {
 		t.Fatalf("expected Search restored at %s, got page=%s focus=%s", cardID, view.State.Page, view.State.Focus)
+	}
+}
+
+func TestVideoDetailMultiCreatorsAvatarHoverAndHiddenNames(t *testing.T) {
+	assets, err := LoadAssets()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := NewPages(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Cast avatar row without FollowCreator: hidden/omitted names must not render
+	// inline text, focus must target circular 50x50 avatars, and stepping Right/Enter
+	// must open the focused actor's creator page and restore focus on Back.
+	cinemaEntry := app.Entry{
+		ID: "cinema", SourceID: "cinema", Name: "Cinema",
+		Capabilities: provider.Capabilities{
+			provider.BrowseCatalog, provider.GetCatalogItem, provider.ResolvePlayback, provider.ReadCreator,
+		},
+	}
+	cinemaState, err := app.NewState([]app.Entry{cinemaEntry}, cinemaEntry.ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	movieRef := provider.MediaRef{EntryID: cinemaEntry.ID, Kind: provider.Movie, ID: "m1"}
+	cinemaSession := &uiCreatorSession{
+		items: map[string]provider.MediaItem{
+			"m1": {
+				Ref:   movieRef,
+				Title: "Ensemble Film",
+				Creators: []provider.Creator{
+					{ID: "actor-1", Name: "Actor One", HideName: true},
+					{ID: "actor-2"},
+					{ID: "actor-3", Name: "Actor Three", HideName: true},
+				},
+				VideoDetails: &provider.VideoDetails{Access: provider.VideoAccessGranted},
+			},
+		},
+		creatorsByID: map[string]provider.CreatorPage{
+			"actor-3": {
+				Profile: &provider.CreatorProfile{
+					Creator: provider.Creator{ID: "actor-3", Name: "Actor Three"},
+					Tabs:    []provider.CreatorTab{provider.CreatorTabVideos},
+				},
+			},
+		},
+	}
+	cinemaCB := make(chan func(), 32)
+	drainCinema := func() {
+		for {
+			select {
+			case fn := <-cinemaCB:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	cinemaCatalog := app.NewCatalog(func(string) provider.Session { return cinemaSession }, func(fn func()) { cinemaCB <- fn }, func() {})
+	defer cinemaCatalog.Close()
+
+	cinemaView := newTestView(t, Options{State: cinemaState, Catalog: cinemaCatalog, Pages: pages, Assets: assets, Theme: theme.Default()})
+	cinemaView.SyncEntry()
+	drainCinema()
+	cinemaTester := ui.NewTester(cinemaView.Render, 1920, 1080)
+	cinemaTester.Frame()
+
+	cinemaView.dispatch(func() {
+		p := cinemaView.context(cinemaView.State.Location, true, 1920, 1080)
+		p.openVideoDetail(cinemaSession.items["m1"])
+	})
+	(<-cinemaCB)()
+	drainCinema()
+	cinemaTester.Frame()
+	cinemaTester.Advance(2 * videoDetailTransition.Duration)
+	cinemaTester.Frame()
+
+	if cinemaView.focus.item(videoDetailFollow) != nil {
+		t.Fatal("expected follow button hidden without FollowCreator capability")
+	}
+	var avatarRects [3]app.FocusTarget
+	for i := range 3 {
+		id := videoDetailCreatorFocus(i)
+		ctrl := cinemaView.focus.item(id)
+		if ctrl == nil {
+			t.Fatalf("missing focusable circular avatar %s", id)
+		}
+		if ctrl.target.W != 50 || ctrl.target.H != 50 {
+			t.Fatalf("expected circular 50x50 avatar button for %s, got %vx%v", id, ctrl.target.W, ctrl.target.H)
+		}
+		avatarRects[i] = ctrl.target
+	}
+	// Hidden/omitted names render an avatar-only row: 50px avatar + 14px gap = 64px pitch.
+	if gap := avatarRects[1].X - avatarRects[0].X; gap != 64 {
+		t.Fatalf("expected avatar-only pitch of 64px (no inline name text), got %v", gap)
+	}
+	if rect, ok := cinemaTester.Find("Actor One"); !ok || rect.W != 50 || rect.H != 50 {
+		t.Fatalf("expected Actor One accessibility label only on the 50x50 avatar button, got ok=%v rect=%+v", ok, rect)
+	}
+
+	// Up from Play moves to first circular avatar; Right twice reaches actor-3.
+	cinemaTester.Key(0, ui.KeyUp)
+	cinemaTester.Frame()
+	if cinemaState.Focus != videoDetailCreatorID {
+		t.Fatalf("expected Up from Play to focus %s, got %s", videoDetailCreatorID, cinemaState.Focus)
+	}
+	cinemaTester.Key(0, ui.KeyRight)
+	cinemaTester.Frame()
+	if cinemaState.Focus != videoDetailCreatorFocus(1) {
+		t.Fatalf("expected focus on creator/1, got %s", cinemaState.Focus)
+	}
+	cinemaTester.Key(0, ui.KeyRight)
+	cinemaTester.Frame()
+	if cinemaState.Focus != videoDetailCreatorFocus(2) {
+		t.Fatalf("expected focus on creator/2, got %s", cinemaState.Focus)
+	}
+	cinemaTester.Key(0, ui.KeyEnter)
+	(<-cinemaCB)()
+	drainCinema()
+	cinemaTester.Frame()
+	cinemaTester.Advance(2 * videoDetailTransition.Duration)
+	cinemaTester.Frame()
+	if cinemaState.Page != app.Creator || cinemaView.creator == nil || cinemaView.creator.profile.Creator.Name != "Actor Three" {
+		t.Fatalf("expected Actor Three creator page, got page=%s creator=%+v", cinemaState.Page, cinemaView.creator)
+	}
+	if !cinemaView.goBack() {
+		t.Fatal("expected Back from actor page to succeed")
+	}
+	cinemaTester.Frame()
+	if cinemaState.Page != app.VideoDetail || cinemaState.Focus != videoDetailCreatorFocus(2) {
+		t.Fatalf("expected VideoDetail restored at creator/2, got page=%s focus=%s", cinemaState.Page, cinemaState.Focus)
+	}
+
+	// 2. Named co-authors with FollowCreator: follow sits next to primary creator,
+	// Right steps primary avatar -> follow -> co-author avatar, and following the
+	// co-author from their creator page syncs Creators[1].Following independently.
+	collabEntry := app.Entry{
+		ID: "collab", SourceID: "collab", Name: "Collab",
+		Capabilities: provider.Capabilities{
+			provider.BrowseCatalog, provider.GetCatalogItem, provider.ResolvePlayback,
+			provider.ReadCreator, provider.FollowCreator, provider.EditVideo, provider.SignIn,
+		},
+	}
+	collabState, err := app.NewState([]app.Entry{collabEntry}, collabEntry.ID, pages.Routes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collabRef := provider.MediaRef{EntryID: collabEntry.ID, Kind: provider.Video, ID: "v-collab"}
+	owner := provider.Creator{ID: "u1", Name: "Primary Author"}
+	coauthor := provider.Creator{ID: "u2", Name: "Guest CoAuthor"}
+	collabSession := &uiCreatorSession{
+		items: map[string]provider.MediaItem{
+			"v-collab": {
+				Ref:          collabRef,
+				Title:        "Joint Video",
+				Creator:      &owner,
+				Creators:     []provider.Creator{owner, coauthor},
+				VideoDetails: &provider.VideoDetails{Access: provider.VideoAccessGranted},
+			},
+		},
+		creatorsByID: map[string]provider.CreatorPage{
+			"u2": {
+				Profile: &provider.CreatorProfile{
+					Creator: coauthor,
+					Tabs:    []provider.CreatorTab{provider.CreatorTabVideos},
+				},
+			},
+		},
+	}
+	collabCB := make(chan func(), 32)
+	drainCollab := func() {
+		for {
+			select {
+			case fn := <-collabCB:
+				fn()
+			default:
+				return
+			}
+		}
+	}
+	collabCatalog := app.NewCatalog(func(string) provider.Session { return collabSession }, func(fn func()) { collabCB <- fn }, func() {})
+	defer collabCatalog.Close()
+	creds := newMemoryCreds()
+	_ = creds.Save(collabEntry.SourceID, collabEntry.ID, []byte(`{"selected":"42","accounts":[{"account":{"id":"42","name":"Viewer"},"data":{"csrf":"ok"}}]}`))
+	collabAuth := app.NewAuth(creds, func(fn func()) { collabCB <- fn }, func() {}, func() {}, func() {})
+	defer collabAuth.Close()
+
+	collabView := newTestView(t, Options{State: collabState, Catalog: collabCatalog, Auth: collabAuth, Pages: pages, Assets: assets, Theme: theme.Default()})
+	collabView.SyncEntry()
+	for len(collabCB) > 0 || !collabAuth.Accounts().Ready {
+		(<-collabCB)()
+	}
+	drainCollab()
+	collabTester := ui.NewTester(collabView.Render, 1920, 1080)
+	collabTester.Frame()
+
+	collabView.dispatch(func() {
+		p := collabView.context(collabView.State.Location, true, 1920, 1080)
+		p.openVideoDetail(collabSession.items["v-collab"])
+	})
+	(<-collabCB)()
+	drainCollab()
+	collabTester.Frame()
+	collabTester.Advance(2 * videoDetailTransition.Duration)
+	collabTester.Frame()
+
+	if !collabTester.HasText("Primary Author") || !collabTester.HasText("Guest CoAuthor") {
+		t.Fatal("expected named co-authors to render both names beside their avatars")
+	}
+	primaryAvatar := collabView.focus.item(videoDetailCreatorID)
+	followBtn := collabView.focus.item(videoDetailFollow)
+	if primaryAvatar == nil || followBtn == nil || followBtn.target.X-primaryAvatar.target.X <= 80 {
+		t.Fatalf("expected inline author name space between primary avatar and follow button, avatar=%+v follow=%+v", primaryAvatar, followBtn)
+	}
+
+	collabView.dispatch(func() { collabView.moveFocus(videoDetailCreatorID, app.Up, false) })
+	collabTester.Frame()
+	collabTester.Key(0, ui.KeyRight)
+	collabTester.Frame()
+	if collabState.Focus != videoDetailFollow {
+		t.Fatalf("expected Right from primary avatar to focus follow button, got %s", collabState.Focus)
+	}
+	collabTester.Key(0, ui.KeyRight)
+	collabTester.Frame()
+	if collabState.Focus != videoDetailCreatorFocus(1) {
+		t.Fatalf("expected Right from follow button to focus co-author avatar, got %s", collabState.Focus)
+	}
+	collabTester.Key(0, ui.KeyLeft)
+	collabTester.Frame()
+	if collabState.Focus != videoDetailFollow {
+		t.Fatalf("expected Left from co-author avatar back to follow button, got %s", collabState.Focus)
+	}
+	collabTester.Key(0, ui.KeyRight)
+	collabTester.Frame()
+	collabTester.Key(0, ui.KeyEnter)
+	(<-collabCB)()
+	drainCollab()
+	collabTester.Frame()
+	collabTester.Advance(2 * videoDetailTransition.Duration)
+	collabTester.Frame()
+	if collabState.Page != app.Creator || collabView.creator.profile.Creator.ID != "u2" {
+		t.Fatalf("expected co-author Creator(u2) page, got page=%s creator=%+v", collabState.Page, collabView.creator)
+	}
+	// Follow co-author u2 on their Creator page.
+	collabTester.Key(0, ui.KeyEnter)
+	(<-collabCB)()
+	drainCollab()
+	collabTester.Frame()
+	collabTester.Advance(2 * videoDetailTransition.Duration)
+	collabTester.Frame()
+	if !collabView.videoDetail.item.Creators[1].Following || collabView.videoDetail.item.Creators[0].Following {
+		t.Fatalf("expected Creators[1].Following=true and Creators[0].Following=false, got %+v", collabView.videoDetail.item.Creators)
 	}
 }

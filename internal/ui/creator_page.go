@@ -529,20 +529,24 @@ func (v *View) syncCreatorFollowing(creator provider.Creator, following bool) {
 	for _, s := range v.creatorStack {
 		updateCreator(s)
 	}
+	syncItemFollowing := func(item *provider.MediaItem) {
+		if item.Creator != nil && item.Creator.ID == creatorID {
+			copied := *item.Creator
+			copied.Following = following
+			item.Creator = &copied
+		}
+		for i := range item.Creators {
+			if item.Creators[i].ID == creatorID {
+				item.Creators[i].Following = following
+			}
+		}
+	}
 	updateDetail := func(d *videoDetailState) {
-		if d.seed.Creator != nil && d.seed.Creator.ID == creatorID {
-			d.seed.Creator.Following = following
-		}
-		if d.item.Creator != nil && d.item.Creator.ID == creatorID {
-			d.item.Creator.Following = following
-		}
+		syncItemFollowing(&d.seed)
+		syncItemFollowing(&d.item)
 		for i := range d.previous {
-			if d.previous[i].seed.Creator != nil && d.previous[i].seed.Creator.ID == creatorID {
-				d.previous[i].seed.Creator.Following = following
-			}
-			if d.previous[i].item.Creator != nil && d.previous[i].item.Creator.ID == creatorID {
-				d.previous[i].item.Creator.Following = following
-			}
+			syncItemFollowing(&d.previous[i].seed)
+			syncItemFollowing(&d.previous[i].item)
 		}
 	}
 	updateDetail(&v.videoDetail)
@@ -556,11 +560,7 @@ func (v *View) syncCreatorFollowing(creator provider.Creator, following bool) {
 		v.Live.SyncFollow(creatorID, following)
 	}
 	for i := range v.player.items {
-		if c := v.player.items[i].item.Creator; c != nil && c.ID == creatorID {
-			copied := *c
-			copied.Following = following
-			v.player.items[i].item.Creator = &copied
-		}
+		syncItemFollowing(&v.player.items[i].item)
 	}
 }
 

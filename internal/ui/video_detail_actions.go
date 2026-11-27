@@ -115,7 +115,9 @@ func (p *PageContext) performVideoInteraction(action provider.VideoInteraction) 
 	request := provider.VideoEdit{Ref: item.Ref, Interaction: action}
 	switch action {
 	case provider.VideoFollow:
-		request.Enabled = item.Creator != nil && !item.Creator.Following
+		if creator := item.PrimaryCreator(); creator != nil {
+			request.Enabled = !creator.Following
+		}
 	case provider.VideoLike:
 		request.Enabled = !engagement.Liked
 	case provider.VideoWatchLater:
@@ -152,8 +154,10 @@ func (p *PageContext) editVideo(request provider.VideoEdit) {
 			}
 		}
 		detail.applyVideoEdit(request, result)
-		if result.Following != nil && detail.item.Creator != nil {
-			p.host.syncCreatorFollowing(*detail.item.Creator, *result.Following)
+		if result.Following != nil {
+			if creator := detail.item.PrimaryCreator(); creator != nil {
+				p.host.syncCreatorFollowing(*creator, *result.Following)
+			}
 		}
 		if detail == &p.host.player.discussion {
 			p.host.syncPlaybackEngagement(request, result)
@@ -233,8 +237,21 @@ func (s *videoDetailState) applyVideoEdit(request provider.VideoEdit, result pro
 	if result.WatchLater != nil {
 		detail.Engagement.WatchLater = *result.WatchLater
 	}
-	if result.Following != nil && s.item.Creator != nil {
-		s.item.Creator.Following = *result.Following
+	if result.Following != nil {
+		var primaryID string
+		if s.item.Creator != nil {
+			s.item.Creator.Following = *result.Following
+			primaryID = s.item.Creator.ID
+		} else if len(s.item.Creators) > 0 {
+			primaryID = s.item.Creators[0].ID
+		}
+		if primaryID != "" {
+			for i := range s.item.Creators {
+				if s.item.Creators[i].ID == primaryID {
+					s.item.Creators[i].Following = *result.Following
+				}
+			}
+		}
 	}
 	if len(result.ActionStates) != 0 {
 		for index := range detail.Actions {

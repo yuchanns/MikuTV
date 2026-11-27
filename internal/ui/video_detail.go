@@ -2,9 +2,12 @@ package tvui
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/yuchanns/MikuTV/internal/app"
@@ -36,6 +39,13 @@ func videoDetailActionFocus(id string) app.FocusID {
 	return app.FocusID("video-detail/action/" + id)
 }
 
+func videoDetailCreatorFocus(index int) app.FocusID {
+	if index <= 0 {
+		return videoDetailCreatorID
+	}
+	return app.FocusID(fmt.Sprintf("video-detail/creator/%d", index))
+}
+
 const videoDetailTextStroke = 0.018
 
 var videoDetailNumbers = message.NewPrinter(language.English)
@@ -62,6 +72,7 @@ type videoDetailState struct {
 	failure       provider.ErrorCode
 	confirm       *provider.ActionSpec
 	discussion    *videoDiscussionState
+	creatorScroll *ui.ScrollState
 	relatedScroll *ui.ScrollState
 	segmentRows   *ui.ListState
 	draft         videoCommentDraft
@@ -84,6 +95,7 @@ type videoDetailLocation struct {
 	expanded      bool
 	position      app.Position
 	discussion    *videoDiscussionState
+	creatorScroll *ui.ScrollState
 	relatedScroll *ui.ScrollState
 	segmentRows   *ui.ListState
 	queue         []playbackItem
@@ -255,12 +267,12 @@ func (p *PageContext) openRelatedVideoDetail(item provider.MediaItem, queue []pl
 	detail.discussion.cancelLoad()
 	detail.previous = append(detail.previous, videoDetailLocation{
 		seed: detail.seed, item: detail.item, tab: detail.tab, part: detail.part, expanded: detail.expanded, position: view.State.Position,
-		discussion: detail.discussion, relatedScroll: detail.relatedScroll, segmentRows: detail.segmentRows,
+		discussion: detail.discussion, creatorScroll: detail.creatorScroll, relatedScroll: detail.relatedScroll, segmentRows: detail.segmentRows,
 		queue: detail.queue, queueIndex: detail.queueIndex,
 	})
 	detail.seed, detail.tab, detail.part = item, videoDetailOverview, 0
 	detail.expanded = false
-	detail.discussion, detail.relatedScroll, detail.segmentRows = nil, nil, nil
+	detail.discussion, detail.creatorScroll, detail.relatedScroll, detail.segmentRows = nil, nil, nil, nil
 	if len(queue) > 1 && queueIndex >= 0 && queueIndex < len(queue) {
 		detail.queue, detail.queueIndex = queue, queueIndex
 	} else {
@@ -297,7 +309,7 @@ func (v *View) backFromVideoDetail() bool {
 	detail.previous = detail.previous[:last]
 	detail.seed, detail.item, detail.tab = parent.seed, parent.item, parent.tab
 	detail.expanded, detail.part = parent.expanded, parent.part
-	detail.discussion, detail.relatedScroll, detail.segmentRows = parent.discussion, parent.relatedScroll, parent.segmentRows
+	detail.discussion, detail.creatorScroll, detail.relatedScroll, detail.segmentRows = parent.discussion, parent.creatorScroll, parent.relatedScroll, parent.segmentRows
 	detail.queue, detail.queueIndex = parent.queue, parent.queueIndex
 	detail.cancel, detail.loading, detail.failure = nil, false, ""
 	v.State.RecordPosition(parent.position)
@@ -367,8 +379,10 @@ func (videoDetailPage) Render(c *ui.Context, p *PageContext) {
 	item := detail.item
 	catalog := p.host.Catalog
 	covers := []string{item.CoverURL}
-	if item.Creator != nil && item.Creator.AvatarURL != "" {
-		covers = append(covers, item.Creator.AvatarURL)
+	for _, creator := range item.DetailCreators() {
+		if creator.AvatarURL != "" {
+			covers = append(covers, creator.AvatarURL)
+		}
 	}
 	if sections := item.VideoDetails; detail.tab == videoDetailRelated && sections != nil {
 		covers = p.videoDetailRelatedArtwork(covers, sections.Related)
@@ -481,8 +495,8 @@ func (p *PageContext) videoDetailSummary(c *ui.Context, detail *videoDetailState
 			ui.Box(c).Absolute().Top(0).Left(0).Height(26).Center().Children(func() {
 				p.catalogHeroMetadata(c, item)
 			})
-			if item.Creator != nil {
-				p.videoDetailCreator(c, *item.Creator)
+			if creators := item.DetailCreators(); len(creators) > 0 {
+				p.videoDetailCreators(c, detail, creators)
 			}
 			if item.Subtitle != "" {
 				ui.Text(c, item.Subtitle).Absolute().Top(392 - videoDetailMetadataTop).Left(0).Width(min(690, p.Width-2*videoDetailInset)).
@@ -494,36 +508,131 @@ func (p *PageContext) videoDetailSummary(c *ui.Context, detail *videoDetailState
 	})
 }
 
-func (p *PageContext) videoDetailCreator(c *ui.Context, creator provider.Creator) {
+func (p *PageContext) videoDetailCreators(c *ui.Context, detail *videoDetailState, creators []provider.Creator) {
 	text, colors, d := p.Assets.Text.Detail, p.Theme.Colors, p.uiColors()
 	entry, _ := p.State.Current()
-	ui.Row(c).Absolute().Top(323 - videoDetailMetadataTop).Left(0).Height(41).Gap(15).AlignItems(ui.Center).Children(func() {
-		ui.Box(c).Size(41, 41).Radius(21).Clip().Center().Background(paint(colors.Surface.Raised)).Children(func() {
-			if portrait := p.catalogCover(creator.AvatarURL); portrait != nil {
-				ui.Image(c, portrait).Fill().Fit(ui.Cover).ObjectPosition(0.5, 0.5)
-			} else {
-				ui.Icon(c, p.Assets.Icon("user")).Size(22, 22).TextColor(paint(colors.Text.Secondary))
+	item := detail.item
+	if detail.creatorScroll == nil {
+		detail.creatorScroll = &ui.ScrollState{}
+	}
+
+	primary := item.PrimaryCreator()
+	showFollow := entry.Capabilities.Has(provider.FollowCreator) && primary != nil
+	followIndex := -1
+	if showFollow {
+		for i := range creators {
+			if creators[i].ID == primary.ID {
+				followIndex = i
+				break
 			}
+		}
+	}
+
+	hasVisibleNames := false
+	rowIDs := make([]app.FocusID, 0, len(creators)+1)
+	for i := range creators {
+		if !creators[i].HideName && strings.TrimSpace(creators[i].Name) != "" {
+			hasVisibleNames = true
+		}
+		if p.canOpenCreator(&creators[i]) {
+			rowIDs = append(rowIDs, videoDetailCreatorFocus(i))
+		}
+		if i == followIndex {
+			rowIDs = append(rowIDs, videoDetailFollow)
+		}
+	}
+
+	rowDirection := func(id app.FocusID) func(app.Direction) bool {
+		pos := slices.Index(rowIDs, id)
+		return func(direction app.Direction) bool {
+			if direction != app.Left && direction != app.Right {
+				return false
+			}
+			next := pos + 1
+			if direction == app.Left {
+				next = pos - 1
+			}
+			if next >= 0 && next < len(rowIDs) {
+				p.host.moveFocus(rowIDs[next], direction, true)
+			}
+			return true
+		}
+	}
+
+	rowGap := float32(14)
+	if hasVisibleNames {
+		rowGap = 18
+	}
+	rowWidth := min(float32(908), p.Width-2*videoDetailInset+8)
+	ui.Box(c.Key("video-detail-creators")).Absolute().Top(314-videoDetailMetadataTop).Left(-4).Width(rowWidth).Height(58).Children(func() {
+		ui.ScrollHorizontal(c.Key("video-detail-creators-scroll")).Fill().TrackScroll(detail.creatorScroll).Children(func() {
+			ui.Row(c).Height(58).Padding(4, 4, 4, 4).Gap(rowGap).AlignItems(ui.Center).Children(func() {
+				for i := range creators {
+					creator := creators[i]
+					id := videoDetailCreatorFocus(i)
+					canOpen := p.canOpenCreator(&creator)
+					focused := canOpen && p.paintFocus() == id
+					showName := !creator.HideName && strings.TrimSpace(creator.Name) != ""
+
+					drawPortrait := func() {
+						ui.Box(c).Size(42, 42).Radius(21).Clip().Center().Background(paint(colors.Surface.Raised)).Children(func() {
+							if portrait := p.catalogCover(creator.AvatarURL); portrait != nil {
+								ui.Image(c, portrait).Fill().Fit(ui.Cover).ObjectPosition(0.5, 0.25)
+							} else if r, _ := utf8.DecodeRuneInString(strings.TrimSpace(creator.Name)); r != utf8.RuneError {
+								ui.Text(c, string(r)).FontSize(18).FontWeight(500).TextColor(paint(colors.Text.Primary))
+							} else {
+								ui.Icon(c, p.Assets.Icon("user")).Size(20, 20).TextColor(paint(colors.Text.Secondary))
+							}
+						})
+					}
+
+					ui.Row(c.Key(fmt.Sprintf("video-detail-creator-slot/%d/%s", i, creator.ID))).Gap(10).Shrink(0).AlignItems(ui.Center).Children(func() {
+						if canOpen {
+							selected := creator
+							label := strings.TrimSpace(creator.Name)
+							if label == "" {
+								label = p.Assets.Text.Creator.Eyebrow
+							}
+							ringWidth, ringColor := float32(2), withAlpha(colors.Text.Primary, 0x1a)
+							if focused {
+								ringWidth, ringColor = 3, paint(colors.Focus.Ring)
+							}
+							button := ui.Button(c.Key(string(id)), "").Label(label).Size(50, 50).Padding(0, 0).
+								Radius(25).Background(ui.Transparent).Center().Shrink(0).
+								OnClick(func() { p.dispatch(func() { p.openCreator(selected) }) })
+							button.Border(ringWidth, button.AnimateColor("focus-ring", ringColor, ui.Animation{Duration: focusDuration, NonMotion: true}))
+							p.addVideoFocusShadow(button, focused)
+							p.bindDirection(button, id, videoDetailControls, rowDirection(id))
+							button.Children(drawPortrait)
+						} else {
+							drawPortrait()
+						}
+						if showName {
+							nameColor := paint(colors.Text.Secondary)
+							if focused {
+								nameColor = paint(colors.Text.Primary)
+							}
+							ui.Text(c, creator.Name).FontSize(19).FontWeight(500).SingleLine().MaxWidth(220).TextColor(nameColor)
+						}
+					})
+
+					if i == followIndex {
+						follow := text.Follow
+						if primary.Following || creator.Following {
+							follow = text.Followed
+						}
+						followStyle := buttonAppearance{
+							height: 34, padding: 15, radius: 20, fontSize: 16, focusShadow: true,
+							background: ui.Transparent, foreground: paint(colors.Text.Secondary), border: d.strongBorder,
+							direction: rowDirection(videoDetailFollow),
+						}
+						p.styledButton(c, follow, "", videoDetailFollow, videoDetailControls, func() {
+							p.runVideoDetailAction(videoDetailFollow, follow)
+						}, followStyle).Shrink(0).AlignSelf(ui.Center)
+					}
+				}
+			})
 		})
-		style := buttonAppearance{
-			height: 34, padding: 15, radius: 20, fontSize: 16, focusShadow: true,
-			background: ui.Transparent, foreground: paint(colors.Text.Secondary), border: d.strongBorder,
-		}
-		openCreator := func() {}
-		if p.canOpenCreator(&creator) {
-			selected := creator
-			openCreator = func() { p.dispatch(func() { p.openCreator(selected) }) }
-		}
-		p.styledButton(c, creator.Name, "", videoDetailCreatorID, videoDetailControls, openCreator, style).AlignSelf(ui.Center)
-		if entry.Capabilities.Has(provider.FollowCreator) {
-			follow := text.Follow
-			if creator.Following {
-				follow = text.Followed
-			}
-			p.styledButton(c, follow, "", videoDetailFollow, videoDetailControls, func() {
-				p.runVideoDetailAction(videoDetailFollow, follow)
-			}, style).AlignSelf(ui.Center)
-		}
 	})
 }
 
@@ -543,6 +652,13 @@ func (p *PageContext) videoDetailActions(c *ui.Context, item provider.MediaItem)
 		if entry.Capabilities.Has(provider.ResolvePlayback) {
 			style := p.playButtonAppearance()
 			style.focusShadow = true
+			style.direction = func(direction app.Direction) bool {
+				if direction == app.Up && p.host.focus.item(videoDetailCreatorID) != nil {
+					p.host.moveFocus(videoDetailCreatorID, app.Up, true)
+					return true
+				}
+				return false
+			}
 			p.styledButton(c, play, icon, videoDetailPlay, videoDetailControls, func() {
 				if p.canPlay(item.Ref) {
 					p.startDetailPlayback(item, nil)
