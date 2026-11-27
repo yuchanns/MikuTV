@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.9 - 2026-11-27
+
+## What's Changed
+* Unify detail creator circular avatar hover and add multi-creator support by @yuchanns in https://github.com/yuchanns/MikuTV/pull/17
+
+
+**Full Changelog**: https://github.com/yuchanns/MikuTV/compare/v0.1.8...v0.1.9
+
 ## 0.1.8 - 2026-11-26
 
 ## What's Changed
