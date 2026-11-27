@@ -541,6 +541,9 @@ func (p *PageContext) videoDetailCreators(c *ui.Context, detail *videoDetailStat
 			rowIDs = append(rowIDs, videoDetailFollow)
 		}
 	}
+	if showFollow && followIndex < 0 {
+		rowIDs = append(rowIDs, videoDetailFollow)
+	}
 
 	rowDirection := func(id app.FocusID) func(app.Direction) bool {
 		pos := slices.Index(rowIDs, id)
@@ -557,6 +560,21 @@ func (p *PageContext) videoDetailCreators(c *ui.Context, detail *videoDetailStat
 			}
 			return true
 		}
+	}
+
+	renderFollow := func(followed bool) {
+		follow := text.Follow
+		if followed {
+			follow = text.Followed
+		}
+		followStyle := buttonAppearance{
+			height: 34, padding: 15, radius: 20, fontSize: 16, focusShadow: true,
+			background: ui.Transparent, foreground: paint(colors.Text.Secondary), border: d.strongBorder,
+			direction: rowDirection(videoDetailFollow),
+		}
+		p.styledButton(c, follow, "", videoDetailFollow, videoDetailControls, func() {
+			p.runVideoDetailAction(videoDetailFollow, follow)
+		}, followStyle).Shrink(0).AlignSelf(ui.Center)
 	}
 
 	rowGap := float32(14)
@@ -617,19 +635,11 @@ func (p *PageContext) videoDetailCreators(c *ui.Context, detail *videoDetailStat
 					})
 
 					if i == followIndex {
-						follow := text.Follow
-						if primary.Following || creator.Following {
-							follow = text.Followed
-						}
-						followStyle := buttonAppearance{
-							height: 34, padding: 15, radius: 20, fontSize: 16, focusShadow: true,
-							background: ui.Transparent, foreground: paint(colors.Text.Secondary), border: d.strongBorder,
-							direction: rowDirection(videoDetailFollow),
-						}
-						p.styledButton(c, follow, "", videoDetailFollow, videoDetailControls, func() {
-							p.runVideoDetailAction(videoDetailFollow, follow)
-						}, followStyle).Shrink(0).AlignSelf(ui.Center)
+						renderFollow(primary.Following || creator.Following)
 					}
+				}
+				if showFollow && followIndex < 0 {
+					renderFollow(primary.Following)
 				}
 			})
 		})

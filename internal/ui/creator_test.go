@@ -674,4 +674,25 @@ func TestVideoDetailMultiCreatorsAvatarHoverAndHiddenNames(t *testing.T) {
 	if !collabView.videoDetail.item.Creators[1].Following || collabView.videoDetail.item.Creators[0].Following {
 		t.Fatalf("expected Creators[1].Following=true and Creators[0].Following=false, got %+v", collabView.videoDetail.item.Creators)
 	}
+
+	// 3. When primary Creator is outside the Creators avatar list, Follow must
+	// still be preserved and reachable via Right at the end of the row.
+	if !collabView.goBack() {
+		t.Fatal("expected Back from co-author Creator page")
+	}
+	collabView.videoDetail.item.Creator = &provider.Creator{ID: "channel-0", Name: "Channel"}
+	collabView.videoDetail.item.Creators = []provider.Creator{
+		{ID: "cast-1", Name: "Cast 1", HideName: true},
+		{ID: "cast-2", Name: "Cast 2", HideName: true},
+	}
+	collabView.dispatch(func() { collabView.moveFocus(videoDetailCreatorFocus(1), app.Right, false) })
+	collabTester.Frame()
+	if collabView.focus.item(videoDetailFollow) == nil {
+		t.Fatal("expected Follow button preserved when primary Creator is not in Creators")
+	}
+	collabTester.Key(0, ui.KeyRight)
+	collabTester.Frame()
+	if collabState.Focus != videoDetailFollow {
+		t.Fatalf("expected Right from last cast avatar to focus Follow, got %s", collabState.Focus)
+	}
 }
