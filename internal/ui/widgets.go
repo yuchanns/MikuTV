@@ -43,6 +43,7 @@ type buttonAppearance struct {
 	textStroke                                                     float32
 	fontWeight                                                     int
 	focusShadow, tab, selected                                     bool
+	direction                                                      func(app.Direction) bool
 }
 
 func (p *PageContext) playButtonAppearance() buttonAppearance {
@@ -127,7 +128,11 @@ func (p *PageContext) styledButton(c *ui.Context, label, icon string, id app.Foc
 	if style.textStroke > 0 {
 		e.TextStroke(style.textStroke, color)
 	}
-	p.bind(e, id, group)
+	if style.direction != nil {
+		p.bindDirection(e, id, group, style.direction)
+	} else {
+		p.bind(e, id, group)
+	}
 	return e
 }
 

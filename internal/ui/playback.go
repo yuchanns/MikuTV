@@ -1324,7 +1324,11 @@ func (p *PageContext) playbackCreatorButton(c *ui.Context, creator provider.Crea
 			border = paint(colors.Focus.Ring)
 		}
 		selected := creator
-		button := ui.Button(c.Key(string(playerCreator)), "").Label(creator.Name).Size(55, 55).Padding(0, 0).
+		label := strings.TrimSpace(creator.Name)
+		if label == "" {
+			label = p.Assets.Text.Creator.Eyebrow
+		}
+		button := ui.Button(c.Key(string(playerCreator)), "").Label(label).Size(55, 55).Padding(0, 0).
 			Radius(27.5).Border(3, border).Background(ui.Transparent).Center().Shrink(0).IgnoreInput(!p.active).
 			OnClick(func() {
 				p.dispatch(func() { p.playbackOpenCreator(selected) })
@@ -1336,10 +1340,15 @@ func (p *PageContext) playbackCreatorButton(c *ui.Context, creator provider.Crea
 	} else {
 		p.videoCommentAvatar(c, creator.Name, creator.AvatarURL, 49, p.catalogCover(creator.AvatarURL), false)
 	}
-	ui.Column(c).Width(115).Gap(5).Children(func() {
-		ui.Text(c, creator.Name).FillWidth().MaxLines(1).FontSize(19).TextColor(paint(colors.Playback.Foreground))
+	name := strings.TrimSpace(creator.Name)
+	if !creator.HideName && name != "" {
+		ui.Column(c).Width(115).Gap(5).Children(func() {
+			ui.Text(c, name).FillWidth().MaxLines(1).FontSize(19).TextColor(paint(colors.Playback.Foreground))
+			ui.Text(c, infoLabel).FontSize(13).TextColor(paint(colors.Playback.Secondary))
+		})
+	} else if infoLabel != "" {
 		ui.Text(c, infoLabel).FontSize(13).TextColor(paint(colors.Playback.Secondary))
-	})
+	}
 }
 
 func (p *PageContext) playerButton(c *ui.Context, id app.FocusID, icon, title, label string, disabled bool, action func()) {

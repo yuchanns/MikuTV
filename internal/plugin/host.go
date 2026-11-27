@@ -233,6 +233,7 @@ func installHostWith(ctx context.Context, rt *moejs.Runtime, store *Storage, cac
 		"pgsSubtitles":        true,
 		"playbackStopped":     true,
 		"autoQualityUnderfed": true,
+		"multiCreators":       true,
 	}
 	hostObj := map[string]any{
 		"storage":  map[string]any{"get": get, "set": set, "delete": remove},

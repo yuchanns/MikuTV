@@ -2,6 +2,7 @@ package tvui
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -335,7 +336,8 @@ func (p *PageContext) catalogCardMetadata(c *ui.Context, item provider.MediaItem
 	related := p.Location.Page == app.VideoDetail
 	ink := paint(colors.Text.Secondary)
 	ui.Row(c).FillWidth().Gap(9).AlignItems(ui.Center).Children(func() {
-		if item.Creator != nil {
+		hasCreator := item.Creator != nil && !item.Creator.HideName && strings.TrimSpace(item.Creator.Name) != ""
+		if hasCreator {
 			if related {
 				ui.Box(c).Size(17, 17).Shrink(0).Radius(8.5).Clip().Center().
 					Background(paint(colors.Surface.Raised)).Children(func() {
@@ -352,7 +354,7 @@ func (p *PageContext) catalogCardMetadata(c *ui.Context, item provider.MediaItem
 				FontSize(15).SingleLine().TextColor(ink)
 		}
 		if item.Views != nil {
-			if item.Creator != nil {
+			if hasCreator {
 				ui.Text(c, "\u00b7").FontSize(15).TextColor(ink)
 			}
 			ui.Text(c, catalogViews(*item.Views, text)+text.Plays).FontSize(15).SingleLine().TextColor(ink)

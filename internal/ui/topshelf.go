@@ -259,7 +259,7 @@ func (v *View) topShelfItemFromMedia(entry app.Entry, media provider.MediaItem, 
 		progress = int(*media.ProgressSeconds)
 	}
 	creatorName := ""
-	if media.Creator != nil {
+	if media.Creator != nil && !media.Creator.HideName {
 		creatorName = strings.TrimSpace(media.Creator.Name)
 	}
 	imageURL := strings.TrimSpace(media.BackdropURL)

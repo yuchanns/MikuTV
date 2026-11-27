@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	callTimeout = 12 * time.Second
-	heapLimit   = 32 << 20
+	callTimeout     = 12 * time.Second
+	heapLimit       = 32 << 20
+	maxItemCreators = 24
 )
 
 type Session struct {
@@ -194,12 +195,44 @@ func (s *Session) item(ctx context.Context, ref provider.MediaRef, includeSectio
 	return item, nil
 }
 
+func (s *Session) sanitizeItemCreator(creator *provider.Creator) error {
+	if strings.TrimSpace(creator.ID) == "" || len(creator.ID) > maxCreatorIDLength {
+		return &provider.Error{Code: provider.PluginFailed}
+	}
+	creator.Name = strings.TrimSpace(creator.Name)
+	if creator.AvatarURL != "" && s.allowedURL(creator.AvatarURL) == nil {
+		creator.AvatarURL = ""
+	}
+	return nil
+}
+
 func (s *Session) ownItem(item *provider.MediaItem) error {
 	if !item.Ref.Kind.Valid() || item.Ref.ID == "" || strings.TrimSpace(item.Title) == "" {
 		return &provider.Error{Code: provider.PluginFailed}
 	}
-	if item.Creator != nil && (item.Creator.ID == "" || strings.TrimSpace(item.Creator.Name) == "") {
-		return &provider.Error{Code: provider.PluginFailed}
+	if item.Creator != nil {
+		if err := s.sanitizeItemCreator(item.Creator); err != nil {
+			return err
+		}
+	}
+	if len(item.Creators) > 0 {
+		cleaned := make([]provider.Creator, 0, min(len(item.Creators), maxItemCreators))
+		seen := make(map[string]bool, min(len(item.Creators), maxItemCreators))
+		for i := range item.Creators {
+			creator := item.Creators[i]
+			if err := s.sanitizeItemCreator(&creator); err != nil {
+				return err
+			}
+			if seen[creator.ID] {
+				continue
+			}
+			seen[creator.ID] = true
+			cleaned = append(cleaned, creator)
+			if len(cleaned) >= maxItemCreators {
+				break
+			}
+		}
+		item.Creators = cleaned
 	}
 	if item.DurationSeconds != nil && *item.DurationSeconds < 0 ||
 		item.Views != nil && *item.Views < 0 || item.ProgressSeconds != nil && *item.ProgressSeconds < 0 {
