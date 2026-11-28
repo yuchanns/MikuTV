@@ -22,7 +22,6 @@ const (
 	keychainAccount      = "snapshot.v1"
 	keychainProbeService = "dev.yuchanns.MikuTV.topshelf.probe"
 	keychainProbeAccount = "prefix"
-	keychainGroupSuffix  = ".dev.yuchanns.MikuTV.topshelf"
 	keychainItemNotFound = -25300
 	cfStringUTF8         = 0x08000100
 )
@@ -266,11 +265,19 @@ func (s *SharedStore) detectSharedAccessGroup() string {
 		return ""
 	}
 	raw := string(buf[:bytes.IndexByte(buf[:], 0)])
-	prefix, _, ok := strings.Cut(raw, ".")
-	if !ok || strings.TrimSpace(prefix) == "" {
-		return ""
+	return selectSharedAccessGroup(raw, s.canAccessKeychainGroup)
+}
+
+func (s *SharedStore) canAccessKeychainGroup(accessGroup string) bool {
+	query := s.baseQuery(keychainService, keychainAccount, accessGroup)
+	defer s.cfRelease(query)
+	s.put(query, s.returnAttrsKey, s.booleanTrue)
+	var item uintptr
+	status := s.copy(query, &item)
+	if status == 0 && item != 0 {
+		s.cfRelease(item)
 	}
-	return prefix + keychainGroupSuffix
+	return status == 0 || status == keychainItemNotFound
 }
 
 func (s *SharedStore) readKeychain() ([]byte, error) {
